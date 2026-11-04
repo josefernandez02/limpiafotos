@@ -1,0 +1,19 @@
+{
+  "name": "limpiafotos",
+  "version": "1.0.0",
+  "description": "Borra metadatos y cambia el fondo de fotos, todo en el móvil.",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  },
+  "dependencies": {
+    "@imgly/background-removal": "^1.4.5",
+    "@imgly/background-removal-data": "^1.4.5"
+  },
+  "private": true,
+  "type": "module"
+}
