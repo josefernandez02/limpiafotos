@@ -144,19 +144,4 @@ export function postProcess(mask, width, height) {
   return out;
 }
 
-// Jarvis' guard: reject masks that kept most of the background or erased
-// most of the item.
-export function maskLooksValid(mask, width, height) {
-  const small = resize(mask, width, height, 1, 1, 48, 48);
-  let significant = 0;
-  let opaque = 0;
-  for (const v of small) {
-    if (v > 100) significant += 1;
-    if (v > 230) opaque += 1;
-  }
-  significant /= small.length;
-  opaque /= small.length;
-  return !(significant < 0.04 || significant > 0.88 || opaque < 0.03);
-}
-
 export const MODEL_SIZE = SIZE;

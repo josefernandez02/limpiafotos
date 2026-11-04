@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { postProcess, maskLooksValid, resize, toMask } from '../src/mask.js';
+import { postProcess, resize, toMask } from '../src/mask.js';
 
 const W = 64;
 const H = 64;
@@ -14,14 +14,6 @@ test('post-process removes isolated specks and binarizes', () => {
   assert.equal(out[10 * W + 10], 0);
   assert.equal(out[35 * W + 35], 255);
   assert.ok(out.every((v) => v === 0 || v === 255));
-});
-
-test('guard rejects empty and full masks, accepts a centered item', () => {
-  assert.equal(maskLooksValid(blank(), W, H), false);
-  assert.equal(maskLooksValid(new Uint8Array(W * H).fill(255), W, H), false);
-  const m = blank();
-  for (let y = 16; y < 48; y += 1) for (let x = 16; x < 48; x += 1) m[y * W + x] = 255;
-  assert.equal(maskLooksValid(m, W, H), true);
 });
 
 test('resize keeps a flat image flat', () => {

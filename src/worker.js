@@ -1,7 +1,7 @@
 // Runs entirely on the device. No photo ever leaves this worker except as the
 // final, freshly encoded JPEGs returned to the page.
 import * as ort from 'onnxruntime-web/wasm';
-import { toInput, toMask, postProcess, maskLooksValid, MODEL_SIZE } from './mask.js';
+import { toInput, toMask, postProcess, MODEL_SIZE } from './mask.js';
 import { stripJpeg } from './strip.js';
 
 const MAX_EDGE = 2048;
@@ -74,15 +74,11 @@ async function processPhoto(file, color) {
   bitmap.close();
   const image = ctx.getImageData(0, 0, width, height);
 
-  const plain = await encode(canvas);
-
   const s = await session();
   const input = new ort.Tensor('float32', toInput(image.data, width, height), [1, 3, MODEL_SIZE, MODEL_SIZE]);
   const output = await s.run({ [s.inputNames[0]]: input });
   const pred = output[s.outputNames[0]].data;
   const mask = postProcess(toMask(pred, width, height), width, height);
-
-  if (!maskLooksValid(mask, width, height)) return { plain, edited: null };
 
   const [br, bg, bb] = parseHex(color);
   const px = image.data;
@@ -94,7 +90,7 @@ async function processPhoto(file, color) {
     }
   }
   ctx.putImageData(image, 0, 0);
-  return { plain, edited: await encode(canvas) };
+  return encode(canvas);
 }
 
 self.onmessage = async ({ data }) => {

@@ -83,22 +83,10 @@ function setActions(enabled) {
   sendBtn.disabled = !enabled;
   saveBtn.disabled = !enabled;
 }
-function variant(blob, name) {
-  const file = new File([blob], name, { type: 'image/jpeg' });
-  return { file, url: URL.createObjectURL(file) };
-}
 function clearResults() {
-  for (const r of results) {
-    URL.revokeObjectURL(r.plain.url);
-    if (r.edited) URL.revokeObjectURL(r.edited.url);
-  }
+  for (const r of results) URL.revokeObjectURL(r.url);
   results = [];
   grid.replaceChildren();
-}
-const current = (r) => (r.useEdited ? r.edited : r.plain);
-function render(r) {
-  r.img.src = current(r).url;
-  r.cell.classList.toggle('original', !r.useEdited);
 }
 
 // ---------- flow ----------
@@ -116,48 +104,26 @@ picker.addEventListener('change', async () => {
 
   const color = readColor();
   const cells = files.map(() => {
-    const cell = document.createElement('button');
-    cell.type = 'button';
+    const cell = document.createElement('div');
     cell.className = 'cell loading';
-    cell.disabled = true;
     grid.append(cell);
     return cell;
   });
 
   let failed = 0;
   let formatError = false;
-  let kept = 0;
   for (let i = 0; i < files.length; i += 1) {
     setStatus(`Procesando ${i + 1} de ${files.length}…`);
     try {
-      const out = await call({ type: 'process', file: files[i], color });
-      const name = randomName();
-      const cell = cells[i];
+      const blob = await call({ type: 'process', file: files[i], color });
+      const file = new File([blob], randomName(), { type: 'image/jpeg' });
+      const url = URL.createObjectURL(file);
+      results.push({ file, url });
       const img = document.createElement('img');
+      img.src = url;
       img.alt = '';
-      const label = document.createElement('span');
-      label.className = 'tag';
-      label.textContent = 'Fondo original';
-      cell.className = 'cell';
-      cell.disabled = false;
-      cell.append(img, label);
-      const r = {
-        cell, img,
-        plain: variant(out.plain, name),
-        edited: out.edited ? variant(out.edited, name) : null,
-        useEdited: Boolean(out.edited),
-      };
-      if (!r.edited) {
-        kept += 1;
-        cell.disabled = true;
-      }
-      cell.addEventListener('click', () => {
-        if (!r.edited || busy) return;
-        r.useEdited = !r.useEdited;
-        render(r);
-      });
-      render(r);
-      results.push(r);
+      cells[i].className = 'cell';
+      cells[i].append(img);
     } catch (error) {
       failed += 1;
       if (error.message === 'FORMAT') formatError = true;
@@ -174,12 +140,11 @@ picker.addEventListener('change', async () => {
   const ready = `${n} ${n === 1 ? 'lista' : 'listas'} · sin metadatos`;
   if (formatError) setStatus(`${failed} no se pudieron abrir. Usa fotos JPEG (Cámara → Ajustes → Formatos de imagen → desactiva HEIF).`);
   else if (failed) setStatus(`${ready}. ${failed} con error: vuelve a intentarlo con esas.`);
-  else if (kept) setStatus(`${ready}. En ${kept} no se pudo recortar bien y conservan su fondo.`);
-  else setStatus(`${ready}. Toca una foto para alternar el fondo.`);
+  else setStatus(ready);
 });
 
 sendBtn.addEventListener('click', async () => {
-  const files = results.map((r) => current(r).file);
+  const files = results.map((r) => r.file);
   if (navigator.canShare?.({ files })) {
     try { await navigator.share({ files }); } catch (e) {
       if (e.name !== 'AbortError') setStatus('No se pudo compartir. Usa "Guardar".');
@@ -192,8 +157,8 @@ sendBtn.addEventListener('click', async () => {
 saveBtn.addEventListener('click', () => {
   for (const r of results) {
     const a = document.createElement('a');
-    a.href = current(r).url;
-    a.download = current(r).file.name;
+    a.href = r.url;
+    a.download = r.file.name;
     a.click();
   }
 });

@@ -4,7 +4,8 @@
   "description": "Borra metadatos y cambia el fondo de fotos, todo en el móvil.",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "deploy": "npm test && npm run build && node scripts/deploy.mjs"
   },
   "license": "MIT",
   "devDependencies": {
