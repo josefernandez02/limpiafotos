@@ -1,6 +1,3 @@
-const DEFAULT_COLOR = '#7F8283';
-const STORAGE_KEY = 'limpiafotos.color';
-
 const $ = (selector) => document.querySelector(selector);
 const picker = $('#picker');
 const pickBtn = $('#pick');
@@ -8,52 +5,9 @@ const grid = $('#grid');
 const statusEl = $('#status');
 const sendBtn = $('#send');
 const saveBtn = $('#save');
-const settings = $('#settings');
-const colorInput = $('#color');
-const hexInput = $('#hex');
-const swatch = $('#swatch');
 
 let results = [];
 let busy = false;
-
-// ---------- settings ----------
-function readColor() {
-  try {
-    const v = localStorage.getItem(STORAGE_KEY);
-    if (v && /^#[0-9a-f]{6}$/i.test(v)) return v.toUpperCase();
-  } catch {}
-  return DEFAULT_COLOR;
-}
-function writeColor(v) {
-  try { localStorage.setItem(STORAGE_KEY, v); } catch {}
-}
-function applyColor(v) {
-  colorInput.value = v.toLowerCase();
-  hexInput.value = v;
-  swatch.style.background = v;
-}
-applyColor(readColor());
-
-$('#open-settings').addEventListener('click', () => settings.showModal());
-colorInput.addEventListener('input', () => {
-  const v = colorInput.value.toUpperCase();
-  applyColor(v);
-  writeColor(v);
-});
-hexInput.addEventListener('input', () => {
-  let v = hexInput.value.trim();
-  if (!v.startsWith('#')) v = `#${v}`;
-  if (/^#[0-9a-f]{6}$/i.test(v)) {
-    v = v.toUpperCase();
-    colorInput.value = v.toLowerCase();
-    swatch.style.background = v;
-    writeColor(v);
-  }
-});
-$('#reset-color').addEventListener('click', () => {
-  applyColor(DEFAULT_COLOR);
-  writeColor(DEFAULT_COLOR);
-});
 
 // ---------- worker ----------
 const worker = new Worker('./worker.js', { type: 'module' });
@@ -65,11 +19,11 @@ worker.onmessage = ({ data }) => {
   pending.delete(data.id);
   data.ok ? p.resolve(data.result) : p.reject(new Error(data.error));
 };
-function call(msg) {
+function process(file) {
   return new Promise((resolve, reject) => {
     const id = ++seq;
     pending.set(id, { resolve, reject });
-    worker.postMessage({ id, ...msg });
+    worker.postMessage({ id, file });
   });
 }
 
@@ -102,7 +56,6 @@ picker.addEventListener('change', async () => {
   setActions(false);
   clearResults();
 
-  const color = readColor();
   const cells = files.map(() => {
     const cell = document.createElement('div');
     cell.className = 'cell loading';
@@ -115,7 +68,7 @@ picker.addEventListener('change', async () => {
   for (let i = 0; i < files.length; i += 1) {
     setStatus(`Procesando ${i + 1} de ${files.length}…`);
     try {
-      const blob = await call({ type: 'process', file: files[i], color });
+      const blob = await process(files[i]);
       const file = new File([blob], randomName(), { type: 'image/jpeg' });
       const url = URL.createObjectURL(file);
       results.push({ file, url });
@@ -163,11 +116,7 @@ saveBtn.addEventListener('click', () => {
   }
 });
 
-// Warm up the model in the background so the first batch is quicker.
-setStatus('Preparando…');
-call({ type: 'preload' })
-  .then(() => { if (!busy && !results.length) setStatus('Listo'); })
-  .catch(() => { if (!busy && !results.length) setStatus('No se pudo cargar la IA. Abre la app con internet y vuelve a intentarlo.'); });
+setStatus('Listo');
 
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(() => {});

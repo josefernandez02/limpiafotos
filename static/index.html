@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111213">
   <meta name="referrer" content="no-referrer">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob: data:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' blob: data:; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' blob:; script-src 'self'; worker-src 'self'; connect-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
   <title>Limpiafotos</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
@@ -15,9 +15,6 @@
 <body>
   <header>
     <h1>Limpiafotos</h1>
-    <button id="open-settings" class="icon" aria-label="Ajustes">
-      <span id="swatch" class="swatch"></span>
-    </button>
   </header>
 
   <main>
@@ -34,21 +31,6 @@
   </footer>
 
   <input id="picker" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
-
-  <dialog id="settings">
-    <form method="dialog">
-      <h2>Color de fondo</h2>
-      <div class="color-row">
-        <input id="color" type="color" aria-label="Selector de color">
-        <input id="hex" type="text" inputmode="text" maxlength="7" spellcheck="false" autocomplete="off" aria-label="Código hexadecimal">
-      </div>
-      <p class="note">Todas las fotos se generan desde cero: sin ubicación, sin modelo de móvil, sin fecha, sin nombre original. Las fotos nunca salen del dispositivo.</p>
-      <div class="row">
-        <button id="reset-color" type="button">Restablecer</button>
-        <button class="primary" value="close">Hecho</button>
-      </div>
-    </form>
-  </dialog>
 
   <script type="module" src="app.js"></script>
 </body>
