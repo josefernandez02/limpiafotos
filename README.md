@@ -1,28 +1,21 @@
-# Limpiafotos
+# Catálogo
 
-App web instalable (PWA) que borra todos los metadatos de las fotos en el propio móvil, sin subirlas a ningún sitio.
+App Android para catalogar artículos con fotos sin metadatos, repartidas entre varios móviles.
 
-Cada foto se decodifica a píxeles (aplicando la orientación) y se escribe un JPEG nuevo a resolución completa y calidad 95. Después se eliminan todos los bloques no esenciales del archivo. No sobrevive nada del original:
+- **Principal** (cámara): crea artículos con el primer número libre, hace las fotos con la cámara del sistema y las guarda limpias en el álbum `<prefijo><número>` de cada móvil.
+- **Secundarios**: se vinculan al principal y reciben sus álbumes por conexión directa (Nearby Connections, sin internet), cifrada y autenticada.
+- **Vendido**: borra el artículo en todos los móviles; el número vuelve a quedar libre cuando todos lo confirman.
 
-- EXIF y GPS, XMP, IPTC, ICC, MakerNotes y miniaturas.
-- El vídeo de las "fotos en movimiento".
-- Las tablas de cuantización propias de la cámara.
-- El nombre del archivo, que pasa a ser aleatorio.
+## Estructura
 
-Las fotos se envían con el menú de compartir del sistema (Quick Share) o se guardan.
-
-## Uso
-
-Abrir la URL de GitHub Pages en Chrome → menú ⋮ → **Añadir a pantalla de inicio**. Funciona sin conexión.
+- `core/`: lógica pura y probada (SKU, catálogo, liberaciones, protocolo, autenticación, limpieza de JPEG).
+- `app/`: Android (Compose, MediaStore, Nearby).
 
 ## Desarrollo
 
 ```bash
-npm ci
-npm test
-npm run deploy   # tests + build + publica dist/ en la rama gh-pages
+CORE_ONLY=1 ./gradlew :core:test      # pruebas, sin Android SDK
+./gradlew :app:assembleRelease        # APK (requiere Android SDK)
 ```
 
-## Licencia
-
-MIT.
+Cada push a `main` compila el APK y lo publica en la release `app`.

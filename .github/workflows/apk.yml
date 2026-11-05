@@ -1,0 +1,66 @@
+name: APK
+
+on:
+  push:
+    branches: [main]
+    paths: ["app/**", "core/**", "*.gradle.kts", "gradle/**", "gradle.properties", ".github/workflows/apk.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Signing key comes from repository secrets; without them the APK is
+      # signed with a throwaway key and is not published.
+      - name: Clave de firma
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/catalogo.jks"
+            echo "KEYSTORE_FILE=$RUNNER_TEMP/catalogo.jks" >> "$GITHUB_ENV"
+            echo "SIGNED=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compilar
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain :app:assembleRelease 2>&1 | tee build.log
+
+      # Compiler errors as annotations, readable from the commit's check run.
+      - name: Errores
+        if: failure()
+        run: |
+          grep -E "^e: |error:|What went wrong|Could not|Execution failed|> " build.log | head -80 > errors.txt || true
+          split -l 8 errors.txt chunk_ || true
+          for f in chunk_*; do
+            [ -f "$f" ] || continue
+            msg=$(sed ':a;N;$!ba;s/%/%25/g;s/\n/%0A/g' "$f")
+            echo "::error::$msg"
+          done
+
+      - name: Publicar
+        if: env.SIGNED == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk catalogo.apk
+          gh release delete app --yes --cleanup-tag || true
+          gh release create app catalogo.apk --title "Catálogo" --notes "Versión ${{ github.run_number }}" --latest

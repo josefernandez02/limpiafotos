@@ -1,2 +1,10 @@
-node_modules/
-dist/
+.gradle/
+build/
+*/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+keystore/
+*.jks
