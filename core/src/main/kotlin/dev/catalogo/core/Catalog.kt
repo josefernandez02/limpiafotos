@@ -24,8 +24,19 @@ object Catalog {
         return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost))
     }
 
-    /** Style for a newly paired phone: alternate so neighbouring accounts differ. */
-    fun nextStyle(s: ParentState): Int = (s.children.size + 1) % Garments.STYLES
+    /**
+     * Makes sure no secondary phone writes with the main phone's style (phones
+     * paired before styles existed all had style 0).
+     */
+    fun ensureDistinctStyles(s: ParentState): ParentState {
+        if (s.children.none { it.style == s.self.style }) return s
+        val other = (s.self.style + 1) % Garments.STYLES
+        val children = s.children.map { c -> if (c.style != s.self.style) c else c.copy(style = other) }
+        return s.copy(children = children, configVersion = s.configVersion + 1)
+    }
+
+    /** Style for a newly paired phone: never the main phone's own style. */
+    fun nextStyle(s: ParentState): Int = (s.self.style + 1) % Garments.STYLES
 
     fun styleAndTemplate(s: ParentState, id: String, style: Int, template: String): ParentState {
         val clean = template.trim().take(ListingWriter.DESCRIPTION_MAX)

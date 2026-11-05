@@ -4,6 +4,7 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -88,27 +89,26 @@ fun ListingCard(vm: MainViewModel, text: ListingText?, onComplete: (() -> Unit)?
             }
             return@Tile
         }
-        var expanded by remember(text) { mutableStateOf(false) }
         Text(text.title, style = MaterialTheme.typography.titleMedium)
         Text(
             text.description,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = if (expanded) Int.MAX_VALUE else 4,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(top = 6.dp).animateContentSize().clickable { expanded = !expanded },
+            modifier = Modifier.padding(top = 8.dp),
         )
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(
                 onClick = { vm.copy("Título", text.title) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("Copiar título") }
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text("Copiar título", maxLines = 1, softWrap = false) }
             FilledTonalButton(
                 onClick = { vm.copyDescription(text.description) },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).height(48.dp),
                 shape = RoundedCornerShape(14.dp),
-            ) { Text("Copiar descripción") }
+                contentPadding = PaddingValues(horizontal = 8.dp),
+            ) { Text("Copiar descripción", maxLines = 1, softWrap = false) }
         }
         OutlinedButton(
             onClick = { vm.openVinted() },

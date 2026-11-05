@@ -99,6 +99,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     init {
         // Each phone keeps its albums where its own gallery shows them.
         run {
+            repo.ensureDistinctStyles()
             reportMoves(repo.adoptFolder(dev.catalogo.data.Folders.auto()))
             refresh()
         }
@@ -296,6 +297,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // ---------- child ----------
+
+    fun deleteArticle(number: Int) = run {
+        askToDelete(repo.deleteArticle(number))
+        back()
+    }
+
+    fun deleteOnChild(number: Int) = run {
+        askToDelete(repo.releaseOnChild(number, null))
+        if (_stack.value.last() is Screen.Album) back() else refresh()
+    }
 
     fun sellOnChild(number: Int, priceText: String) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")

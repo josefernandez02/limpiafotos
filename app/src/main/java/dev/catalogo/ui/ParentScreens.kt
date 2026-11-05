@@ -31,6 +31,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalButton
@@ -164,6 +165,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     val article = Catalog.article(p, number)
     var selling by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
     var shown by remember { mutableStateOf(p.self.id) }
 
     Scaffold(
@@ -171,6 +173,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             Bar("", onBack = { vm.back() }) {
                 if (article != null && !article.released) {
                     IconButton(onClick = { vm.go(Screen.Editor(number)) }) { Icon(Icons.Default.Edit, contentDescription = "Editar") }
+                    IconButton(onClick = { deleting = true }) { Icon(Icons.Default.Delete, contentDescription = "Eliminar") }
                 }
             }
         },
@@ -255,6 +258,17 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
             Spacer(Modifier.height(8.dp))
         }
+    }
+
+    if (deleting) {
+        Confirm(
+            title = "Eliminar ${Sku.number(number, p.digits)}",
+            text = "Se borran sus fotos y su anuncio en todos los móviles, sin contar como venta.",
+            confirm = "Eliminar",
+            destructive = true,
+            onConfirm = { vm.deleteArticle(number) },
+            onDismiss = { deleting = false },
+        )
     }
 
     if (selling && article != null) {

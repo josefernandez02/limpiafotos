@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -108,9 +109,14 @@ fun AlbumScreen(vm: MainViewModel, child: ChildState, number: Int) {
     val n = counts[sku] ?: 0
     val strip by produceState(emptyList<android.net.Uri>(), sku, n) { value = vm.albumPhotos(sku) }
     var selling by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
 
     Scaffold(
-        topBar = { Bar(sku, onBack = { vm.back() }) },
+        topBar = {
+            Bar(sku, onBack = { vm.back() }) {
+                IconButton(onClick = { deleting = true }) { Icon(Icons.Default.Delete, contentDescription = "Eliminar") }
+            }
+        },
         bottomBar = {
             BottomActions {
                 OutlinedButton(
@@ -139,6 +145,17 @@ fun AlbumScreen(vm: MainViewModel, child: ChildState, number: Int) {
             Section("Anuncio")
             ListingCard(vm, child.listings[number])
         }
+    }
+
+    if (deleting) {
+        Confirm(
+            title = "Eliminar $sku",
+            text = "Se borran sus fotos en todos los móviles, sin contar como venta.",
+            confirm = "Eliminar",
+            destructive = true,
+            onConfirm = { vm.deleteOnChild(number) },
+            onDismiss = { deleting = false },
+        )
     }
 
     if (selling) {

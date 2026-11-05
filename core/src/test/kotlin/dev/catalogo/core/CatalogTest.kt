@@ -136,4 +136,17 @@ class CatalogTest {
         s = Catalog.release(s, 500)
         assertEquals(500, Catalog.nextFree(s))
     }
+
+    @Test
+    fun `phones paired before styles get a distinct style`() {
+        var s = state(poco.copy(style = 0), third.copy(style = 0))
+        s = Catalog.ensureDistinctStyles(s)
+        assertTrue(s.children.none { it.style == s.self.style })
+        assertEquals(s, Catalog.ensureDistinctStyles(s), "idempotent")
+        s = Catalog.create(s, 0).first
+        s = Catalog.updateArticle(s, 0, Listing(type = "jeans", brand = "Levi's", keywords = listOf("vintage", "90s")), null, null)
+        val a = Catalog.listingText(s, 0, s.self)!!
+        val b = Catalog.listingText(s, 0, s.children.first())!!
+        assertTrue(a.title != b.title && a.description != b.description)
+    }
 }

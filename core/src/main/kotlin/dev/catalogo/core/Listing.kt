@@ -93,7 +93,9 @@ object Garments {
         GarmentType("zipsweat", "Sudadera con cremallera", Group.TOP, listOf("Zip Up Hoodie", "Full Zip Sweatshirt"), "sudadera cremallera zip"),
         GarmentType("sweater", "Jersey de punto", Group.TOP, listOf("Sweater", "Jumper"), "jersey punto lana knit"),
         GarmentType("cardigan", "Cárdigan", Group.TOP, listOf("Cardigan", "Knit Cardigan"), "cardigan chaqueta punto botones"),
-        GarmentType("top", "Top", Group.TOP, listOf("Top", "Blouse Top"), "top blusa tirantes"),
+        GarmentType("tanktop", "Camiseta de tirantes", Group.TOP, listOf("Tank Top", "Vest Top"), "tirantes sin mangas"),
+        GarmentType("top", "Top / blusa", Group.TOP, listOf("Top", "Blouse"), "top blusa"),
+        GarmentType("overshirt", "Sobrecamisa", Group.OUTER, listOf("Overshirt", "Shirt Jacket"), "sobrecamisa camisa gruesa leñador"),
         GarmentType("jacket", "Chaqueta", Group.OUTER, listOf("Jacket", "Light Jacket"), "chaqueta ligera corta"),
         GarmentType("denimjacket", "Cazadora vaquera", Group.OUTER, listOf("Denim Jacket", "Jean Jacket"), "chaqueta vaquera tejana"),
         GarmentType("bomber", "Bomber", Group.OUTER, listOf("Bomber Jacket", "Flight Jacket"), "chaqueta bomber aviador"),
@@ -119,6 +121,7 @@ object Garments {
         GarmentType("belt", "Cinturón", Group.ACCESSORY, listOf("Belt", "Waist Belt"), "cinturon correa"),
         GarmentType("scarf", "Bufanda", Group.ACCESSORY, listOf("Scarf", "Scarf"), "bufanda"),
         GarmentType("sunglasses", "Gafas de sol", Group.ACCESSORY, listOf("Sunglasses", "Shades"), "gafas sol"),
+        GarmentType("wallet", "Cartera", Group.ACCESSORY, listOf("Wallet", "Card Wallet"), "cartera billetera monedero"),
     )
 
     private val E = KeywordKind.EPOCH

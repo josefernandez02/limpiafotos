@@ -6,9 +6,11 @@
     android:viewportWidth="108"
     android:viewportHeight="108">
     <group
-        android:pivotX="54"
+        android:pivotX="58.3"
         android:pivotY="54"
-        android:rotation="-35">
+        android:rotation="-35"
+        android:translateX="-6.2"
+        android:translateY="2.1">
         <path
             android:fillColor="#FFECECEC"
             android:pathData="M42,38 H76 A6,6 0 0 1 82,44 V64 A6,6 0 0 1 76,70 H42 L28,54 Z" />

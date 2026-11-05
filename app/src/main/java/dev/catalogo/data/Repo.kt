@@ -141,6 +141,17 @@ class Repo(context: Context) {
         return consent
     }
 
+    /** Removed by mistake: delete it everywhere without recording a sale. */
+    suspend fun deleteArticle(number: Int): List<Uri> {
+        val consent = deleteLocalForParent(number)
+        store.update { s -> s.copy(parent = Catalog.release(s.parent!!, number)) }
+        return consent
+    }
+
+    suspend fun ensureDistinctStyles() {
+        store.update { s -> s.parent?.let { s.copy(parent = Catalog.ensureDistinctStyles(it)) } ?: s }
+    }
+
     suspend fun releaseFromChild(number: Int, childId: String, price: Long?): List<Uri> {
         if (Catalog.article(parent(), number) == null) return emptyList()
         val consent = deleteLocalForParent(number)
@@ -164,14 +175,15 @@ class Repo(context: Context) {
     }
 
     /** Sold on a child: delete its album now, tell the parent on next sync. */
-    suspend fun releaseOnChild(number: Int, price: Long): List<Uri> {
+    /** Sold ([price] set) or removed by mistake ([price] null) on a secondary phone. */
+    suspend fun releaseOnChild(number: Int, price: Long?): List<Uri> {
         val c = child()
         val consent = withContext(Dispatchers.IO) { gallery.deleteAlbum(base, sku(c.self, number, c.digits)) }
         store.update { s ->
             val current = s.child!!
             s.copy(child = current.copy(
                 pendingReleases = current.pendingReleases + number,
-                salePrices = current.salePrices + (number to price),
+                salePrices = if (price != null) current.salePrices + (number to price) else current.salePrices - number,
                 listings = current.listings - number,
             ))
         }
