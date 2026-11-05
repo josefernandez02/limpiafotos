@@ -14,7 +14,7 @@ class ListingTest {
         measures = mapOf("length" to "98", "waist" to "36 cm", "rise" to "25"),
     )
     private val hoodie = Listing(type = "hoodie", brand = "Nike", keywords = listOf("vintage", "y2k", "streetwear", "oversized"), size = "M")
-    private val knit = Listing(type = "sweater", brand = "Ralph Lauren", keywords = listOf("oldmoney", "classic", "cableknit"), size = "L")
+    private val knit = Listing(type = "sweater", brand = "Ralph Lauren", keywords = listOf("oldmoney", "preppy", "cableknit"), size = "L")
 
     @Test
     fun `every type and keyword has a distinct wording per style`() {
@@ -45,8 +45,10 @@ class ListingTest {
             assertNotEquals(a.lowercase().split(" ").toSet(), b.lowercase().split(" ").toSet(), "same words: $a / $b")
             assertTrue(a.length <= ListingWriter.TITLE_MAX && b.length <= ListingWriter.TITLE_MAX)
         }
-        assertEquals("Ralph Lauren Old Money Classic Sweater Cable Knit", ListingWriter.title(knit, 0))
-        assertEquals("Timeless Quiet Luxury Ralph Lauren Knit Jumper Cable Knitted", ListingWriter.title(knit, 1))
+        assertEquals("Ralph Lauren Old Money Preppy Cable Knit Sweater", ListingWriter.title(knit, 0))
+        assertEquals("Ivy Style Quiet Luxury Ralph Lauren Cable Knitted Jumper", ListingWriter.title(knit, 1))
+        assertEquals("Nike Vintage Streetwear Y2K Oversized Hoodie", ListingWriter.title(hoodie, 0))
+        assertEquals("Early 2000s Street Style Retro Nike Oversize Fit Hooded Sweatshirt", ListingWriter.title(hoodie, 1))
     }
 
     @Test
@@ -112,5 +114,37 @@ class ListingTest {
     fun `custom template keeps its own wording`() {
         val d = ListingWriter.description(jeans, 0, "Talla {talla}\nSKU {sku}\nTalla otra vez {nada}", "SH9")
         assertEquals("Talla W31 L32\nSKU SH9\nTalla otra vez {nada}", d)
+    }
+
+    @Test
+    fun `every keyword explains itself and fits at least one garment`() {
+        for (k in Garments.keywords) {
+            assertTrue(k.help.length in 6..120, k.id)
+            assertTrue(Group.entries.any { k.appliesTo(it) }, k.id)
+        }
+    }
+
+    @Test
+    fun `keywords are filtered by garment`() {
+        val pants = Garments.keywordsFor(Group.PANTS).map { it.id }
+        val tops = Garments.keywordsFor(Group.TOP).map { it.id }
+        assertTrue("bootcut" in pants && "bootcut" !in tops)
+        assertTrue("cableknit" in tops && "cableknit" !in pants)
+        assertTrue("vintage" in pants && "vintage" in tops)
+        // Keywords that do not fit the garment never reach the title.
+        val odd = Listing(type = "sweater", brand = "X", keywords = listOf("bootcut", "vintage"))
+        assertFalse("Bootcut" in ListingWriter.title(odd, 0))
+    }
+
+    @Test
+    fun `search finds types by spanish, english and synonyms`() {
+        fun ids(q: String) = Garments.search(q).map { it.id }
+        assertTrue("joggers" in ids("chandal"))
+        assertTrue("tracksuit" in ids("chándal"))
+        assertTrue("hoodie" in ids("capucha"))
+        assertTrue("sweatshirt" in ids("crewneck"))
+        assertTrue("puffer" in ids("plumifero"))
+        assertEquals(listOf("denimshorts"), ids("shorts vaqueros"))
+        assertEquals(emptyList(), ids("   "))
     }
 }
