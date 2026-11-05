@@ -90,19 +90,57 @@ class Gallery(context: Context) {
 
     fun deleteAlbum(base: String, album: String): List<Uri> = delete(albumPhotos(base, album))
 
-    /** Moves every photo of an album to another folder; returns the ones that could not be moved. */
+    /**
+     * Moves every photo of an album to another folder. Tries a direct move;
+     * if the system or gallery refuses it (Xiaomi's own album folder does),
+     * copies the photo, verifies the copy and only then deletes the original.
+     * Returns how many photos could not be moved.
+     */
     fun move(fromBase: String, fromAlbum: String, toBase: String, toAlbum: String): Int {
         if (fromBase == toBase && fromAlbum == toAlbum) return 0
         var failed = 0
         val values = ContentValues().apply { put(MediaStore.Images.Media.RELATIVE_PATH, path(toBase, toAlbum)) }
         for (uri in albumPhotos(fromBase, fromAlbum)) {
-            try {
-                if (resolver.update(uri, values, null, null) == 0) failed++
-            } catch (_: SecurityException) {
-                failed++
+            val moved = try {
+                resolver.update(uri, values, null, null) > 0 && isIn(uri, toBase, toAlbum)
+            } catch (_: Exception) {
+                false
             }
+            if (!moved && !copyThenDelete(uri, toBase, toAlbum)) failed++
         }
         return failed
+    }
+
+    private fun isIn(uri: Uri, base: String, album: String): Boolean =
+        resolver.query(uri, arrayOf(MediaStore.Images.Media.RELATIVE_PATH), null, null, null)?.use { c ->
+            c.moveToFirst() && c.getString(0) == path(base, album)
+        } ?: false
+
+    private fun copyThenDelete(uri: Uri, toBase: String, toAlbum: String): Boolean {
+        val bytes = try {
+            resolver.openInputStream(uri)?.use { it.readBytes() } ?: return false
+        } catch (_: Exception) {
+            return false
+        }
+        val name = resolver.query(uri, arrayOf(MediaStore.Images.Media.DISPLAY_NAME), null, null, null)?.use { c ->
+            if (c.moveToFirst()) c.getString(0) else null
+        } ?: randomName()
+        val copy = try {
+            save(toBase, toAlbum, bytes, name)
+        } catch (_: Exception) {
+            return false
+        }
+        val verified = try {
+            resolver.openInputStream(copy)?.use { it.readBytes() }?.contentEquals(bytes) == true
+        } catch (_: Exception) {
+            false
+        }
+        if (!verified || delete(listOf(uri)).isNotEmpty()) {
+            // Never leave duplicates: undo the copy if the original cannot go.
+            resolver.delete(copy, null, null)
+            return false
+        }
+        return true
     }
 
     /** Photos the camera saved (or the gallery edited) since [sinceMillis]. */
