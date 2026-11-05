@@ -17,6 +17,34 @@ object Catalog {
         return (0..Sku.maxNumber(s.digits)).firstOrNull { it !in used }
     }
 
+    /** Article details: listing data, lot and manual cost. */
+    fun updateArticle(s: ParentState, number: Int, listing: Listing?, lotId: String?, cost: Long?): ParentState {
+        val a = article(s, number) ?: return s
+        if (lotId != null && s.lots.none { it.id == lotId }) throw CatalogException("Lote no encontrado")
+        return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost))
+    }
+
+    /** Style for a newly paired phone: alternate so neighbouring accounts differ. */
+    fun nextStyle(s: ParentState): Int = (s.children.size + 1) % Garments.STYLES
+
+    fun styleAndTemplate(s: ParentState, id: String, style: Int, template: String): ParentState {
+        val clean = template.trim().take(ListingWriter.DESCRIPTION_MAX)
+        return if (id == s.self.id) {
+            s.copy(self = s.self.copy(style = style.mod(Garments.STYLES), template = clean))
+        } else {
+            s.copy(
+                children = s.children.map { if (it.id == id) it.copy(style = style.mod(Garments.STYLES), template = clean) else it },
+                configVersion = s.configVersion + 1,
+            )
+        }
+    }
+
+    /** Title and description of [number] as [device] publishes it. */
+    fun listingText(s: ParentState, number: Int, device: Device): ListingText? {
+        val listing = article(s, number)?.listing ?: return null
+        return ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits))
+    }
+
     fun create(s: ParentState, now: Long): Pair<ParentState, Int> {
         val number = nextFree(s) ?: throw CatalogException("No quedan números libres")
         val articles = (s.articles + Article(number, now)).sortedBy { it.number }

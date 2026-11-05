@@ -24,14 +24,17 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -51,11 +54,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
+import dev.catalogo.core.Ledger
+import dev.catalogo.core.ListingWriter
+import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
 
@@ -67,6 +74,10 @@ private fun openCamera(context: Context, vm: MainViewModel) {
     }
 }
 
+private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
+
+// ---------- Artículos (tab) ----------
+
 @Composable
 fun ParentHome(vm: MainViewModel, p: ParentState) {
     val counts by vm.counts.collectAsStateWithLifecycle()
@@ -75,41 +86,31 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     val active = p.articles.count { !it.released }
     Scaffold(
         topBar = {
-            Header("Catálogo", if (active == 1) "1 artículo" else "$active artículos") {
+            Header("Artículos", if (active == 1) "1 en catálogo" else "$active en catálogo") {
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             }
         },
-        bottomBar = {
-            BottomActions {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilledTonalButton(
-                        onClick = { vm.go(Screen.Connect) },
-                        modifier = Modifier.weight(1f).height(54.dp),
-                        shape = RoundedCornerShape(18.dp),
-                    ) { Text("Conectar") }
-                    Button(
-                        onClick = { vm.newArticle() },
-                        modifier = Modifier.weight(1f).height(54.dp),
-                        shape = RoundedCornerShape(18.dp),
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
-                        Text("  Nuevo")
-                    }
-                }
-            }
+        bottomBar = { MainTabs(vm, Screen.Home) },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { vm.go(Screen.Editor(null)) },
+                shape = RoundedCornerShape(18.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+            ) { Icon(Icons.Default.Add, contentDescription = "Nuevo artículo") }
         },
     ) { padding ->
         if (p.articles.isEmpty()) {
-            Empty("Pulsa Nuevo para empezar", Modifier.padding(padding))
-        } else {
-            LazyColumn(
-                modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                items(p.articles.sortedByDescending { it.number }, key = { it.number }) { a ->
-                    ArticleRow(vm, p, a, counts, covers, outbox)
-                }
+            Empty("Pulsa + para crear tu primer artículo", Modifier.padding(padding))
+            return@Scaffold
+        }
+        LazyColumn(
+            modifier = Modifier.padding(padding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(p.articles.sortedByDescending { it.number }, key = { it.number }) { a ->
+                ArticleRow(vm, p, a, counts, covers, outbox)
             }
         }
     }
@@ -125,14 +126,21 @@ private fun ArticleRow(
     outbox: Map<String, Map<Int, Int>>,
 ) {
     val own = Sku.format(p.self.prefix, a.number, p.digits)
+    val title = a.listing?.let { ListingWriter.title(it, p.self.style) }
     Tile(onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) })) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Cover(covers[own])
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 20.sp))
-                if (a.released) {
-                    Muted("Vendido · pendiente de sincronizar")
-                } else {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 18.sp))
+                    Ledger.lot(p, a.lotId)?.let { Pill(it.name) }
+                }
+                when {
+                    a.released -> Muted("Vendido · pendiente de sincronizar")
+                    title != null -> Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    else -> Muted("Sin datos del anuncio")
+                }
+                if (!a.released) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         for (d in Catalog.devices(p)) {
                             val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
@@ -147,22 +155,30 @@ private fun ArticleRow(
     }
 }
 
+// ---------- Ficha del artículo ----------
+
 @Composable
 fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val context = LocalContext.current
     val counts by vm.counts.collectAsStateWithLifecycle()
-    val covers by vm.covers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     val article = Catalog.article(p, number)
-    var confirmSold by remember { mutableStateOf(false) }
+    var selling by remember { mutableStateOf(false) }
+    var shown by remember { mutableStateOf(p.self.id) }
 
     Scaffold(
-        topBar = { Bar("", onBack = { vm.back() }) },
+        topBar = {
+            Bar("", onBack = { vm.back() }) {
+                if (article != null && !article.released) {
+                    IconButton(onClick = { vm.go(Screen.Editor(number)) }) { Icon(Icons.Default.Edit, contentDescription = "Editar") }
+                }
+            }
+        },
         bottomBar = {
             if (article != null && !article.released) {
                 BottomActions {
                     OutlinedButton(
-                        onClick = { confirmSold = true },
+                        onClick = { selling = true },
                         modifier = Modifier.fillMaxWidth().height(54.dp),
                         shape = RoundedCornerShape(18.dp),
                     ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
@@ -175,14 +191,20 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             return@Scaffold
         }
         Column(
-            Modifier.padding(padding).padding(horizontal = 16.dp).fillMaxSize(),
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(
-                Sku.number(number, p.digits),
-                style = Mono.copy(fontSize = 34.sp),
-                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
-            )
+            Row(
+                Modifier.padding(start = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(Sku.number(number, p.digits), style = Mono.copy(fontSize = 34.sp))
+                Ledger.lot(p, article.lotId)?.let { Pill(it.name) }
+                Ledger.costOf(p, article)?.let { Pill("Coste ${Money.format(it)}") }
+            }
+
+            Section("Fotos")
             for (d in Catalog.devices(p)) {
                 val sku = Sku.format(d.prefix, number, p.digits)
                 val isSelf = d.id == p.self.id
@@ -201,15 +223,10 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                     value = if (isSelf) vm.albumPhotos(sku) else vm.outboxPhotos(d.id, number)
                 }
                 Tile {
-                    Column(Modifier.fillMaxWidth()) {
-                        Text(sku, style = Mono.copy(fontSize = 18.sp))
-                        Muted("${d.name} · $detail")
-                    }
+                    Text(sku, style = Mono.copy(fontSize = 18.sp))
+                    Muted("${d.name} · $detail")
                     PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
+                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalButton(
                             onClick = { vm.startSession(number, d.id) { openCamera(context, vm) } },
                             modifier = Modifier.weight(1f),
@@ -226,22 +243,31 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                     }
                 }
             }
+
+            Section("Anuncio")
+            val devices = Catalog.devices(p)
+            if (devices.size > 1) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (d in devices) Choice(d.prefix, shown == d.id) { shown = d.id }
+                }
+            }
+            val device = devices.firstOrNull { it.id == shown } ?: p.self
+            ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
+            Spacer(Modifier.height(8.dp))
         }
     }
 
-    if (confirmSold) {
-        Confirm(
-            title = "Vendido",
-            text = "Se borrarán las fotos de ${Sku.number(number, p.digits)} en todos los móviles.",
-            confirm = "Borrar",
-            destructive = true,
-            onConfirm = { vm.releaseOnParent(number) },
-            onDismiss = { confirmSold = false },
+    if (selling && article != null) {
+        val cost = Ledger.costOf(p, article)
+        SellDialog(
+            title = "Vender ${Sku.number(number, p.digits)}",
+            initialCost = Money.input(cost),
+            costHint = Ledger.lot(p, article.lotId)?.let { "Coste por prenda de ${it.name}" },
+            onDismiss = { selling = false },
+            onConfirm = { price, c -> vm.sellOnParent(number, price, c) },
         )
     }
 }
-
-private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
 
 @Composable
 fun SessionScreen(vm: MainViewModel, p: ParentState) {

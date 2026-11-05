@@ -6,19 +6,22 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,10 +30,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.AppState
+import dev.catalogo.core.ChildState
 import dev.catalogo.core.Sku
 
 @Composable
@@ -38,7 +43,6 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
     val counts by vm.counts.collectAsStateWithLifecycle()
     val covers by vm.covers.collectAsStateWithLifecycle()
     val child = state.child
-    var sold by remember { mutableStateOf<Int?>(null) }
 
     val albums = if (child == null) emptyList() else counts
         .mapNotNull { (album, n) -> Sku.parse(album, child.self.prefix, child.digits)?.let { it to n } }
@@ -65,7 +69,7 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
             return@Scaffold
         }
         if (albums.isEmpty() && pending.isEmpty()) {
-            Empty("Sin álbumes", Modifier.padding(padding))
+            Empty("Sin álbumes todavía", Modifier.padding(padding))
             return@Scaffold
         }
         LazyColumn(
@@ -75,22 +79,14 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
         ) {
             items(albums, key = { "a${it.first}" }) { (number, n) ->
                 val sku = Sku.format(child.self.prefix, number, child.digits)
-                val strip by produceState(emptyList<android.net.Uri>(), sku, n) { value = vm.albumPhotos(sku) }
-                Tile {
-                    Text(sku, style = Mono.copy(fontSize = 18.sp))
-                    Muted(if (n == 1) "1 foto" else "$n fotos")
-                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        FilledTonalButton(
-                            onClick = { vm.stage(number) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                        ) { Text("Subir") }
-                        TextButton(onClick = { sold = number }, modifier = Modifier.weight(1f)) {
-                            Text("Vendido", color = MaterialTheme.colorScheme.error)
+                Tile(onClick = { vm.go(Screen.Album(number)) }) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Cover(covers[sku])
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(sku, style = Mono.copy(fontSize = 18.sp))
+                            val title = child.listings[number]?.title
+                            if (title != null) Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Muted(if (n == 1) "1 foto" else "$n fotos")
                         }
                     }
                 }
@@ -103,16 +99,55 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
             }
         }
     }
+}
 
-    val number = sold
-    if (number != null && child != null) {
-        Confirm(
-            title = "Vendido",
-            text = "Se borrarán las fotos de ${Sku.number(number, child.digits)} en todos los móviles.",
-            confirm = "Borrar",
-            destructive = true,
-            onConfirm = { vm.releaseOnChild(number) },
-            onDismiss = { sold = null },
+@Composable
+fun AlbumScreen(vm: MainViewModel, child: ChildState, number: Int) {
+    val counts by vm.counts.collectAsStateWithLifecycle()
+    val sku = Sku.format(child.self.prefix, number, child.digits)
+    val n = counts[sku] ?: 0
+    val strip by produceState(emptyList<android.net.Uri>(), sku, n) { value = vm.albumPhotos(sku) }
+    var selling by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = { Bar(sku, onBack = { vm.back() }) },
+        bottomBar = {
+            BottomActions {
+                OutlinedButton(
+                    onClick = { selling = true },
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(18.dp),
+                ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
+            }
+        },
+    ) { padding ->
+        Column(
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Section("Fotos")
+            Tile {
+                Muted(if (n == 1) "1 foto" else "$n fotos")
+                PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
+                FilledTonalButton(
+                    onClick = { vm.stage(number) },
+                    enabled = n > 0,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) { Text("Subir") }
+            }
+            Section("Anuncio")
+            ListingCard(vm, child.listings[number])
+        }
+    }
+
+    if (selling) {
+        SellDialog(
+            title = "Vender $sku",
+            initialCost = null,
+            costHint = null,
+            onDismiss = { selling = false },
+            onConfirm = { price, _ -> vm.sellOnChild(number, price) },
         )
     }
 }

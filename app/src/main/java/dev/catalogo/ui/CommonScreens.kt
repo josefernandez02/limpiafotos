@@ -1,6 +1,18 @@
 package dev.catalogo.ui
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import dev.catalogo.core.Garments
+import dev.catalogo.core.Listing
+import dev.catalogo.core.ListingWriter
+import dev.catalogo.core.ParentState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -90,30 +102,37 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
     }
     LaunchedEffect(Unit) { start() }
 
+    val done: () -> Unit = { if (isParent) vm.tab(Screen.Home) else vm.back() }
     Scaffold(
-        topBar = { Bar("Conectar", onBack = { vm.back() }) },
+        topBar = {
+            if (isParent) Header("Conectar", "Sincroniza fotos, anuncios y ventas")
+            else Bar("Conectar", onBack = { vm.back() })
+        },
         bottomBar = {
-            BottomActions {
-                if (status.running || status.working) {
-                    OutlinedButton(
-                        onClick = { vm.back() },
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("Cancelar") }
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = start,
-                            modifier = Modifier.weight(1f).height(52.dp),
-                            shape = RoundedCornerShape(14.dp),
-                        ) { Text("Conectar de nuevo") }
-                        Button(
-                            onClick = { vm.back() },
-                            modifier = Modifier.weight(1f).height(52.dp),
-                            shape = RoundedCornerShape(14.dp),
-                        ) { Text("Hecho") }
+            Column {
+                Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                    if (status.running || status.working) {
+                        OutlinedButton(
+                            onClick = { if (isParent) vm.sync.stop() else vm.back() },
+                            modifier = Modifier.fillMaxWidth().height(54.dp),
+                            shape = RoundedCornerShape(18.dp),
+                        ) { Text("Cancelar") }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilledTonalButton(
+                                onClick = start,
+                                modifier = Modifier.weight(1f).height(54.dp),
+                                shape = RoundedCornerShape(18.dp),
+                            ) { Text("Conectar de nuevo") }
+                            Button(
+                                onClick = done,
+                                modifier = Modifier.weight(1f).height(54.dp),
+                                shape = RoundedCornerShape(18.dp),
+                            ) { Text("Hecho") }
+                        }
                     }
                 }
+                if (isParent) MainTabs(vm, Screen.Connect) else Spacer(Modifier.navigationBarsPadding())
             }
         },
     ) { padding ->
@@ -169,15 +188,20 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
     val c = state.child
 
     Scaffold(topBar = { Bar("Ajustes", onBack = { vm.back() }) }) { padding ->
-        Column(Modifier.padding(padding).padding(horizontal = 16.dp).fillMaxSize()) {
+        Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             if (p != null) {
                 Section("Dispositivos")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (d in Catalog.devices(p)) {
                         Tile(onClick = { editing = d }) {
                             Row2(
-                                left = { Text(d.name, style = MaterialTheme.typography.titleMedium) },
-                                right = { Text(Sku.format(d.prefix, 54, p.digits), style = Mono, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                                left = {
+                                    Column {
+                                        Text(d.name, style = MaterialTheme.typography.titleMedium)
+                                        Muted(if (d.id == p.self.id) "Principal · estilo ${d.style + 1}" else "Secundario · estilo ${d.style + 1}")
+                                    }
+                                },
+                                right = { Pill(d.prefix) },
                             )
                         }
                     }
@@ -204,19 +228,17 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                 Tile {
                     Row2(
                         left = { Text(c.self.name, style = MaterialTheme.typography.titleMedium) },
-                        right = { Text(Sku.format(c.self.prefix, 54, c.digits), style = Mono, color = MaterialTheme.colorScheme.onSurfaceVariant) },
+                        right = { Pill(c.self.prefix) },
                     )
                     Muted("Se cambia desde el principal")
                 }
             }
             if (c != null) {
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { unpairing = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                TextButton(onClick = { unpairing = true }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp)) {
                     Text("Desvincular", color = MaterialTheme.colorScheme.error)
                 }
             } else if (p == null) {
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = { vm.resetRole() }, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                TextButton(onClick = { vm.resetRole() }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp)) {
                     Text("Cambiar rol", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
@@ -227,8 +249,13 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
     if (device != null && p != null) {
         val isChild = device.id != p.self.id
         var confirmRemove by remember(device.id) { mutableStateOf(false) }
-        val removeButton: @Composable () -> Unit = {
-            TextButton(onClick = { confirmRemove = true }) { Text("Desvincular", color = MaterialTheme.colorScheme.error) }
+        val extraButtons: @Composable () -> Unit = {
+            Column {
+                TextButton(onClick = { editing = null; vm.go(Screen.Template(device.id)) }) { Text("Estilo y plantilla del anuncio") }
+                if (isChild) {
+                    TextButton(onClick = { confirmRemove = true }) { Text("Desvincular", color = MaterialTheme.colorScheme.error) }
+                }
+            }
         }
         DeviceDialog(
             title = device.name,
@@ -245,7 +272,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                     e.message
                 }
             },
-            extra = if (isChild) removeButton else null,
+            extra = extraButtons,
         )
         if (confirmRemove) {
             Confirm(
@@ -320,4 +347,92 @@ fun DeviceDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
+}
+
+// ---------- listing style and template ----------
+
+private val SAMPLE = Listing(
+    type = "jeans", brand = "Levi's", model = "501", size = "W31 L32",
+    keywords = listOf("vintage", "90s", "straight", "faded"),
+    measures = mapOf("length" to "98", "waist" to "36", "rise" to "25"),
+)
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
+    val device = Catalog.device(p, deviceId) ?: return
+    var style by remember { mutableIntStateOf(device.style) }
+    var text by remember { mutableStateOf(TextFieldValue(device.template.ifBlank { ListingWriter.defaultTemplate(device.style) })) }
+    val sample = p.articles.firstOrNull { it.listing != null && !it.released }?.listing ?: SAMPLE
+    val sku = Sku.format(device.prefix, 54, p.digits)
+
+    fun insert(token: String) {
+        val sel = text.selection
+        val next = text.text.substring(0, sel.min) + token + text.text.substring(sel.max)
+        text = TextFieldValue(next, TextRange(sel.min + token.length))
+    }
+
+    Scaffold(
+        topBar = { Bar("Anuncio · ${device.name}", onBack = { vm.back() }) },
+        bottomBar = {
+            BottomActions {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { text = TextFieldValue(ListingWriter.defaultTemplate(style)) },
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    ) { Text("Restablecer") }
+                    Button(
+                        onClick = {
+                            val custom = text.text.trim().takeIf { it != ListingWriter.defaultTemplate(style) } ?: ""
+                            vm.saveStyle(device.id, style, custom)
+                        },
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    ) { Text("Guardar") }
+                }
+            }
+        },
+    ) { padding ->
+        Column(
+            Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Section("Estilo")
+            Muted("Cada estilo usa otras palabras y otro orden en los títulos.")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (s in 0 until Garments.STYLES) {
+                    Choice("Estilo ${s + 1}", style == s) {
+                        if (text.text.trim() == ListingWriter.defaultTemplate(style)) text = TextFieldValue(ListingWriter.defaultTemplate(s))
+                        style = s
+                    }
+                }
+            }
+
+            Section("Descripción")
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                textStyle = MaterialTheme.typography.bodySmall,
+                minLines = 10,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Muted("Se rellenan solos:")
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (token in listOf("{talla}", "{medidas}", "{estado}", "{sku}")) Choice(token, false) { insert(token) }
+            }
+
+            Section("Vista previa")
+            Tile {
+                Text(ListingWriter.title(sample, style), style = MaterialTheme.typography.titleMedium)
+                Text(
+                    ListingWriter.description(sample, style, text.text, sku),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 6.dp),
+                )
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+    }
 }

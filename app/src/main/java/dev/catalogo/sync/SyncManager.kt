@@ -26,6 +26,7 @@ import dev.catalogo.core.Done
 import dev.catalogo.core.Failure
 import dev.catalogo.core.FileInfo
 import dev.catalogo.core.Hello
+import dev.catalogo.core.Listings
 import dev.catalogo.core.Msg
 import dev.catalogo.core.PROTOCOL_VERSION
 import dev.catalogo.core.PairAccept
@@ -352,8 +353,16 @@ class SyncManager(context: Context, private val repo: Repo) {
         send(link, Sync(current.name, current.prefix, p.digits, p.configVersion, Catalog.releasesFor(p, current.id)))
         val reply = link.expect<SyncReply>()
         repo.confirmReleases(current.id, reply.released)
-        for (n in reply.releasedHere) repo.releaseFromChild(n, current.id)
+        for (n in reply.releasedHere) repo.releaseFromChild(n, current.id, reply.prices[n])
         send(link, SyncAck(reply.releasedHere))
+
+        // This phone's titles and descriptions, in batches that fit one payload.
+        val texts = repo.state.parent!!.let { p ->
+            p.articles.filter { !it.released }.mapNotNull { a -> Catalog.listingText(p, a.number, current)?.let { a.number to it } }
+        }
+        val batches = texts.chunked(LISTING_BATCH)
+        if (batches.isEmpty()) send(link, Listings(emptyMap(), last = true))
+        batches.forEachIndexed { i, batch -> send(link, Listings(batch.toMap(), last = i == batches.lastIndex)) }
         val releasedCount = (reply.released + reply.releasedHere).distinct().size
         if (releasedCount > 0) log("Liberados: $releasedCount")
 
@@ -402,9 +411,18 @@ class SyncManager(context: Context, private val repo: Repo) {
         val notMoved = repo.applyChildConfig(sync)
         if (notMoved > 0) log("$notMoved fotos no se pudieron renombrar")
         val released = repo.applyRequestedReleases(sync.releases)
-        send(link, SyncReply(released, repo.state.child!!.pendingReleases.sorted()))
+        val mine = repo.state.child!!
+        send(link, SyncReply(released, mine.pendingReleases.sorted(), mine.salePrices))
         repo.ackChildReleases(link.expect<SyncAck>().accepted)
         if (released.isNotEmpty()) log("Liberados: ${released.size}")
+
+        val listings = HashMap<Int, dev.catalogo.core.ListingText>()
+        while (true) {
+            val batch = link.expect<Listings>()
+            listings.putAll(batch.entries)
+            if (batch.last) break
+        }
+        repo.setListings(listings)
 
         while (true) {
             when (val msg = link.expect<Msg>(TRANSFER_TIMEOUT)) {
@@ -507,5 +525,6 @@ class SyncManager(context: Context, private val repo: Repo) {
         private const val MESSAGE_TIMEOUT = 60_000L
         private const val TRANSFER_TIMEOUT = 30 * 60_000L
         private const val IDLE_TIMEOUT = 2 * 60_000L
+        private const val LISTING_BATCH = 8
     }
 }

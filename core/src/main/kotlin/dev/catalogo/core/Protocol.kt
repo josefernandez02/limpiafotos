@@ -9,7 +9,7 @@ import java.util.Base64
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
-const val PROTOCOL_VERSION = 1
+const val PROTOCOL_VERSION = 2
 
 /** Messages exchanged between parent and child, one per BYTES payload. */
 @Serializable
@@ -46,7 +46,16 @@ data class Sync(
 
 /** Child → parent: numbers deleted as asked, and numbers released on the child. */
 @Serializable @SerialName("sync_reply")
-data class SyncReply(val released: List<Int>, val releasedHere: List<Int>) : Msg
+data class SyncReply(
+    val released: List<Int>,
+    val releasedHere: List<Int>,
+    /** Sale price in cents for numbers in [releasedHere], when entered. */
+    val prices: Map<Int, Long> = emptyMap(),
+) : Msg
+
+/** Parent → child: the child's titles and descriptions, sent in batches; [last] replaces the set. */
+@Serializable @SerialName("listings")
+data class Listings(val entries: Map<Int, ListingText>, val last: Boolean) : Msg
 
 @Serializable @SerialName("sync_ack")
 data class SyncAck(val accepted: List<Int>) : Msg

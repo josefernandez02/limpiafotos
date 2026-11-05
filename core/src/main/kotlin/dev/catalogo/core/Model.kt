@@ -12,6 +12,10 @@ data class Device(
     val name: String,
     val prefix: String,
     val secret: String = "",
+    /** Listing style (vocabulary and phrasing family) used for this phone's texts. */
+    val style: Int = 0,
+    /** Description template; blank means the style's default. */
+    val template: String = "",
 )
 
 /**
@@ -26,6 +30,10 @@ data class Article(
     val released: Boolean = false,
     val pendingRelease: Set<String> = emptySet(),
     val delivered: Map<String, Int> = emptyMap(),
+    val listing: Listing? = null,
+    val lotId: String? = null,
+    /** Manual cost in cents, used when the article has no lot. */
+    val cost: Long? = null,
 )
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */
@@ -40,6 +48,8 @@ data class ParentState(
     val articles: List<Article> = emptyList(),
     val session: Session? = null,
     val configVersion: Long = 1,
+    val lots: List<Lot> = emptyList(),
+    val sales: List<Sale> = emptyList(),
 )
 
 @Serializable
@@ -51,6 +61,10 @@ data class ChildState(
     val configVersion: Long = 0,
     /** Numbers released on this device that the parent has not acknowledged yet. */
     val pendingReleases: Set<Int> = emptySet(),
+    /** Sale price (cents) entered here for each pending release. */
+    val salePrices: Map<Int, Long> = emptyMap(),
+    /** Title and description for each article, written by the parent for this phone. */
+    val listings: Map<Int, ListingText> = emptyMap(),
 )
 
 @Serializable

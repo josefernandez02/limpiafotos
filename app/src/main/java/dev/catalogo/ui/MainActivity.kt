@@ -69,19 +69,25 @@ private fun App(vm: MainViewModel) {
         vm.clearMessage()
     }
     val sessionOpen = state.parent?.session != null && stack.last() != Screen.Review
-    BackHandler(enabled = stack.size > 1 && !sessionOpen) { vm.back() }
+    val onSecondaryTab = stack.size == 1 && (stack.last() == Screen.Lots || stack.last() == Screen.Connect)
+    BackHandler(enabled = (stack.size > 1 || onSecondaryTab) && !sessionOpen) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {
         val parent = state.parent
         val top = stack.last()
+        val child = state.child
         when {
             state.role == null -> SetupScreen(vm)
             parent != null && top == Screen.Review && parent.session != null -> ReviewScreen(vm, parent)
             parent != null && parent.session != null -> SessionScreen(vm, parent)
             top == Screen.Connect -> ConnectScreen(vm, state)
             top == Screen.Settings -> SettingsScreen(vm, state)
+            parent != null && top is Screen.Template -> TemplateScreen(vm, parent, top.deviceId)
+            parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
             parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
+            parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
             parent != null -> ParentHome(vm, parent)
+            child != null && top is Screen.Album -> AlbumScreen(vm, child, top.number)
             state.role == Role.CHILD -> ChildHome(vm, state)
         }
         val viewer by vm.viewer.collectAsStateWithLifecycle()

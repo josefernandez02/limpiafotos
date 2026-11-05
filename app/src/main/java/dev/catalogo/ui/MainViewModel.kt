@@ -9,6 +9,11 @@ import androidx.lifecycle.viewModelScope
 import dev.catalogo.CatalogoApp
 import dev.catalogo.core.AppState
 import dev.catalogo.core.CatalogException
+import dev.catalogo.core.Listing
+import dev.catalogo.core.Money
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -17,12 +22,22 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
+    /** Main tabs on the parent: articles, lots, connect. */
     data object Home : Screen
-    data class Article(val number: Int) : Screen
-    data object Review : Screen
+    data object Lots : Screen
     data object Connect : Screen
+
+    data class Article(val number: Int) : Screen
+    /** New article when [number] is null. */
+    data class Editor(val number: Int?) : Screen
+    data object Review : Screen
     data object Settings : Screen
+    data class Template(val deviceId: String) : Screen
+    /** A child's album. */
+    data class Album(val number: Int) : Screen
 }
+
+private const val VINTED_PACKAGE = "fr.vinted"
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as CatalogoApp
@@ -97,11 +112,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun back(): Boolean {
         val s = _stack.value
-        if (s.size <= 1) return false
+        if (s.size <= 1) {
+            // Secondary tabs go back to Artículos before leaving the app.
+            if (s.last() == Screen.Lots || s.last() == Screen.Connect) {
+                tab(Screen.Home)
+                return true
+            }
+            return false
+        }
         if (s.last() == Screen.Connect) sync.stop()
         _stack.value = s.dropLast(1)
         refresh()
         return true
+    }
+
+    /** Switches main tab; leaving Connect stops the link. */
+    fun tab(screen: Screen) {
+        if (_stack.value.last() == Screen.Connect && screen != Screen.Connect) sync.stop()
+        _stack.value = listOf(screen)
+        refresh()
     }
 
     private fun replaceTop(screen: Screen) {
@@ -170,9 +199,53 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- parent ----------
 
-    fun newArticle() = run {
-        val number = repo.newArticle()
-        go(Screen.Article(number))
+    fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String) = run {
+        val cost = if (lotId != null || costText.isBlank()) null
+        else Money.parse(costText) ?: throw CatalogException("Coste no válido")
+        if (number == null) {
+            val created = repo.newArticle(listing, lotId, cost)
+            replaceTop(Screen.Article(created))
+        } else {
+            repo.updateArticle(number, listing, lotId, cost)
+            back()
+        }
+    }
+
+    fun saveLot(id: String?, name: String, priceText: String, quantityText: String, done: () -> Unit) = run {
+        val price = Money.parse(priceText) ?: throw CatalogException("Precio no válido")
+        val quantity = quantityText.trim().toIntOrNull() ?: throw CatalogException("Número de prendas no válido")
+        repo.saveLot(id, name, price, quantity)
+        done()
+    }
+
+    fun deleteLot(id: String) = run { repo.deleteLot(id) }
+
+    fun saveStyle(deviceId: String, style: Int, template: String) = run {
+        repo.setStyle(deviceId, style, template)
+        back()
+    }
+
+    // ---------- publishing helpers ----------
+
+    fun copy(label: String, text: String) {
+        val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java)
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        _message.value = "$label copiado"
+    }
+
+    fun copyDescription(text: String) {
+        copy("Descripción", text)
+        _message.value = "Descripción copiada"
+    }
+
+    fun openVinted() {
+        val context = getApplication<Application>()
+        val intent = context.packageManager.getLaunchIntentForPackage(VINTED_PACKAGE)
+        if (intent == null) {
+            _message.value = "Vinted no está instalada"
+            return
+        }
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     fun startSession(number: Int, deviceId: String, openCamera: () -> Unit) = run {
@@ -215,16 +288,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun releaseOnParent(number: Int) = run {
-        askToDelete(repo.releaseOnParent(number))
+    fun sellOnParent(number: Int, priceText: String, costText: String) = run {
+        val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
+        val cost = if (costText.isBlank()) null else Money.parse(costText) ?: throw CatalogException("Coste no válido")
+        askToDelete(repo.sellOnParent(number, price, cost))
         back()
     }
 
     // ---------- child ----------
 
-    fun releaseOnChild(number: Int) = run {
-        askToDelete(repo.releaseOnChild(number))
-        refresh()
+    fun sellOnChild(number: Int, priceText: String) = run {
+        val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
+        askToDelete(repo.releaseOnChild(number, price))
+        if (_stack.value.last() is Screen.Album) back() else refresh()
     }
 
     fun unpair() = run {

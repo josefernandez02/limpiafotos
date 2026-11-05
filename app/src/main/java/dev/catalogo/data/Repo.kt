@@ -7,6 +7,10 @@ import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
 import dev.catalogo.core.ChildState
 import dev.catalogo.core.Device
+import dev.catalogo.core.Ledger
+import dev.catalogo.core.Listing
+import dev.catalogo.core.ListingText
+import dev.catalogo.core.Auth
 import dev.catalogo.core.PairAccept
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Session
@@ -50,14 +54,40 @@ class Repo(context: Context) {
 
     // ---------- parent: articles and photo sessions ----------
 
-    suspend fun newArticle(): Int {
+    suspend fun newArticle(listing: Listing?, lotId: String?, cost: Long?): Int {
         var number = -1
         store.update { s ->
-            val (next, n) = Catalog.create(s.parent!!, System.currentTimeMillis())
+            val (created, n) = Catalog.create(s.parent!!, System.currentTimeMillis())
             number = n
-            s.copy(parent = next)
+            s.copy(parent = Catalog.updateArticle(created, n, listing, lotId, cost))
         }
         return number
+    }
+
+    suspend fun updateArticle(number: Int, listing: Listing?, lotId: String?, cost: Long?) {
+        store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost)) }
+    }
+
+    // ---------- lots ----------
+
+    suspend fun saveLot(id: String?, name: String, price: Long, quantity: Int) {
+        store.update { s ->
+            val p = s.parent!!
+            s.copy(parent = if (id == null) Ledger.addLot(p, Auth.newId(), name, price, quantity, System.currentTimeMillis())
+            else Ledger.updateLot(p, id, name, price, quantity))
+        }
+    }
+
+    suspend fun deleteLot(id: String) {
+        store.update { s -> s.copy(parent = Ledger.deleteLot(s.parent!!, id)) }
+    }
+
+    suspend fun setStyle(id: String, style: Int, template: String) {
+        store.update { s -> s.copy(parent = Catalog.styleAndTemplate(s.parent!!, id, style, template)) }
+    }
+
+    suspend fun setListings(listings: Map<Int, ListingText>) {
+        store.update { s -> s.copy(child = s.child?.copy(listings = listings)) }
     }
 
     suspend fun startSession(number: Int, deviceId: String) {
@@ -104,17 +134,21 @@ class Repo(context: Context) {
 
     // ---------- releases ----------
 
-    /** Sold on the parent: delete everything local, children follow on next sync. */
-    suspend fun releaseOnParent(number: Int): List<Uri> {
+    /** Sold on the parent: record the sale, delete everything local, children follow on next sync. */
+    suspend fun sellOnParent(number: Int, price: Long, cost: Long?): List<Uri> {
         val consent = deleteLocalForParent(number)
-        store.update { s -> s.copy(parent = Catalog.release(s.parent!!, number)) }
+        store.update { s -> s.copy(parent = Ledger.sell(s.parent!!, number, s.deviceId, price, cost, System.currentTimeMillis())) }
         return consent
     }
 
-    suspend fun releaseFromChild(number: Int, childId: String): List<Uri> {
+    suspend fun releaseFromChild(number: Int, childId: String, price: Long?): List<Uri> {
         if (Catalog.article(parent(), number) == null) return emptyList()
         val consent = deleteLocalForParent(number)
-        store.update { s -> s.copy(parent = Catalog.release(s.parent!!, number, confirmedBy = childId)) }
+        store.update { s ->
+            val p = s.parent!!
+            s.copy(parent = if (price != null) Ledger.sell(p, number, childId, price, null, System.currentTimeMillis())
+            else Catalog.release(p, number, confirmedBy = childId))
+        }
         return consent
     }
 
@@ -130,12 +164,16 @@ class Repo(context: Context) {
     }
 
     /** Sold on a child: delete its album now, tell the parent on next sync. */
-    suspend fun releaseOnChild(number: Int): List<Uri> {
+    suspend fun releaseOnChild(number: Int, price: Long): List<Uri> {
         val c = child()
         val consent = withContext(Dispatchers.IO) { gallery.deleteAlbum(base, sku(c.self, number, c.digits)) }
         store.update { s ->
             val current = s.child!!
-            s.copy(child = current.copy(pendingReleases = current.pendingReleases + number))
+            s.copy(child = current.copy(
+                pendingReleases = current.pendingReleases + number,
+                salePrices = current.salePrices + (number to price),
+                listings = current.listings - number,
+            ))
         }
         return consent
     }
@@ -148,7 +186,9 @@ class Repo(context: Context) {
     }
 
     suspend fun ackChildReleases(numbers: List<Int>) {
-        store.update { s -> s.copy(child = s.child?.let { it.copy(pendingReleases = it.pendingReleases - numbers.toSet()) }) }
+        store.update { s ->
+            s.copy(child = s.child?.let { it.copy(pendingReleases = it.pendingReleases - numbers.toSet(), salePrices = it.salePrices - numbers.toSet()) })
+        }
     }
 
     // ---------- delivery ----------
@@ -168,7 +208,10 @@ class Repo(context: Context) {
     // ---------- pairing ----------
 
     suspend fun addChild(device: Device): ParentState {
-        val s = store.update { s -> s.copy(parent = Catalog.addChild(s.parent!!, device)) }
+        val s = store.update { s ->
+            val p = s.parent!!
+            s.copy(parent = Catalog.addChild(p, device.copy(style = Catalog.nextStyle(p))))
+        }
         return s.parent!!
     }
 

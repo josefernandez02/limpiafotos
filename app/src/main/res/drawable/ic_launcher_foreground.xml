@@ -1,13 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal price tag: the catalogue's mark. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <path
-        android:fillColor="#FF7F8283"
-        android:pathData="M38,38h32a6,6 0,0 1,6 6v20a6,6 0,0 1,-6 6h-32a6,6 0,0 1,-6 -6v-20a6,6 0,0 1,6 -6z" />
-    <path
-        android:fillColor="#FFECECEC"
-        android:pathData="M54,46a8,8 0,1 1,0 16a8,8 0,1 1,0 -16z" />
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-35">
+        <path
+            android:fillColor="#FFECECEC"
+            android:pathData="M42,38 H76 A6,6 0 0 1 82,44 V64 A6,6 0 0 1 76,70 H42 L28,54 Z" />
+        <path
+            android:fillColor="#FF0E0F11"
+            android:pathData="M41,54 m-4.5,0 a4.5,4.5 0 1 0 9,0 a4.5,4.5 0 1 0 -9,0" />
+        <path
+            android:fillColor="#FF0E0F11"
+            android:pathData="M54,51 H72 A1.5,1.5 0 0 1 72,54 H54 A1.5,1.5 0 0 1 54,51 Z" />
+        <path
+            android:fillColor="#FF0E0F11"
+            android:pathData="M54,58 H66 A1.5,1.5 0 0 1 66,61 H54 A1.5,1.5 0 0 1 54,58 Z" />
+    </group>
 </vector>
