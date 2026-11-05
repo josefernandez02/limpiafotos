@@ -48,7 +48,7 @@ jobs:
       - name: Errores
         if: failure()
         run: |
-          grep -E "^e: |error:|What went wrong|Could not|Execution failed|> " build.log | head -80 > errors.txt || true
+          { grep -iE "^e: |: error:|Error: |What went wrong|Could not" build.log; find app/build -name "lint-results*.txt" -exec grep -A3 "Error:" {} \; ; } | head -80 > errors.txt || true
           split -l 8 errors.txt chunk_ || true
           for f in chunk_*; do
             [ -f "$f" ] || continue
