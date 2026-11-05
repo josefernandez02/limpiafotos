@@ -22,6 +22,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -74,14 +75,11 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
         ) {
             items(albums, key = { "a${it.first}" }) { (number, n) ->
                 val sku = Sku.format(child.self.prefix, number, child.digits)
+                val strip by produceState(emptyList<android.net.Uri>(), sku, n) { value = vm.albumPhotos(sku) }
                 Tile {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Cover(covers[sku])
-                        Column(Modifier.weight(1f).padding(start = 14.dp)) {
-                            Text(sku, style = Mono.copy(fontSize = 18.sp))
-                            Muted(if (n == 1) "1 foto" else "$n fotos")
-                        }
-                    }
+                    Text(sku, style = Mono.copy(fontSize = 18.sp))
+                    Muted(if (n == 1) "1 foto" else "$n fotos")
+                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
                     Row(
                         Modifier.fillMaxWidth().padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),

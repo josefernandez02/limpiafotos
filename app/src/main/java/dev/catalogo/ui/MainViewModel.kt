@@ -60,6 +60,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _progress = MutableStateFlow<Pair<Int, Int>?>(null)
     val progress: StateFlow<Pair<Int, Int>?> = _progress.asStateFlow()
 
+    data class Viewer(val photos: List<Uri>, val start: Int)
+
+    private val _viewer = MutableStateFlow<Viewer?>(null)
+    val viewer: StateFlow<Viewer?> = _viewer.asStateFlow()
+
+    fun openViewer(photos: List<Uri>, start: Int) {
+        if (photos.isNotEmpty()) _viewer.value = Viewer(photos, start)
+    }
+
+    fun closeViewer() {
+        _viewer.value = null
+    }
+
+    /** Photos of an album on this phone, oldest first. */
+    suspend fun albumPhotos(album: String): List<Uri> =
+        withContext(Dispatchers.IO) { runCatching { repo.gallery.albumPhotos(repo.base, album) }.getOrDefault(emptyList()) }
+
+    /** Clean photos still waiting to be sent to [deviceId]. */
+    suspend fun outboxPhotos(deviceId: String, number: Int): List<Uri> =
+        withContext(Dispatchers.IO) { repo.outbox.files(deviceId, number).map { Uri.fromFile(it) } }
+
     init {
         // Each phone keeps its albums where its own gallery shows them.
         run {

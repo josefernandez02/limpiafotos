@@ -195,7 +195,7 @@ fun Thumb(uri: Uri, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val bitmap by produceState<ImageBitmap?>(null, uri) {
         value = withContext(Dispatchers.IO) {
-            runCatching { context.contentResolver.loadThumbnail(uri, Size(384, 384), null).asImageBitmap() }.getOrNull()
+            runCatching { loadPhoto(context, uri, 384) }.getOrNull()
         }
     }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainer)) {

@@ -84,6 +84,8 @@ private fun App(vm: MainViewModel) {
             parent != null -> ParentHome(vm, parent)
             state.role == Role.CHILD -> ChildHome(vm, state)
         }
+        val viewer by vm.viewer.collectAsStateWithLifecycle()
+        viewer?.let { v -> ViewerScreen(v.photos, v.start, onClose = { vm.closeViewer() }) }
         SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(16.dp)) { data ->
             Snackbar(
                 snackbarData = data,

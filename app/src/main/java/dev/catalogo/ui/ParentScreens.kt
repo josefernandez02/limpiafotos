@@ -43,6 +43,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -195,14 +196,16 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                         if (waiting > 0) "$waiting por enviar" else null,
                     ).joinToString(" · ").ifEmpty { "Sin fotos" }
                 }
+                val version = if (isSelf) counts[sku] ?: 0 else outbox[d.id]?.get(number) ?: 0
+                val strip by produceState(emptyList<android.net.Uri>(), sku, version) {
+                    value = if (isSelf) vm.albumPhotos(sku) else vm.outboxPhotos(d.id, number)
+                }
                 Tile {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Cover(if (isSelf) covers[sku] else null)
-                        Column(Modifier.weight(1f)) {
-                            Text(sku, style = Mono.copy(fontSize = 18.sp))
-                            Muted("${d.name} · $detail")
-                        }
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(sku, style = Mono.copy(fontSize = 18.sp))
+                        Muted("${d.name} · $detail")
                     }
+                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
                     Row(
                         Modifier.fillMaxWidth().padding(top = 10.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
