@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -107,6 +108,16 @@ fun BigButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
         modifier = modifier.fillMaxWidth().height(52.dp),
         shape = RoundedCornerShape(14.dp),
     ) { Text(text, style = MaterialTheme.typography.titleSmall) }
+}
+
+/** Bottom action area, kept clear of the system navigation bar. */
+@Composable
+fun BottomActions(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        content = content,
+    )
 }
 
 @Composable

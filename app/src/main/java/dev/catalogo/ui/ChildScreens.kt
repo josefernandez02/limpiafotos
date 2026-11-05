@@ -40,7 +40,7 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
             })
         },
         bottomBar = {
-            Column(Modifier.padding(16.dp)) {
+            BottomActions {
                 BigButton(if (child == null) "Vincular" else "Conectar", onClick = { vm.go(Screen.Connect) })
             }
         },

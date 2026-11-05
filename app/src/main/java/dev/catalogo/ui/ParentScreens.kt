@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -28,9 +29,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -73,18 +73,27 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     Scaffold(
         topBar = {
             Bar("Catálogo", actions = {
-                IconButton(onClick = { vm.go(Screen.Connect) }) { Icon(Icons.Default.Refresh, contentDescription = "Conectar") }
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             })
         },
-        floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { vm.newArticle() },
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text("Nuevo") },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-            )
+        bottomBar = {
+            BottomActions {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = { vm.go(Screen.Connect) },
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Conectar") }
+                    Button(
+                        onClick = { vm.newArticle() },
+                        modifier = Modifier.weight(1f).height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("  Nuevo")
+                    }
+                }
+            }
         },
     ) { padding ->
         if (p.articles.isEmpty()) {
@@ -92,7 +101,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 items(p.articles, key = { it.number }) { a -> ArticleRow(vm, p, a, counts, outbox) }
@@ -250,7 +259,7 @@ fun ReviewScreen(vm: MainViewModel, p: ParentState) {
     Scaffold(
         topBar = { Bar(title, onBack = if (progress == null) goBack else null) },
         bottomBar = {
-            Column(Modifier.padding(16.dp)) {
+            BottomActions {
                 val current = progress
                 if (current != null) {
                     Muted("Guardando ${current.first} de ${current.second}", Modifier.padding(bottom = 8.dp))

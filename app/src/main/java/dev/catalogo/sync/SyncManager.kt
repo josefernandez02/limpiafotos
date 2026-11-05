@@ -40,6 +40,7 @@ import dev.catalogo.data.Repo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
@@ -98,6 +99,7 @@ class SyncManager(context: Context, private val repo: Repo) {
     private val links = ConcurrentHashMap<String, Link>()
     private val approved = ConcurrentHashMap<String, Pair<String, String>>()
     private var requested = false
+    private var idleJob: Job? = null
 
     private val _status = MutableStateFlow(Status())
     val status: StateFlow<Status> = _status.asStateFlow()
@@ -113,6 +115,19 @@ class SyncManager(context: Context, private val repo: Repo) {
         val options = AdvertisingOptions.Builder().setStrategy(STRATEGY).build()
         client.startAdvertising("$TAG_PARENT|${repo.state.deviceId}", SERVICE_ID, lifecycle, options)
             .addOnFailureListener { fail(it) }
+        armIdle()
+    }
+
+    /** Stops looking for the other phone if nobody connects in a while. */
+    private fun armIdle() {
+        idleJob?.cancel()
+        idleJob = scope.launch {
+            delay(IDLE_TIMEOUT)
+            if (_status.value.running && links.isEmpty()) {
+                log("Nadie se ha conectado")
+                stop()
+            }
+        }
     }
 
     fun startChild() {
@@ -122,9 +137,11 @@ class SyncManager(context: Context, private val repo: Repo) {
         _status.value = Status(running = true, log = listOf("Buscando el principal…"))
         val options = DiscoveryOptions.Builder().setStrategy(STRATEGY).build()
         client.startDiscovery(SERVICE_ID, discovery, options).addOnFailureListener { fail(it) }
+        armIdle()
     }
 
     fun stop() {
+        idleJob?.cancel()
         client.stopAdvertising()
         client.stopDiscovery()
         client.stopAllEndpoints()
@@ -262,6 +279,7 @@ class SyncManager(context: Context, private val repo: Repo) {
     }
 
     private fun accept(endpointId: String) {
+        idleJob?.cancel()
         links[endpointId] = Link(endpointId)
         client.acceptConnection(endpointId, payloads).addOnFailureListener {
             links.remove(endpointId)
@@ -295,11 +313,13 @@ class SyncManager(context: Context, private val repo: Repo) {
             delay(500)
             client.disconnectFromEndpoint(link.endpointId)
             links.remove(link.endpointId)?.close(IOException("Cerrado"))
-            val isChild = repo.state.parent == null
-            _status.update {
-                it.copy(working = links.isNotEmpty(), finished = ok, running = if (isChild) false else it.running)
+            // Session over: stop advertising/discovery unless another phone is still connected.
+            val idle = links.isEmpty()
+            if (idle) {
+                client.stopAdvertising()
+                client.stopDiscovery()
             }
-            if (isChild) client.stopDiscovery()
+            _status.update { it.copy(working = !idle, finished = ok, running = if (idle) false else it.running) }
             requested = false
         }
     }
@@ -486,5 +506,6 @@ class SyncManager(context: Context, private val repo: Repo) {
         private val STRATEGY = Strategy.P2P_STAR
         private const val MESSAGE_TIMEOUT = 60_000L
         private const val TRANSFER_TIMEOUT = 30 * 60_000L
+        private const val IDLE_TIMEOUT = 2 * 60_000L
     }
 }

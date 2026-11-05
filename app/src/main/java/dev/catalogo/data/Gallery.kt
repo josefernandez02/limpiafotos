@@ -111,7 +111,7 @@ class Gallery(context: Context) {
         return query(
             "(${MediaStore.Images.Media.DATE_ADDED} >= ? OR ${MediaStore.Images.Media.DATE_MODIFIED} >= ?) AND " +
                 "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ? AND ${MediaStore.Images.Media.IS_PENDING} = 0",
-            arrayOf(since, since, "DCIM/%"),
+            arrayOf(since, since, "DCIM/Camera%"),
         )
     }
 

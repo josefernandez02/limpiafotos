@@ -14,6 +14,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.MaterialTheme
@@ -89,8 +93,27 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
     Scaffold(
         topBar = { Bar("Conectar", onBack = { vm.back() }) },
         bottomBar = {
-            Column(Modifier.padding(16.dp)) {
-                if (!status.running && !status.working) BigButton("Reintentar", onClick = start)
+            BottomActions {
+                if (status.running || status.working) {
+                    OutlinedButton(
+                        onClick = { vm.back() },
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Cancelar") }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilledTonalButton(
+                            onClick = start,
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text("Conectar de nuevo") }
+                        Button(
+                            onClick = { vm.back() },
+                            modifier = Modifier.weight(1f).height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text("Hecho") }
+                    }
+                }
             }
         },
     ) { padding ->
@@ -100,7 +123,7 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             items(status.log) { line -> Text(line, style = MaterialTheme.typography.bodyLarge) }
-            if (status.running || status.working) {
+            if (status.running && !status.working) {
                 item {
                     Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
