@@ -52,6 +52,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -128,7 +129,10 @@ private fun ArticleRow(
 ) {
     val own = Sku.format(p.self.prefix, a.number, p.digits)
     val title = a.listing?.let { ListingWriter.title(it, p.self.style) }
-    Tile(onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) })) {
+    Tile(
+        modifier = if (a.released) Modifier.alpha(0.55f) else Modifier,
+        onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) }),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Cover(covers[own])
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -137,7 +141,11 @@ private fun ArticleRow(
                     Ledger.lot(p, a.lotId)?.let { Pill(it.name) }
                 }
                 when {
-                    a.released -> Muted("Vendido · pendiente de sincronizar")
+                    a.released -> {
+                        // Sold if a sale was recorded for this article; otherwise it was deleted.
+                        val sold = p.sales.any { it.number == a.number && it.soldAt >= a.createdAt }
+                        Muted(if (sold) "Vendido · conecta para terminar" else "Eliminado · conecta para terminar")
+                    }
                     title != null -> Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     else -> Muted("Sin datos del anuncio")
                 }

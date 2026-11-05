@@ -95,7 +95,7 @@ fun ChildHome(vm: MainViewModel, state: AppState) {
             items(pending, key = { "p$it" }) { number ->
                 Tile {
                     Text(Sku.format(child.self.prefix, number, child.digits), style = Mono.copy(fontSize = 18.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Muted("Vendido · pendiente de sincronizar")
+                    Muted(if (number in child.salePrices) "Vendido · conecta para terminar" else "Eliminado · conecta para terminar")
                 }
             }
         }
