@@ -214,7 +214,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                 for (folder in AppState.BASE_FOLDERS) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         RadioButton(selected = state.baseFolder == folder, onClick = { vm.setBaseFolder(folder) })
-                        Text(folder, style = MaterialTheme.typography.bodyLarge)
+                        Text(AppState.folderLabel(folder), style = MaterialTheme.typography.bodyLarge)
                     }
                 }
             }

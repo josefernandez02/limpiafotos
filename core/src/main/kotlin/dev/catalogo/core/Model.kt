@@ -56,7 +56,7 @@ data class ChildState(
 @Serializable
 data class AppState(
     val deviceId: String,
-    val baseFolder: String = BASE_FOLDERS.first(),
+    val baseFolder: String = "Pictures",
     val parent: ParentState? = null,
     val child: ChildState? = null,
     /** Chosen as secondary but not paired yet. */
@@ -69,6 +69,13 @@ data class AppState(
     }
 
     companion object {
-        val BASE_FOLDERS = listOf("Pictures", "DCIM")
+        /** Where galleries list albums: Samsung uses DCIM, Xiaomi's "Mis álbumes" Pictures/Gallery/owner. */
+        val BASE_FOLDERS = listOf("DCIM", "Pictures/Gallery/owner", "Pictures")
+
+        fun folderLabel(folder: String): String = when (folder) {
+            "DCIM" -> "DCIM · Samsung"
+            "Pictures/Gallery/owner" -> "Mis álbumes · Xiaomi"
+            else -> folder
+        }
     }
 }
