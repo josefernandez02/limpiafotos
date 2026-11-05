@@ -69,13 +69,7 @@ data class AppState(
     }
 
     companion object {
-        /** Where galleries list albums: Samsung uses DCIM, Xiaomi's "Mis álbumes" Pictures/Gallery/owner. */
+        /** Folders where galleries list albums; the app picks one per phone automatically. */
         val BASE_FOLDERS = listOf("DCIM", "Pictures/Gallery/owner", "Pictures")
-
-        fun folderLabel(folder: String): String = when (folder) {
-            "DCIM" -> "DCIM · Samsung"
-            "Pictures/Gallery/owner" -> "Mis álbumes · Xiaomi"
-            else -> folder
-        }
     }
 }

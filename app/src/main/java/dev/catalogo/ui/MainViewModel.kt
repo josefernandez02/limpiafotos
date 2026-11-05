@@ -37,6 +37,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _counts = MutableStateFlow<Map<String, Int>>(emptyMap())
     val counts: StateFlow<Map<String, Int>> = _counts.asStateFlow()
 
+    /** First photo of each album, for thumbnails. */
+    private val _covers = MutableStateFlow<Map<String, Uri>>(emptyMap())
+    val covers: StateFlow<Map<String, Uri>> = _covers.asStateFlow()
+
     /** Clean photos waiting in the outbox: deviceId → number → count. */
     private val _outbox = MutableStateFlow<Map<String, Map<Int, Int>>>(emptyMap())
     val outbox: StateFlow<Map<String, Map<Int, Int>>> = _outbox.asStateFlow()
@@ -55,6 +59,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _progress = MutableStateFlow<Pair<Int, Int>?>(null)
     val progress: StateFlow<Pair<Int, Int>?> = _progress.asStateFlow()
+
+    init {
+        // Each phone keeps its albums where its own gallery shows them.
+        run {
+            reportMoves(repo.adoptFolder(dev.catalogo.data.Folders.auto()))
+            refresh()
+        }
+    }
 
     // ---------- navigation ----------
 
@@ -96,14 +108,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() = viewModelScope.launch {
         val base = repo.base
         val s = state.value
-        val (counts, outbox) = withContext(Dispatchers.IO) {
-            val c = runCatching { repo.gallery.counts(base) }.getOrDefault(emptyMap())
+        val (albums, outbox) = withContext(Dispatchers.IO) {
+            val a = runCatching { repo.gallery.albums(base) }.getOrDefault(emptyMap())
             val o = s.parent?.children?.associate { d ->
                 d.id to repo.outbox.pending(d.id).mapValues { it.value.size }
             } ?: emptyMap()
-            c to o
+            a to o
         }
-        _counts.value = counts
+        _counts.value = albums.mapValues { it.value.count }
+        _covers.value = albums.mapValues { it.value.cover }
         _outbox.value = outbox
     }
 
@@ -122,7 +135,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- setup ----------
 
-    fun setupParent(name: String, prefix: String) = run { repo.setupParent(name, prefix) }
+    fun setupParent(name: String, prefix: String) = run {
+        repo.setupParent(name, prefix)
+        repo.adoptFolder(dev.catalogo.data.Folders.auto())
+    }
 
     fun setupChild() = run { repo.setupChild() }
 
@@ -217,8 +233,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
-    fun setBaseFolder(folder: String) = run {
-        reportMoves(repo.setBaseFolder(folder))
-        refresh()
+    fun stage(number: Int) = run {
+        val n = repo.stage(number)
+        _message.value = "$n fotos listas en «0 Subir»"
     }
 }

@@ -69,25 +69,27 @@ private fun openCamera(context: Context, vm: MainViewModel) {
 @Composable
 fun ParentHome(vm: MainViewModel, p: ParentState) {
     val counts by vm.counts.collectAsStateWithLifecycle()
+    val covers by vm.covers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
+    val active = p.articles.count { !it.released }
     Scaffold(
         topBar = {
-            Bar("Catálogo", actions = {
+            Header("Catálogo", if (active == 1) "1 artículo" else "$active artículos") {
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
-            })
+            }
         },
         bottomBar = {
             BottomActions {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
                         onClick = { vm.go(Screen.Connect) },
-                        modifier = Modifier.weight(1f).height(52.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        shape = RoundedCornerShape(18.dp),
                     ) { Text("Conectar") }
                     Button(
                         onClick = { vm.newArticle() },
-                        modifier = Modifier.weight(1f).height(52.dp),
-                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.weight(1f).height(54.dp),
+                        shape = RoundedCornerShape(18.dp),
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Text("  Nuevo")
@@ -97,59 +99,93 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
         },
     ) { padding ->
         if (p.articles.isEmpty()) {
-            Empty("Sin artículos", Modifier.padding(padding))
+            Empty("Pulsa Nuevo para empezar", Modifier.padding(padding))
         } else {
             LazyColumn(
                 modifier = Modifier.padding(padding),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                items(p.articles, key = { it.number }) { a -> ArticleRow(vm, p, a, counts, outbox) }
+                items(p.articles.sortedByDescending { it.number }, key = { it.number }) { a ->
+                    ArticleRow(vm, p, a, counts, covers, outbox)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, counts: Map<String, Int>, outbox: Map<String, Map<Int, Int>>) {
+private fun ArticleRow(
+    vm: MainViewModel,
+    p: ParentState,
+    a: Article,
+    counts: Map<String, Int>,
+    covers: Map<String, android.net.Uri>,
+    outbox: Map<String, Map<Int, Int>>,
+) {
+    val own = Sku.format(p.self.prefix, a.number, p.digits)
     Tile(onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) })) {
-        Row2(
-            left = { Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 20.sp)) },
-            right = {
-                if (a.released) Muted("Vendido · pendiente de sincronizar")
-                else Muted(deviceSummary(p, a, counts, outbox))
-            },
-        )
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            Cover(covers[own])
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 20.sp))
+                if (a.released) {
+                    Muted("Vendido · pendiente de sincronizar")
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (d in Catalog.devices(p)) {
+                            val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
+                            val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
+                            else (a.delivered[d.id] ?: 0) + waiting
+                            Pill(if (waiting > 0) "${d.prefix} $n ↑" else "${d.prefix} $n")
+                        }
+                    }
+                }
+            }
+        }
     }
 }
-
-private fun deviceSummary(p: ParentState, a: Article, counts: Map<String, Int>, outbox: Map<String, Map<Int, Int>>): String =
-    Catalog.devices(p).joinToString("   ") { d ->
-        val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
-        else (a.delivered[d.id] ?: 0) + (outbox[d.id]?.get(a.number) ?: 0)
-        "${d.prefix} $n"
-    }
 
 @Composable
 fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val context = LocalContext.current
     val counts by vm.counts.collectAsStateWithLifecycle()
+    val covers by vm.covers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     val article = Catalog.article(p, number)
     var confirmSold by remember { mutableStateOf(false) }
 
-    Scaffold(topBar = { Bar(Sku.number(number, p.digits), onBack = { vm.back() }) }) { padding ->
+    Scaffold(
+        topBar = { Bar("", onBack = { vm.back() }) },
+        bottomBar = {
+            if (article != null && !article.released) {
+                BottomActions {
+                    OutlinedButton(
+                        onClick = { confirmSold = true },
+                        modifier = Modifier.fillMaxWidth().height(54.dp),
+                        shape = RoundedCornerShape(18.dp),
+                    ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
+                }
+            }
+        },
+    ) { padding ->
         if (article == null || article.released) {
             Empty("Artículo vendido", Modifier.padding(padding))
             return@Scaffold
         }
         Column(
             Modifier.padding(padding).padding(horizontal = 16.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            Text(
+                Sku.number(number, p.digits),
+                style = Mono.copy(fontSize = 34.sp),
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp),
+            )
             for (d in Catalog.devices(p)) {
                 val sku = Sku.format(d.prefix, number, p.digits)
-                val detail = if (d.id == p.self.id) {
+                val isSelf = d.id == p.self.id
+                val detail = if (isSelf) {
                     photos(counts[sku] ?: 0)
                 } else {
                     val waiting = outbox[d.id]?.get(number) ?: 0
@@ -160,27 +196,33 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                     ).joinToString(" · ").ifEmpty { "Sin fotos" }
                 }
                 Tile {
-                    Row2(
-                        left = {
-                            Column {
-                                Text(sku, style = Mono.copy(fontSize = 18.sp))
-                                Muted("${d.name} · $detail")
-                            }
-                        },
-                        right = {
-                            FilledTonalButton(onClick = {
-                                vm.startSession(number, d.id) { openCamera(context, vm) }
-                            }) { Text("Fotos") }
-                        },
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Cover(if (isSelf) covers[sku] else null)
+                        Column(Modifier.weight(1f)) {
+                            Text(sku, style = Mono.copy(fontSize = 18.sp))
+                            Muted("${d.name} · $detail")
+                        }
+                    }
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        FilledTonalButton(
+                            onClick = { vm.startSession(number, d.id) { openCamera(context, vm) } },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                        ) { Text("Fotos") }
+                        if (isSelf) {
+                            FilledTonalButton(
+                                onClick = { vm.stage(number) },
+                                enabled = (counts[sku] ?: 0) > 0,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) { Text("Subir") }
+                        }
+                    }
                 }
             }
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(
-                onClick = { confirmSold = true },
-                modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp).height(52.dp),
-                shape = RoundedCornerShape(14.dp),
-            ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
         }
     }
 

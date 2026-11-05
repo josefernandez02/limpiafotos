@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,6 +46,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
@@ -64,10 +68,53 @@ fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowSco
     )
 }
 
+/** Large screen title for top-level screens. */
+@Composable
+fun Header(title: String, subtitle: String? = null, actions: @Composable RowScope.() -> Unit = {}) {
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
+            if (subtitle != null) Muted(subtitle)
+        }
+        actions()
+    }
+}
+
+/** Small rounded label, e.g. "SH 4". */
+@Composable
+fun Pill(text: String, strong: Boolean = false) {
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (strong) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (strong) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
+/** Album thumbnail, or a quiet placeholder when there are no photos yet. */
+@Composable
+fun Cover(uri: Uri?, size: Dp = 56.dp) {
+    val shape = RoundedCornerShape(14.dp)
+    if (uri != null) {
+        Thumb(uri, Modifier.size(size).clip(shape))
+    } else {
+        Box(
+            Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center,
+        ) { Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
 /** Rounded surface block used for every list item. */
 @Composable
 fun Tile(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
-    val shape = RoundedCornerShape(14.dp)
+    val shape = RoundedCornerShape(20.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -105,8 +152,8 @@ fun BigButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, 
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = modifier.fillMaxWidth().height(52.dp),
-        shape = RoundedCornerShape(14.dp),
+        modifier = modifier.fillMaxWidth().height(54.dp),
+        shape = RoundedCornerShape(18.dp),
     ) { Text(text, style = MaterialTheme.typography.titleSmall) }
 }
 

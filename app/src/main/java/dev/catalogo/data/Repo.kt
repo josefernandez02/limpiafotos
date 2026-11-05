@@ -244,26 +244,39 @@ class Repo(context: Context) {
         return failed
     }
 
-    suspend fun setBaseFolder(folder: String): Int {
+    /**
+     * Uses [folder] for albums and moves this phone's albums found in any
+     * other known folder into it. Returns photos that could not be moved.
+     */
+    suspend fun adoptFolder(folder: String): Int {
         val s = state
-        if (folder == s.baseFolder || folder !in AppState.BASE_FOLDERS) return 0
+        val (prefix, digits) = s.parent?.let { it.self.prefix to it.digits }
+            ?: s.child?.let { it.self.prefix to it.digits }
+            ?: (null to 0)
         var failed = 0
-        withContext(Dispatchers.IO) {
-            s.parent?.let { p ->
-                for (a in p.articles) {
-                    val album = sku(p.self, a.number, p.digits)
-                    failed += gallery.move(s.baseFolder, album, folder, album)
-                }
-            }
-            s.child?.let { c ->
-                for (number in childAlbums().keys) {
-                    val album = sku(c.self, number, c.digits)
-                    failed += gallery.move(s.baseFolder, album, folder, album)
+        if (prefix != null) {
+            withContext(Dispatchers.IO) {
+                for (other in (AppState.BASE_FOLDERS + s.baseFolder).distinct()) {
+                    if (other == folder) continue
+                    for (album in gallery.counts(other).keys) {
+                        if (Sku.parse(album, prefix, digits) != null) failed += gallery.move(other, album, folder, album)
+                    }
                 }
             }
         }
-        store.update { it.copy(baseFolder = folder) }
+        if (s.baseFolder != folder) store.update { it.copy(baseFolder = folder) }
         return failed
+    }
+
+    /** Fills the fixed "0 Subir" folder with this phone's album of [number]. */
+    suspend fun stage(number: Int): Int {
+        val s = state
+        val album = s.parent?.let { sku(it.self, number, it.digits) }
+            ?: s.child?.let { sku(it.self, number, it.digits) }
+            ?: throw CatalogException("Este móvil no está configurado")
+        val count = withContext(Dispatchers.IO) { gallery.stage(base, album) }
+        if (count == 0) throw CatalogException("$album no tiene fotos")
+        return count
     }
 
     private suspend fun moveOwnAlbums(p: ParentState, newName: (Int) -> String): Int = withContext(Dispatchers.IO) {

@@ -11,10 +11,56 @@ import java.io.IOException
 
 /** Albums are folders "<base>/<SKU>/" in shared storage; galleries list them as albums. */
 class Gallery(context: Context) {
+    companion object {
+        const val STAGING_BASE = "Pictures"
+        const val STAGING_ALBUM = "0 Subir"
+    }
+
     private val resolver = context.contentResolver
     private val collection: Uri = MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
 
     data class Photo(val uri: Uri, val addedSec: Long)
+
+    data class AlbumInfo(val count: Int, val cover: Uri)
+
+    /** Albums directly under [base] with their photo count and first photo. */
+    fun albums(base: String): Map<String, AlbumInfo> {
+        val result = LinkedHashMap<String, AlbumInfo>()
+        resolver.query(
+            collection,
+            arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.RELATIVE_PATH),
+            "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?",
+            arrayOf("$base/%"),
+            "${MediaStore.Images.Media.DATE_ADDED} ASC",
+        )?.use { c ->
+            val id = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
+            val rel = c.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
+            while (c.moveToNext()) {
+                val album = (c.getString(rel) ?: continue).removePrefix("$base/").trimEnd('/')
+                if (album.isEmpty() || '/' in album) continue
+                val prev = result[album]
+                result[album] = prev?.copy(count = prev.count + 1)
+                    ?: AlbumInfo(1, ContentUris.withAppendedId(collection, c.getLong(id)))
+            }
+        }
+        return result
+    }
+
+    /**
+     * Replaces the contents of the fixed upload folder ("0 Subir") with copies
+     * of one album, newest-first so pickers show them in the album's order.
+     */
+    fun stage(base: String, album: String): Int {
+        val photos = albumPhotos(base, album)
+        if (photos.isEmpty()) return 0
+        delete(albumPhotos(STAGING_BASE, STAGING_ALBUM))
+        val now = System.currentTimeMillis()
+        photos.forEachIndexed { i, uri ->
+            val bytes = resolver.openInputStream(uri)?.use { it.readBytes() } ?: return@forEachIndexed
+            save(STAGING_BASE, STAGING_ALBUM, bytes, randomName(), takenAt = now - i * 1000L)
+        }
+        return photos.size
+    }
 
     private fun path(base: String, album: String) = "$base/$album/"
 
@@ -45,10 +91,10 @@ class Gallery(context: Context) {
 
     /** Writes a finished JPEG into the album; invisible to other apps until complete. */
     fun save(base: String, album: String, source: File, name: String = randomName()): Uri =
-        save(base, album, name) { out -> source.inputStream().use { it.copyTo(out) } }
+        save(base, album, name, null) { out -> source.inputStream().use { it.copyTo(out) } }
 
-    fun save(base: String, album: String, bytes: ByteArray, name: String = randomName()): Uri =
-        save(base, album, name) { out -> out.write(bytes) }
+    fun save(base: String, album: String, bytes: ByteArray, name: String = randomName(), takenAt: Long? = null): Uri =
+        save(base, album, name, takenAt) { out -> out.write(bytes) }
 
     fun contains(base: String, album: String, name: String): Boolean = query(
         "${MediaStore.Images.Media.RELATIVE_PATH} = ? AND ${MediaStore.Images.Media.DISPLAY_NAME} = ?",
@@ -57,8 +103,9 @@ class Gallery(context: Context) {
 
     private fun randomName() = "${Auth.newId().take(12)}.jpg"
 
-    private fun save(base: String, album: String, name: String, writer: (java.io.OutputStream) -> Unit): Uri {
+    private fun save(base: String, album: String, name: String, takenAt: Long?, writer: (java.io.OutputStream) -> Unit): Uri {
         val values = ContentValues().apply {
+            if (takenAt != null) put(MediaStore.Images.Media.DATE_TAKEN, takenAt)
             put(MediaStore.Images.Media.DISPLAY_NAME, name)
             put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
             put(MediaStore.Images.Media.RELATIVE_PATH, path(base, album))

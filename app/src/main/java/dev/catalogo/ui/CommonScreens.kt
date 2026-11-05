@@ -209,15 +209,6 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                     Muted("Se cambia desde el principal")
                 }
             }
-            Section("Carpeta de álbumes")
-            Tile {
-                for (folder in AppState.BASE_FOLDERS) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        RadioButton(selected = state.baseFolder == folder, onClick = { vm.setBaseFolder(folder) })
-                        Text(AppState.folderLabel(folder), style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-            }
             if (c != null) {
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = { unpairing = true }, modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
