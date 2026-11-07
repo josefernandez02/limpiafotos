@@ -68,17 +68,17 @@ class ListingTest {
             """
             👕 Talla: W31 L32
             ✨ Estado: Muy buen estado
-            📦 Envío en 24 horas
+            📦 Envío: En 24 horas
 
-            🛍️ Echa un vistazo a mi perfil, encontrarás más prendas de este estilo.
-            💬 Si tienes cualquier duda, escríbeme sin problema.
+            🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar.
+            💬 ¿Tienes alguna duda? Escríbeme y te respondo lo antes posible.
 
             #vintage #branded #y2k #vintagefashion #ootd #vintedfrance #aesthetic #2000s #90s #stylefinds #retrofashion #SH0054
             """.trimIndent(),
             d0,
         )
         val d1 = ListingWriter.description(jeans, 1, "", "SA0054")
-        assertTrue(d1.startsWith("🏷️ Talla W31 L32\n✅ En muy buen estado, ver fotos"), d1)
+        assertTrue(d1.startsWith("🏷️ Talla W31 L32\n✅ En muy buen estado\n🚚 Lo envío en 24h"), d1)
         assertTrue(d1.endsWith("#SA0054"))
     }
 
@@ -115,6 +115,16 @@ class ListingTest {
             "👕 Talla: W31 L32\n✨ Estado: Muy buen estado\n\n🛍️ Descubre más prendas similares en mi perfil",
             ListingWriter.description(jeans, 0, old, "SH1"),
         )
+    }
+
+    @Test
+    fun `notes follow the condition as a sentence`() {
+        for (note in listOf("Tiene manchas", "tiene manchas.", "  Tiene\n manchas ")) {
+            val l = jeans.copy(notes = note)
+            assertTrue(ListingWriter.description(l, 0, "", "SH1").contains("✨ Estado: Muy buen estado. Tiene manchas (revisar imágenes)\n"), note)
+            assertTrue(ListingWriter.description(l, 1, "", "SA1").contains("✅ En muy buen estado. Tiene manchas (ver fotos)\n"), note)
+        }
+        assertEquals("Buen estado, con ligeros signos de uso", ListingWriter.state(jeans.copy(condition = Condition.GOOD, notes = " . "), 0))
     }
 
     @Test

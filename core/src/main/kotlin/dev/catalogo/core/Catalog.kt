@@ -24,6 +24,13 @@ object Catalog {
         return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost))
     }
 
+    /** Marks whether [deviceId]'s account already has [number] published on Vinted. */
+    fun setUploaded(s: ParentState, number: Int, deviceId: String, uploaded: Boolean): ParentState {
+        val a = article(s, number) ?: return s
+        if (a.released || device(s, deviceId) == null) return s
+        return replace(s, a.copy(uploaded = if (uploaded) a.uploaded + deviceId else a.uploaded - deviceId))
+    }
+
     /**
      * Makes sure no secondary phone writes with the main phone's style (phones
      * paired before styles existed all had style 0).
@@ -98,7 +105,7 @@ object Catalog {
         var next = s.copy(children = s.children.filter { it.id != id })
         for (a in next.articles) {
             next = if (a.released) settle(next, a.copy(pendingRelease = a.pendingRelease - id))
-            else replace(next, a.copy(delivered = a.delivered - id))
+            else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id))
         }
         return next
     }

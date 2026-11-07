@@ -155,9 +155,18 @@ private fun ArticleRow(
                             val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
                             val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
                             else (a.delivered[d.id] ?: 0) + waiting
-                            Pill(if (waiting > 0) "${d.prefix} $n ↑" else "${d.prefix} $n")
+                            when {
+                                d.id in a.uploaded -> Pill("${d.prefix} ✓ Subido", strong = true)
+                                waiting > 0 -> Pill("${d.prefix} $n ↑")
+                                else -> Pill("${d.prefix} $n")
+                            }
                         }
                     }
+                }
+            }
+            if (!a.released) {
+                IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
+                    Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -264,6 +273,24 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             }
             val device = devices.firstOrNull { it.id == shown } ?: p.self
             ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
+            val uploaded = device.id in article.uploaded
+            if (uploaded) {
+                FilledTonalButton(
+                    onClick = { vm.setUploaded(number, device.id, false) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.size(8.dp))
+                    Text("Subido en ${device.prefix} · pulsa para desmarcar")
+                }
+            } else {
+                OutlinedButton(
+                    onClick = { vm.setUploaded(number, device.id, true) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) { Text("Marcar como subido en ${device.prefix}") }
+            }
             Spacer(Modifier.height(8.dp))
         }
     }

@@ -34,6 +34,8 @@ data class Article(
     val lotId: String? = null,
     /** Manual cost in cents, used when the article has no lot. */
     val cost: Long? = null,
+    /** Devices whose Vinted account already has this article published. */
+    val uploaded: Set<String> = emptySet(),
 )
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */

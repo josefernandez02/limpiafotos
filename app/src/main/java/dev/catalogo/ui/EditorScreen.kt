@@ -61,11 +61,12 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var size by remember { mutableStateOf(start.size) }
     var condition by remember { mutableStateOf(start.condition) }
     var keywords by remember { mutableStateOf(start.keywords) }
+    var notes by remember { mutableStateOf(start.notes) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
 
-    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords)
+    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords, notes.trim())
     val group = Garments.type(type)?.group
 
     Scaffold(
@@ -97,6 +98,15 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (c in Condition.entries) Choice(c.label, condition == c) { condition = c }
             }
+            OutlinedTextField(
+                value = notes,
+                onValueChange = { notes = it.replace('\n', ' ').take(120) },
+                label = { Text("Notas (opcional)") },
+                placeholder = { Text("Tiene manchas") },
+                supportingText = { Text("Se añade detrás del estado en la descripción.") },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             Section("Palabras clave")
             Muted("Mantén pulsada una palabra para ver qué significa.", Modifier.padding(start = 4.dp))

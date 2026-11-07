@@ -27,6 +27,20 @@ class CatalogTest {
     }
 
     @Test
+    fun `uploaded mark is kept per account`() {
+        var (s, n) = state(poco).create()
+        s = Catalog.setUploaded(s, n, "c1", true)
+        s = Catalog.setUploaded(s, n, "nobody", true)
+        assertEquals(setOf("c1"), Catalog.article(s, n)!!.uploaded)
+        s = Catalog.setUploaded(s, n, "p", true)
+        s = Catalog.setUploaded(s, n, "c1", false)
+        assertEquals(setOf("p"), Catalog.article(s, n)!!.uploaded)
+        s = Catalog.setUploaded(s, n, "c1", true)
+        s = Catalog.removeChild(s, "c1")
+        assertEquals(setOf("p"), Catalog.article(s, n)!!.uploaded)
+    }
+
+    @Test
     fun `numbers are allocated lowest first`() {
         var s = state(poco)
         val numbers = (1..3).map { s.create().also { r -> s = r.first }.second }

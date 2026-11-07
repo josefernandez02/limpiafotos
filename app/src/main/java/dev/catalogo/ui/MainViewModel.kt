@@ -212,6 +212,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) = run {
+        repo.setUploaded(number, deviceId, uploaded)
+    }
+
     fun saveLot(id: String?, name: String, priceText: String, quantityText: String, done: () -> Unit) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio no válido")
         val quantity = quantityText.trim().toIntOrNull() ?: throw CatalogException("Número de prendas no válido")

@@ -63,6 +63,8 @@ data class Listing(
     val size: String = "",
     val condition: Condition = Condition.VERY_GOOD,
     val keywords: List<String> = emptyList(),
+    /** Free text about defects ("Tiene manchas"), added after the condition. */
+    val notes: String = "",
 )
 
 @Serializable
@@ -237,20 +239,20 @@ object ListingWriter {
         """
         👕 Talla: {talla}
         ✨ Estado: {estado}
-        📦 Envío en 24 horas
+        📦 Envío: En 24 horas
 
-        🛍️ Echa un vistazo a mi perfil, encontrarás más prendas de este estilo.
-        💬 Si tienes cualquier duda, escríbeme sin problema.
+        🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar.
+        💬 ¿Tienes alguna duda? Escríbeme y te respondo lo antes posible.
 
         #vintage #branded #y2k #vintagefashion #ootd #vintedfrance #aesthetic #2000s #90s #stylefinds #retrofashion #{sku}
         """,
         """
         🏷️ Talla {talla}
         ✅ {estado}
-        🚚 Envío rápido: 24h
+        🚚 Lo envío en 24h
 
-        👀 Pásate por mi perfil, tengo más prendas como esta.
-        🤝 ¿Alguna pregunta? Mándame un mensaje y te respondo.
+        👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!
+        🤝 Si te surge cualquier pregunta, mándame un mensaje sin compromiso.
 
         #vintagestyle #thrifted #streetwear #y2kfashion #retro #vinted #90sfashion #outfit #secondhand #fashionfinds #vintageclothing #{sku}
         """,
@@ -302,7 +304,7 @@ object ListingWriter {
         val s = style.mod(Garments.STYLES)
         val values = mapOf(
             "{talla}" to listing.size.trim(),
-            "{estado}" to condition(listing.condition, s),
+            "{estado}" to state(listing, s),
             "{sku}" to sku,
         )
         val body = (template.ifBlank { defaultTemplate(s) }).lines().mapNotNull { line ->
@@ -325,21 +327,34 @@ object ListingWriter {
     fun text(listing: Listing, style: Int, template: String, sku: String) =
         ListingText(title(listing, style), description(listing, style, template, sku))
 
+    /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas (revisar imágenes)". */
+    fun state(listing: Listing, style: Int): String {
+        val s = style.mod(Garments.STYLES)
+        val base = condition(listing.condition, s)
+        val note = cleanNote(listing.notes)
+        if (note.isEmpty()) return base
+        return "$base. $note " + if (s == 0) "(revisar imágenes)" else "(ver fotos)"
+    }
+
     fun condition(c: Condition, style: Int): String = if (style.mod(Garments.STYLES) == 0) {
         when (c) {
             Condition.NEW_TAGS -> "Nuevo con etiquetas"
             Condition.NEW -> "Nuevo, sin estrenar"
             Condition.VERY_GOOD -> "Muy buen estado"
-            Condition.GOOD -> "Buen estado"
-            Condition.FAIR -> "Con algún signo de uso (ver fotos)"
+            Condition.GOOD -> "Buen estado, con ligeros signos de uso"
+            Condition.FAIR -> "Usado, con signos de uso visibles"
         }
     } else {
         when (c) {
-            Condition.NEW_TAGS -> "A estrenar, con su etiqueta"
-            Condition.NEW -> "Sin usar, sin etiqueta"
-            Condition.VERY_GOOD -> "En muy buen estado, ver fotos"
-            Condition.GOOD -> "En buen estado, ver fotos"
-            Condition.FAIR -> "Tiene señales de uso, ver fotos"
+            Condition.NEW_TAGS -> "A estrenar, conserva su etiqueta"
+            Condition.NEW -> "A estrenar, sin etiqueta"
+            Condition.VERY_GOOD -> "En muy buen estado"
+            Condition.GOOD -> "En buen estado, con un uso ligero"
+            Condition.FAIR -> "Usado, con señales de uso visibles"
         }
     }
+
+    /** One line, no final full stop, first letter in capitals. */
+    private fun cleanNote(raw: String): String =
+        raw.replace(Regex("\\s+"), " ").trim().trimEnd('.', ' ').replaceFirstChar(Char::uppercase)
 }

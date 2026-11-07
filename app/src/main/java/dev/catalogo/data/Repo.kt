@@ -68,6 +68,10 @@ class Repo(context: Context) {
         store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost)) }
     }
 
+    suspend fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) {
+        store.update { s -> s.copy(parent = Catalog.setUploaded(s.parent!!, number, deviceId, uploaded)) }
+    }
+
     // ---------- lots ----------
 
     suspend fun saveLot(id: String?, name: String, price: Long, quantity: Int) {
