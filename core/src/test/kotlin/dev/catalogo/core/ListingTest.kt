@@ -11,7 +11,6 @@ class ListingTest {
     private val jeans = Listing(
         type = "jeans", brand = "Levi's", model = "501", size = "W31 L32",
         keywords = listOf("vintage", "90s", "straight", "faded"),
-        measures = mapOf("length" to "98", "waist" to "36 cm", "rise" to "25"),
     )
     private val hoodie = Listing(type = "hoodie", brand = "Nike", keywords = listOf("vintage", "y2k", "streetwear", "oversized"), size = "M")
     private val knit = Listing(type = "sweater", brand = "Ralph Lauren", keywords = listOf("oldmoney", "preppy", "cableknit"), size = "L")
@@ -68,19 +67,18 @@ class ListingTest {
         assertEquals(
             """
             👕 Talla: W31 L32
-            📏 Medidas: largo total 98 cm · cintura 36 cm · tiro 25 cm
-            ✨ Estado: Muy buen estado.
-            📦 Envío en 24h
+            ✨ Estado: Muy buen estado
+            📦 Envío en 24 horas
 
-            📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla.
-            🛍️ Descubre más prendas similares en mi perfil
+            🛍️ Echa un vistazo a mi perfil, encontrarás más prendas de este estilo.
+            💬 Si tienes cualquier duda, escríbeme sin problema.
 
             #vintage #branded #y2k #vintagefashion #ootd #vintedfrance #aesthetic #2000s #90s #stylefinds #retrofashion #SH0054
             """.trimIndent(),
             d0,
         )
         val d1 = ListingWriter.description(jeans, 1, "", "SA0054")
-        assertTrue(d1.contains("📐 Largo total 98 · Cintura 36 · Tiro 25 (cm)"), d1)
+        assertTrue(d1.startsWith("🏷️ Talla W31 L32\n✅ En muy buen estado, ver fotos"), d1)
         assertTrue(d1.endsWith("#SA0054"))
     }
 
@@ -95,19 +93,28 @@ class ListingTest {
     }
 
     @Test
-    fun `missing values remove their line, measures fall back to photos`() {
+    fun `missing values remove their line and measures are never mentioned`() {
         val d = ListingWriter.description(Listing(type = "tshirt"), 0, "", "SH0002")
         assertFalse(d.contains("Talla"), d)
-        assertTrue(d.contains("📏 Medidas en las fotos"), d)
-        assertTrue(ListingWriter.description(Listing(), 1, "", "SA0002").contains("📐 Medidas: ver fotos"))
+        for (s in 0 until Garments.STYLES) {
+            assertFalse(ListingWriter.description(jeans, s, "", "SH0003").contains("edidas"))
+        }
     }
 
     @Test
-    fun `measures follow the garment group`() {
-        val top = Listing(type = "sweater", measures = mapOf("length" to "74", "chest" to "58", "shoulders" to "51", "sleeve" to "52", "waist" to "40"))
-        val d = ListingWriter.description(top, 0, "", "SH0003")
-        assertTrue(d.contains("Medidas: largo 74 cm · pecho 58 cm · hombros 51 cm · manga 52 cm"), d)
-        assertFalse(d.contains("cintura"), "measures from another group are ignored")
+    fun `templates saved with measures lose those lines`() {
+        val old = """
+            👕 Talla: {talla}
+            📏 {medidas}
+            ✨ Estado: {estado}
+
+            🛍️ Descubre más prendas similares en mi perfil
+            📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla.
+        """.trimIndent()
+        assertEquals(
+            "👕 Talla: W31 L32\n✨ Estado: Muy buen estado\n\n🛍️ Descubre más prendas similares en mi perfil",
+            ListingWriter.description(jeans, 0, old, "SH1"),
+        )
     }
 
     @Test

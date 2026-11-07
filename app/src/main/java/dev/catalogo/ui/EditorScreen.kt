@@ -23,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Condition
@@ -62,12 +61,11 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var size by remember { mutableStateOf(start.size) }
     var condition by remember { mutableStateOf(start.condition) }
     var keywords by remember { mutableStateOf(start.keywords) }
-    var measures by remember { mutableStateOf(start.measures) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
 
-    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords, measures.filterValues { it.isNotBlank() })
+    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords)
     val group = Garments.type(type)?.group
 
     Scaffold(
@@ -84,7 +82,6 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
         ) {
             Section("Tipo de prenda")
             TypePicker(type) { picked ->
-                if (Garments.type(picked)?.group != group) measures = emptyMap()
                 type = picked
                 keywords = keywords.filter { Garments.keyword(it)?.appliesTo(Garments.type(picked)?.group) == true }
             }
@@ -112,26 +109,6 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                     for (k in list) {
                         val on = k.id in keywords
                         Tag(k.label, on, onClick = { keywords = if (on) keywords - k.id else keywords + k.id }, onLongClick = { help = k })
-                    }
-                }
-            }
-
-            val fields = Garments.measures(group)
-            if (fields.isNotEmpty()) {
-                Section("Medidas (cm, opcional)")
-                for (row in fields.chunked(2)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (m in row) {
-                            OutlinedTextField(
-                                value = measures[m.id] ?: "",
-                                onValueChange = { v -> measures = measures + (m.id to v.filter { it.isDigit() || it == ',' || it == '.' }.take(6)) },
-                                label = { Text(m.label.replaceFirstChar(Char::uppercase)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                modifier = Modifier.weight(1f),
-                            )
-                        }
-                        if (row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
             }

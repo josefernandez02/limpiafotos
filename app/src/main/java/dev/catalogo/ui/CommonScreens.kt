@@ -354,7 +354,6 @@ fun DeviceDialog(
 private val SAMPLE = Listing(
     type = "jeans", brand = "Levi's", model = "501", size = "W31 L32",
     keywords = listOf("vintage", "90s", "straight", "faded"),
-    measures = mapOf("length" to "98", "waist" to "36", "rise" to "25"),
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -419,7 +418,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
             )
             Muted("Se rellenan solos:")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (token in listOf("{talla}", "{medidas}", "{estado}", "{sku}")) Choice(token, false) { insert(token) }
+                for (token in listOf("{talla}", "{estado}", "{sku}")) Choice(token, false) { insert(token) }
             }
 
             Section("Vista previa")

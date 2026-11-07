@@ -2,7 +2,7 @@ package dev.catalogo.core
 
 import kotlinx.serialization.Serializable
 
-/** Measurement set and wording family of a garment. */
+/** Wording family of a garment. */
 enum class Group(val label: String) {
     PANTS("Pantalones"),
     TOP("Arriba"),
@@ -45,8 +45,6 @@ data class Keyword(
     fun appliesTo(group: Group?): Boolean = groups == null || group == null || group in groups
 }
 
-data class Measure(val id: String, val label: String)
-
 @Serializable
 enum class Condition(val label: String) {
     NEW_TAGS("Nuevo con etiquetas"),
@@ -65,7 +63,6 @@ data class Listing(
     val size: String = "",
     val condition: Condition = Condition.VERY_GOOD,
     val keywords: List<String> = emptyList(),
-    val measures: Map<String, String> = emptyMap(),
 )
 
 @Serializable
@@ -225,23 +222,6 @@ object Garments {
         .replace(Regex("\\s+"), " ")
         .trim()
 
-    fun measures(group: Group?): List<Measure> = when (group) {
-        Group.PANTS -> listOf(
-            Measure("length", "largo total"), Measure("waist", "cintura"), Measure("rise", "tiro"),
-            Measure("thigh", "muslo"), Measure("ankle", "tobillo"),
-        )
-        Group.TOP, Group.OUTER -> listOf(
-            Measure("length", "largo"), Measure("chest", "pecho"), Measure("shoulders", "hombros"), Measure("sleeve", "manga"),
-        )
-        Group.DRESS -> listOf(Measure("length", "largo"), Measure("chest", "pecho"), Measure("waist", "cintura"))
-        Group.SET -> listOf(
-            Measure("chest", "pecho"), Measure("jacketLength", "largo de la chaqueta"),
-            Measure("waist", "cintura"), Measure("pantsLength", "largo del pantalón"),
-        )
-        Group.SHOES -> listOf(Measure("insole", "largo de plantilla"))
-        Group.ACCESSORY -> listOf(Measure("height", "alto"), Measure("width", "ancho"), Measure("depth", "fondo"))
-        null -> emptyList()
-    }
 }
 
 /**
@@ -256,27 +236,32 @@ object ListingWriter {
     private val TEMPLATES = listOf(
         """
         👕 Talla: {talla}
-        📏 {medidas}
         ✨ Estado: {estado}
-        📦 Envío en 24h
+        📦 Envío en 24 horas
 
-        📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla.
-        🛍️ Descubre más prendas similares en mi perfil
+        🛍️ Echa un vistazo a mi perfil, encontrarás más prendas de este estilo.
+        💬 Si tienes cualquier duda, escríbeme sin problema.
 
         #vintage #branded #y2k #vintagefashion #ootd #vintedfrance #aesthetic #2000s #90s #stylefinds #retrofashion #{sku}
         """,
         """
         🏷️ Talla {talla}
-        📐 {medidas}
         ✅ {estado}
-        🚚 Envío: 24h
+        🚚 Envío rápido: 24h
 
-        ℹ️ Nota: medidas aproximadas en plano, úsalas como guía junto con la talla.
-        👀 Echa un vistazo a mi perfil, tengo más prendas de este estilo
+        👀 Pásate por mi perfil, tengo más prendas como esta.
+        🤝 ¿Alguna pregunta? Mándame un mensaje y te respondo.
 
         #vintagestyle #thrifted #streetwear #y2kfashion #retro #vinted #90sfashion #outfit #secondhand #fashionfinds #vintageclothing #{sku}
         """,
     ).map { it.trimIndent() }
+
+    /** Lines of templates saved before measures were removed; they are dropped. */
+    private val LEGACY_LINES = setOf(
+        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla.",
+        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla",
+        "ℹ️ Nota: medidas aproximadas en plano, úsalas como guía junto con la talla.",
+    )
 
     fun defaultTemplate(style: Int): String = TEMPLATES[style.mod(TEMPLATES.size)]
 
@@ -315,22 +300,13 @@ object ListingWriter {
 
     fun description(listing: Listing, style: Int, template: String, sku: String): String {
         val s = style.mod(Garments.STYLES)
-        val group = Garments.type(listing.type)?.group
-        val measures = Garments.measures(group).mapNotNull { m ->
-            listing.measures[m.id]?.let(::cleanMeasure)?.takeIf { it.isNotEmpty() }?.let { m to it }
-        }
-        val medidas = when {
-            measures.isEmpty() -> if (s == 0) "Medidas en las fotos" else "Medidas: ver fotos"
-            s == 0 -> "Medidas: " + measures.joinToString(" · ") { (m, v) -> "${m.label} $v cm" }
-            else -> measures.joinToString(" · ") { (m, v) -> "${m.label.replaceFirstChar(Char::uppercase)} $v" } + " (cm)"
-        }
         val values = mapOf(
             "{talla}" to listing.size.trim(),
-            "{medidas}" to medidas,
             "{estado}" to condition(listing.condition, s),
             "{sku}" to sku,
         )
         val body = (template.ifBlank { defaultTemplate(s) }).lines().mapNotNull { line ->
+            if ("{medidas}" in line || line.trim() in LEGACY_LINES) return@mapNotNull null
             var out = line
             for ((key, value) in values) {
                 if (key in out) {
@@ -351,11 +327,11 @@ object ListingWriter {
 
     fun condition(c: Condition, style: Int): String = if (style.mod(Garments.STYLES) == 0) {
         when (c) {
-            Condition.NEW_TAGS -> "Nuevo con etiquetas."
-            Condition.NEW -> "Nuevo, sin estrenar."
-            Condition.VERY_GOOD -> "Muy buen estado."
-            Condition.GOOD -> "Buen estado."
-            Condition.FAIR -> "Con algún signo de uso, ver fotos."
+            Condition.NEW_TAGS -> "Nuevo con etiquetas"
+            Condition.NEW -> "Nuevo, sin estrenar"
+            Condition.VERY_GOOD -> "Muy buen estado"
+            Condition.GOOD -> "Buen estado"
+            Condition.FAIR -> "Con algún signo de uso (ver fotos)"
         }
     } else {
         when (c) {
@@ -366,7 +342,4 @@ object ListingWriter {
             Condition.FAIR -> "Tiene señales de uso, ver fotos"
         }
     }
-
-    private fun cleanMeasure(raw: String): String =
-        raw.trim().removeSuffix("cm").removeSuffix("CM").trim().replace('.', ',')
 }
