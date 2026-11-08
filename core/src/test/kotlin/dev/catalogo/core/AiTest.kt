@@ -93,6 +93,23 @@ class AiTest {
     }
 
     @Test
+    fun `ai answer is saved into the article without touching what the user typed`() {
+        val samsung = Device("p", "Samsung", "SH")
+        var (s, n) = Catalog.create(ParentState(self = samsung), 0)
+        s = Catalog.updateArticle(s, n, levis.copy(notes = "Tiene manchas"), null, null)
+        val answer = AiSuggestion("jeans", listOf("straight"), Gender.MEN, "Hombre › Ropa › Vaqueros › Vaqueros rectos",
+            listOf("Azul"), "W30", mapOf("p" to "Levi's 513 Jeans"), emptyList())
+        s = Catalog.applyAi(s, n, answer, "gemini-x-flash")
+        val a = Catalog.article(s, n)!!
+        assertEquals("jeans", a.listing!!.type)
+        assertEquals(listOf("90s", "straight"), a.listing!!.keywords)
+        assertEquals("W32 L34", a.listing!!.size)
+        assertEquals("Tiene manchas", a.listing!!.notes)
+        assertEquals("Levi's 513 Jeans", Catalog.listingText(s, n, samsung)!!.title)
+        assertEquals("gemini-x-flash", a.ai!!.model)
+    }
+
+    @Test
     fun `letter sizes follow gender and show in the description`() {
         assertEquals("M", Vinted.letterSize("W32 L34", Gender.MEN))
         assertEquals("L", Vinted.letterSize("w32", Gender.WOMEN))

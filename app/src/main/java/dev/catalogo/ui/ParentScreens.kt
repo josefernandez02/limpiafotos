@@ -46,10 +46,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -263,15 +263,8 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 }
             }
 
-            article.ai?.let { r ->
-                Section("Para rellenar en Vinted")
-                Tile {
-                    VintedInfo(article.listing?.gender, r)
-                    if (Catalog.freshAi(p, number) == null) {
-                        Muted("Los títulos de IA no coinciden con los datos actuales. Edita y vuelve a generar.", Modifier.padding(top = 6.dp))
-                    }
-                }
-            }
+            Section("IA")
+            AiTile(vm, p, article)
 
             Section("Anuncio")
             val devices = Catalog.devices(p)

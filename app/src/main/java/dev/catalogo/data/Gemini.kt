@@ -111,7 +111,7 @@ class Gemini(private val resolver: ContentResolver) {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 15_000
-            c.readTimeout = 90_000
+            c.readTimeout = 60_000
             c.setRequestProperty("x-goog-api-key", key.trim())
             if (body != null) {
                 c.requestMethod = "POST"

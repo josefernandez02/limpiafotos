@@ -10,7 +10,6 @@ import dev.catalogo.CatalogoApp
 import dev.catalogo.core.Ai
 import dev.catalogo.core.AiException
 import dev.catalogo.core.AiResult
-import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Sku
@@ -24,7 +23,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
@@ -226,22 +229,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }.distinct()
     }
 
-    fun suggestWithAi(number: Int, listing: Listing, photos: List<Uri>, done: (AiSuggestion?, String) -> Unit) = viewModelScope.launch {
-        try {
-            val p = repo.state.parent ?: throw CatalogException("Solo desde el móvil principal")
-            if (photos.isEmpty() || photos.size > Ai.PHOTOS) throw CatalogException("Elige de 1 a ${Ai.PHOTOS} fotos")
-            val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
-            done(answer.suggestion, answer.model)
-        } catch (e: AiException) {
-            _message.value = e.message
-            done(null, "")
-        } catch (e: CatalogException) {
-            _message.value = e.message
-            done(null, "")
-        } catch (e: Exception) {
-            _message.value = "Error con la IA: ${e.message ?: e.javaClass.simpleName}"
-            done(null, "")
+    /** AI runs per article; they live here so leaving the screen does not lose them. */
+    sealed interface AiRun {
+        data class Running(val since: Long) : AiRun
+        data class Failed(val message: String) : AiRun
+    }
+
+    private val _ai = MutableStateFlow<Map<Int, AiRun>>(emptyMap())
+    val ai: StateFlow<Map<Int, AiRun>> = _ai.asStateFlow()
+    private val aiJobs = HashMap<Int, Job>()
+
+    /** One Gemini call with [photos]; the answer is saved straight into the article. */
+    fun startAi(number: Int, photos: List<Uri>) {
+        if (_ai.value[number] is AiRun.Running) return
+        _ai.update { it + (number to AiRun.Running(System.currentTimeMillis())) }
+        aiJobs[number] = viewModelScope.launch {
+            val failure = try {
+                val p = repo.state.parent ?: throw CatalogException("Solo desde el móvil principal")
+                if (photos.isEmpty() || photos.size > Ai.PHOTOS) throw CatalogException("Elige de 1 a ${Ai.PHOTOS} fotos")
+                val listing = Catalog.article(p, number)?.listing ?: Listing()
+                val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
+                ensureActive()
+                repo.applyAi(number, answer.suggestion, answer.model)
+                _message.value = "Anuncio preparado"
+                null
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: AiException) {
+                e.message
+            } catch (e: CatalogException) {
+                e.message
+            } catch (e: Exception) {
+                "Error con la IA: ${e.message ?: e.javaClass.simpleName}"
+            }
+            _ai.update { if (failure == null) it - number else it + (number to AiRun.Failed(failure)) }
+            aiJobs.remove(number)
         }
+    }
+
+    fun cancelAi(number: Int) {
+        aiJobs.remove(number)?.cancel()
+        _ai.update { it - number }
     }
 
     fun setGeminiKey(key: String) = run {

@@ -24,6 +24,14 @@ object Catalog {
         return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost, ai = ai))
     }
 
+    /** Applies an AI answer to [number]: listing data the user left empty and the titles. */
+    fun applyAi(s: ParentState, number: Int, suggestion: AiSuggestion, model: String): ParentState {
+        val a = article(s, number) ?: return s
+        if (a.released) return s
+        val applied = suggestion.applyTo(a.listing ?: Listing())
+        return replace(s, a.copy(listing = applied, ai = suggestion.result(applied, model)))
+    }
+
     /** AI data of [number] while it still matches the listing (null when stale or absent). */
     fun freshAi(s: ParentState, number: Int): AiResult? {
         val a = article(s, number) ?: return null

@@ -3,6 +3,7 @@ package dev.catalogo.data
 import android.content.Context
 import android.net.Uri
 import dev.catalogo.core.AiResult
+import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
@@ -68,6 +69,10 @@ class Repo(context: Context) {
 
     suspend fun updateArticle(number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?) {
         store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost, ai)) }
+    }
+
+    suspend fun applyAi(number: Int, suggestion: AiSuggestion, model: String) {
+        store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model)) }
     }
 
     suspend fun setGeminiKey(key: String) {
