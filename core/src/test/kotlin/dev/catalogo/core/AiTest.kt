@@ -109,8 +109,8 @@ class AiTest {
     fun `categories are unique and split by gender`() {
         assertEquals(Vinted.categories.size, Vinted.categories.toSet().size)
         assertTrue(Vinted.categories.all { it.startsWith("Hombre › ") || it.startsWith("Mujer › ") })
-        assertTrue("Mujer › Ropa › Vestidos › Vestidos midi" in Vinted.categories)
-        assertFalse("Hombre › Ropa › Vestidos › Vestidos midi" in Vinted.categories)
+        assertTrue("Mujer › Ropa › Vestidos › Midi" in Vinted.categories)
+        assertFalse("Hombre › Ropa › Vestidos › Midi" in Vinted.categories)
     }
 
     @Test

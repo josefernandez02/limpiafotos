@@ -7,6 +7,7 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.catalogo.CatalogoApp
+import dev.catalogo.core.Ai
 import dev.catalogo.core.AiException
 import dev.catalogo.core.AiResult
 import dev.catalogo.core.AiSuggestion
@@ -217,16 +218,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /**
-     * One Gemini call with the article's photos (main phone's album first,
-     * then photos waiting for other phones). [done] gets the suggestion or null.
-     */
-    fun suggestWithAi(number: Int, listing: Listing, done: (AiSuggestion?, String) -> Unit) = viewModelScope.launch {
+    /** Photos the AI can look at: main phone's album first, then photos waiting for other phones. */
+    suspend fun aiPhotos(number: Int): List<Uri> {
+        val p = repo.state.parent ?: return emptyList()
+        return Catalog.devices(p).flatMap { d ->
+            if (d.id == p.self.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else outboxPhotos(d.id, number)
+        }.distinct()
+    }
+
+    fun suggestWithAi(number: Int, listing: Listing, photos: List<Uri>, done: (AiSuggestion?, String) -> Unit) = viewModelScope.launch {
         try {
             val p = repo.state.parent ?: throw CatalogException("Solo desde el móvil principal")
-            val photos = Catalog.devices(p).flatMap { d ->
-                if (d.id == p.self.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else outboxPhotos(d.id, number)
-            }
+            if (photos.isEmpty() || photos.size > Ai.PHOTOS) throw CatalogException("Elige de 1 a ${Ai.PHOTOS} fotos")
             val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
             done(answer.suggestion, answer.model)
         } catch (e: AiException) {

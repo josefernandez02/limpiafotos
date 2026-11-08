@@ -25,6 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import dev.catalogo.core.Ai
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.draw.alpha
 import dev.catalogo.core.AiResult
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Gender
@@ -75,6 +82,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var gender by remember { mutableStateOf(start.gender) }
     var ai by remember { mutableStateOf(article?.ai) }
     var generating by remember { mutableStateOf(false) }
+    var picking by remember { mutableStateOf(false) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
@@ -154,20 +162,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                     Modifier.padding(start = 4.dp),
                 )
                 FilledTonalButton(
-                    onClick = {
-                        generating = true
-                        vm.suggestWithAi(number, listing) { s, model ->
-                            generating = false
-                            if (s != null) {
-                                val applied = s.applyTo(listing)
-                                type = applied.type
-                                keywords = applied.keywords
-                                gender = applied.gender
-                                size = applied.size
-                                ai = s.result(applied, model)
-                            }
-                        }
-                    },
+                    onClick = { picking = true },
                     enabled = !generating,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     shape = RoundedCornerShape(16.dp),
@@ -178,6 +173,23 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                         Text("Mirando las fotos…")
                     } else {
                         Text(if (ai == null) "Rellenar con IA" else "Volver a generar con IA")
+                    }
+                }
+                if (picking) {
+                    PhotoPicker(vm, number, onDismiss = { picking = false }) { photos ->
+                        picking = false
+                        generating = true
+                        vm.suggestWithAi(number, listing, photos) { s, model ->
+                            generating = false
+                            if (s != null) {
+                                val applied = s.applyTo(listing)
+                                type = applied.type
+                                keywords = applied.keywords
+                                gender = applied.gender
+                                size = applied.size
+                                ai = s.result(applied, model)
+                            }
+                        }
                     }
                 }
                 ai?.let { r ->
@@ -356,4 +368,64 @@ fun VintedInfo(gender: Gender?, ai: AiResult) {
             style = MaterialTheme.typography.bodyMedium,
         )
     }
+}
+
+/** Choose the 1 to 3 photos sent to the AI; the first ones come selected. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PhotoPicker(vm: MainViewModel, number: Int, onDismiss: () -> Unit, onSend: (List<android.net.Uri>) -> Unit) {
+    val photos by produceState<List<android.net.Uri>?>(null, number) { value = vm.aiPhotos(number) }
+    var chosen by remember { mutableStateOf<List<android.net.Uri>?>(null) }
+    LaunchedEffect(photos) { if (chosen == null && photos != null) chosen = photos!!.take(Ai.PHOTOS) }
+    val picked = chosen.orEmpty()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Fotos para la IA") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                when {
+                    photos == null -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
+                    photos!!.isEmpty() -> Text("Este artículo no tiene fotos. Hazlas primero.")
+                    else -> {
+                        Muted("Elige de 1 a ${Ai.PHOTOS}. Lo ideal: delante, detrás y la etiqueta.")
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for (uri in photos!!) {
+                                val index = picked.indexOf(uri)
+                                val shape = RoundedCornerShape(12.dp)
+                                Box(
+                                    Modifier.size(84.dp).clip(shape)
+                                        .border(if (index >= 0) 3.dp else 0.dp, MaterialTheme.colorScheme.primary, shape)
+                                        .clickable {
+                                            chosen = when {
+                                                index >= 0 -> picked - uri
+                                                picked.size < Ai.PHOTOS -> picked + uri
+                                                else -> picked
+                                            }
+                                        },
+                                ) {
+                                    Thumb(uri, Modifier.fillMaxSize().alpha(if (index >= 0) 1f else 0.6f))
+                                    if (index >= 0) {
+                                        Text(
+                                            "${index + 1}",
+                                            style = MaterialTheme.typography.labelLarge,
+                                            color = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
+                                                .clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary)
+                                                .padding(horizontal = 7.dp, vertical = 1.dp),
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSend(picked) }, enabled = picked.size in 1..Ai.PHOTOS) { Text("Enviar (${picked.size})") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
 }
