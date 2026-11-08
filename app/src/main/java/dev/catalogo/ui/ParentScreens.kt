@@ -63,7 +63,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Ledger
-import dev.catalogo.core.ListingWriter
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
@@ -128,7 +127,7 @@ private fun ArticleRow(
     outbox: Map<String, Map<Int, Int>>,
 ) {
     val own = Sku.format(p.self.prefix, a.number, p.digits)
-    val title = a.listing?.let { ListingWriter.title(it, p.self.style) }
+    val title = Catalog.listingText(p, a.number, p.self)?.title
     Tile(
         modifier = if (a.released) Modifier.alpha(0.55f) else Modifier,
         onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) }),
@@ -260,6 +259,16 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                                 shape = RoundedCornerShape(14.dp),
                             ) { Text("Subir") }
                         }
+                    }
+                }
+            }
+
+            article.ai?.let { r ->
+                Section("Para rellenar en Vinted")
+                Tile {
+                    VintedInfo(article.listing?.gender, r)
+                    if (Catalog.freshAi(p, number) == null) {
+                        Muted("Los títulos de IA no coinciden con los datos actuales. Edita y vuelve a generar.", Modifier.padding(top = 6.dp))
                     }
                 }
             }

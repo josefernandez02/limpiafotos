@@ -2,6 +2,7 @@ package dev.catalogo.data
 
 import android.content.Context
 import android.net.Uri
+import dev.catalogo.core.AiResult
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
@@ -25,6 +26,7 @@ class Repo(context: Context) {
     val store = Store(context.filesDir)
     val gallery = Gallery(context)
     val outbox = Outbox(context.filesDir)
+    val gemini = Gemini(context.contentResolver)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
@@ -54,18 +56,22 @@ class Repo(context: Context) {
 
     // ---------- parent: articles and photo sessions ----------
 
-    suspend fun newArticle(listing: Listing?, lotId: String?, cost: Long?): Int {
+    suspend fun newArticle(listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?): Int {
         var number = -1
         store.update { s ->
             val (created, n) = Catalog.create(s.parent!!, System.currentTimeMillis())
             number = n
-            s.copy(parent = Catalog.updateArticle(created, n, listing, lotId, cost))
+            s.copy(parent = Catalog.updateArticle(created, n, listing, lotId, cost, ai))
         }
         return number
     }
 
-    suspend fun updateArticle(number: Int, listing: Listing?, lotId: String?, cost: Long?) {
-        store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost)) }
+    suspend fun updateArticle(number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?) {
+        store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost, ai)) }
+    }
+
+    suspend fun setGeminiKey(key: String) {
+        store.update { it.copy(geminiKey = key.trim()) }
     }
 
     suspend fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) {

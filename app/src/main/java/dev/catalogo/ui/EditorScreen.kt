@@ -24,7 +24,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
+import dev.catalogo.core.Ai
+import dev.catalogo.core.AiResult
 import dev.catalogo.core.Catalog
+import dev.catalogo.core.Gender
+import dev.catalogo.core.Vinted
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.runtime.key
+import androidx.compose.ui.Alignment
 import dev.catalogo.core.Condition
 import dev.catalogo.core.Garments
 import dev.catalogo.core.Group
@@ -62,18 +72,22 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var condition by remember { mutableStateOf(start.condition) }
     var keywords by remember { mutableStateOf(start.keywords) }
     var notes by remember { mutableStateOf(start.notes) }
+    var gender by remember { mutableStateOf(start.gender) }
+    var ai by remember { mutableStateOf(article?.ai) }
+    var generating by remember { mutableStateOf(false) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
 
-    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords, notes.trim())
+    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords, notes.trim(), gender)
+    val freshAi = ai?.takeIf { it.basis == Ai.basis(listing) }
     val group = Garments.type(type)?.group
 
     Scaffold(
         topBar = { Bar(if (number == null) "Nuevo artículo" else "Editar ${Sku.number(number, p.digits)}", onBack = { vm.back() }) },
         bottomBar = {
             BottomActions {
-                BigButton("Guardar", onClick = { vm.saveArticle(number, listing, lotId, cost) }, enabled = type.isNotEmpty())
+                BigButton("Guardar", onClick = { vm.saveArticle(number, listing, lotId, cost, ai) }, enabled = type.isNotEmpty())
             }
         },
     ) { padding ->
@@ -82,9 +96,11 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Section("Tipo de prenda")
-            TypePicker(type) { picked ->
-                type = picked
-                keywords = keywords.filter { Garments.keyword(it)?.appliesTo(Garments.type(picked)?.group) == true }
+            key(type) {
+                TypePicker(type) { picked ->
+                    type = picked
+                    keywords = keywords.filter { Garments.keyword(it)?.appliesTo(Garments.type(picked)?.group) == true }
+                }
             }
 
             Section("Prenda")
@@ -93,6 +109,11 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                 Field(model, { model = it }, "Modelo", Modifier.weight(1f), capitalize = true)
             }
             Field(size, { size = it }, "Talla (W31 L32, M, 42…)", capitalize = true)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Muted("Sexo", Modifier.padding(start = 4.dp, end = 4.dp))
+                for (g in Gender.entries) Choice(g.label, gender == g) { gender = if (gender == g) null else g }
+            }
+            Vinted.letterSize(size, gender)?.let { Muted("Equivale a una $it", Modifier.padding(start = 4.dp)) }
 
             Section("Estado")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -123,6 +144,59 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                 }
             }
 
+            Section("IA")
+            if (number == null) {
+                Muted("Guarda el artículo y haz las fotos para que la IA lo complete.", Modifier.padding(start = 4.dp))
+            } else {
+                Muted(
+                    "Pon tú marca, modelo, talla y época. La IA mira las fotos y completa tipo, palabras, sexo, " +
+                        "categoría, color y los títulos de cada móvil. Revísalo antes de guardar.",
+                    Modifier.padding(start = 4.dp),
+                )
+                FilledTonalButton(
+                    onClick = {
+                        generating = true
+                        vm.suggestWithAi(number, listing) { s, model ->
+                            generating = false
+                            if (s != null) {
+                                val applied = s.applyTo(listing)
+                                type = applied.type
+                                keywords = applied.keywords
+                                gender = applied.gender
+                                size = applied.size
+                                ai = s.result(applied, model)
+                            }
+                        }
+                    },
+                    enabled = !generating,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    if (generating) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Text("Mirando las fotos…")
+                    } else {
+                        Text(if (ai == null) "Rellenar con IA" else "Volver a generar con IA")
+                    }
+                }
+                ai?.let { r ->
+                    Tile {
+                        if (freshAi == null) {
+                            Muted("Has cambiado marca, modelo, tipo o palabras: se usan los títulos automáticos hasta que vuelvas a generar.")
+                        } else {
+                            for (d in Catalog.devices(p)) {
+                                r.titles[d.id]?.let { t ->
+                                    Muted(d.prefix)
+                                    Text(t, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 6.dp))
+                                }
+                            }
+                        }
+                        VintedInfo(gender, r)
+                    }
+                }
+            }
+
             Section("Coste")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Choice("Sin lote", lotId == null) { lotId = null }
@@ -138,7 +212,10 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             if (type.isNotEmpty()) {
                 Section("Vista previa · ${p.self.prefix}")
                 Tile {
-                    Text(ListingWriter.title(listing, p.self.style), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        freshAi?.titles?.get(p.self.id) ?: ListingWriter.title(listing, p.self.style),
+                        style = MaterialTheme.typography.titleMedium,
+                    )
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -261,4 +338,22 @@ private fun Field(value: String, onChange: (String) -> Unit, label: String, modi
         keyboardOptions = KeyboardOptions(capitalization = if (capitalize) KeyboardCapitalization.Words else KeyboardCapitalization.None),
         modifier = modifier.fillMaxWidth(),
     )
+}
+
+/** What to pick by hand in Vinted: gender, category and colour. */
+@Composable
+fun VintedInfo(gender: Gender?, ai: AiResult) {
+    val rows = listOfNotNull(
+        gender?.let { "Sexo" to it.label },
+        ai.category?.let { "Categoría" to it },
+        ai.colors.takeIf { it.isNotEmpty() }?.let { "Color" to it.joinToString(" y ") },
+    )
+    if (rows.isEmpty()) return
+    Muted("Para rellenar en Vinted", Modifier.padding(top = 6.dp))
+    for ((label, value) in rows) {
+        Text(
+            "$label: $value",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+    }
 }

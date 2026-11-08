@@ -36,6 +36,7 @@ data class Article(
     val cost: Long? = null,
     /** Devices whose Vinted account already has this article published. */
     val uploaded: Set<String> = emptySet(),
+    val ai: AiResult? = null,
 )
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */
@@ -77,6 +78,8 @@ data class AppState(
     val child: ChildState? = null,
     /** Chosen as secondary but not paired yet. */
     val secondary: Boolean = false,
+    /** Google AI Studio key; stays on this phone, never synced. */
+    val geminiKey: String = "",
 ) {
     val role: Role? get() = when {
         parent != null -> Role.PARENT

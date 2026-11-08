@@ -34,6 +34,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -206,6 +207,8 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                         }
                     }
                 }
+                Section("IA (Gemini)")
+                GeminiKeyTile(vm, state.geminiKey)
                 Section("SKU")
                 Tile {
                     Row2(
@@ -432,6 +435,34 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                 )
             }
             Spacer(Modifier.height(16.dp))
+        }
+    }
+}
+
+@Composable
+private fun GeminiKeyTile(vm: MainViewModel, saved: String) {
+    var key by remember(saved) { mutableStateOf(saved) }
+    Tile {
+        Muted(
+            if (saved.isBlank()) "Para generar títulos con IA. Es gratis: entra en aistudio.google.com, pulsa " +
+                "\"Get API key\", crea una clave y pégala aquí."
+            else "Clave guardada. Solo se usa en este móvil.",
+        )
+        OutlinedTextField(
+            value = key,
+            onValueChange = { key = it.trim().take(100) },
+            label = { Text("Clave de Gemini") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+        )
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (saved.isNotBlank()) {
+                OutlinedButton(onClick = { vm.setGeminiKey("") }, modifier = Modifier.weight(1f)) { Text("Borrar") }
+            }
+            FilledTonalButton(onClick = { vm.setGeminiKey(key) }, enabled = key.isNotBlank() && key != saved, modifier = Modifier.weight(1f)) {
+                Text("Guardar clave")
+            }
         }
     }
 }

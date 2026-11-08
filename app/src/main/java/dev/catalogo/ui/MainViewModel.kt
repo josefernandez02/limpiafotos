@@ -7,7 +7,12 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.catalogo.CatalogoApp
+import dev.catalogo.core.AiException
+import dev.catalogo.core.AiResult
+import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.AppState
+import dev.catalogo.core.Catalog
+import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Money
@@ -200,16 +205,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- parent ----------
 
-    fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String) = run {
+    fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String, ai: AiResult?) = run {
         val cost = if (lotId != null || costText.isBlank()) null
         else Money.parse(costText) ?: throw CatalogException("Coste no válido")
         if (number == null) {
-            val created = repo.newArticle(listing, lotId, cost)
+            val created = repo.newArticle(listing, lotId, cost, ai)
             replaceTop(Screen.Article(created))
         } else {
-            repo.updateArticle(number, listing, lotId, cost)
+            repo.updateArticle(number, listing, lotId, cost, ai)
             back()
         }
+    }
+
+    /**
+     * One Gemini call with the article's photos (main phone's album first,
+     * then photos waiting for other phones). [done] gets the suggestion or null.
+     */
+    fun suggestWithAi(number: Int, listing: Listing, done: (AiSuggestion?, String) -> Unit) = viewModelScope.launch {
+        try {
+            val p = repo.state.parent ?: throw CatalogException("Solo desde el móvil principal")
+            val photos = Catalog.devices(p).flatMap { d ->
+                if (d.id == p.self.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else outboxPhotos(d.id, number)
+            }
+            val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
+            done(answer.suggestion, answer.model)
+        } catch (e: AiException) {
+            _message.value = e.message
+            done(null, "")
+        } catch (e: CatalogException) {
+            _message.value = e.message
+            done(null, "")
+        } catch (e: Exception) {
+            _message.value = "Error con la IA: ${e.message ?: e.javaClass.simpleName}"
+            done(null, "")
+        }
+    }
+
+    fun setGeminiKey(key: String) = run {
+        repo.setGeminiKey(key)
+        _message.value = if (key.isBlank()) "Clave borrada" else "Clave guardada"
     }
 
     fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) = run {

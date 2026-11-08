@@ -65,6 +65,8 @@ data class Listing(
     val keywords: List<String> = emptyList(),
     /** Free text about defects ("Tiene manchas"), added after the condition. */
     val notes: String = "",
+    /** Chosen by the AI or the user; gives the letter size of W sizes. */
+    val gender: Gender? = null,
 )
 
 @Serializable
@@ -303,7 +305,7 @@ object ListingWriter {
     fun description(listing: Listing, style: Int, template: String, sku: String): String {
         val s = style.mod(Garments.STYLES)
         val values = mapOf(
-            "{talla}" to listing.size.trim(),
+            "{talla}" to size(listing, s),
             "{estado}" to state(listing, s),
             "{sku}" to sku,
         )
@@ -326,6 +328,13 @@ object ListingWriter {
 
     fun text(listing: Listing, style: Int, template: String, sku: String) =
         ListingText(title(listing, style), description(listing, style, template, sku))
+
+    /** "W32 L34 (equivale a una M)": W sizes also show their letter size. */
+    fun size(listing: Listing, style: Int): String {
+        val size = listing.size.trim()
+        val letter = Vinted.letterSize(size, listing.gender) ?: return size
+        return if (style.mod(Garments.STYLES) == 0) "$size (equivale a una $letter)" else "$size · $letter"
+    }
 
     /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas (revisar imágenes)". */
     fun state(listing: Listing, style: Int): String {

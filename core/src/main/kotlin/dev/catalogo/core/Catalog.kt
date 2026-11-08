@@ -18,11 +18,21 @@ object Catalog {
     }
 
     /** Article details: listing data, lot and manual cost. */
-    fun updateArticle(s: ParentState, number: Int, listing: Listing?, lotId: String?, cost: Long?): ParentState {
+    fun updateArticle(s: ParentState, number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult? = null): ParentState {
         val a = article(s, number) ?: return s
         if (lotId != null && s.lots.none { it.id == lotId }) throw CatalogException("Lote no encontrado")
-        return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost))
+        return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost, ai = ai))
     }
+
+    /** AI data of [number] while it still matches the listing (null when stale or absent). */
+    fun freshAi(s: ParentState, number: Int): AiResult? {
+        val a = article(s, number) ?: return null
+        val listing = a.listing ?: return null
+        return a.ai?.takeIf { it.basis == Ai.basis(listing) }
+    }
+
+    /** Accounts the AI writes titles for: every phone, in order. */
+    fun aiAccounts(s: ParentState): List<Ai.Account> = devices(s).map { Ai.Account(it.id, it.prefix, it.style) }
 
     /** Marks whether [deviceId]'s account already has [number] published on Vinted. */
     fun setUploaded(s: ParentState, number: Int, deviceId: String, uploaded: Boolean): ParentState {
@@ -60,7 +70,9 @@ object Catalog {
     /** Title and description of [number] as [device] publishes it. */
     fun listingText(s: ParentState, number: Int, device: Device): ListingText? {
         val listing = article(s, number)?.listing ?: return null
-        return ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits))
+        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits))
+        val title = freshAi(s, number)?.titles?.get(device.id)?.takeIf { it.isNotBlank() } ?: return text
+        return text.copy(title = title)
     }
 
     fun create(s: ParentState, now: Long): Pair<ParentState, Int> {
