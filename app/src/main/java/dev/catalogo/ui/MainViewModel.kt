@@ -65,6 +65,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _covers = MutableStateFlow<Map<String, Uri>>(emptyMap())
     val covers: StateFlow<Map<String, Uri>> = _covers.asStateFlow()
 
+    /** Main phone: article number → cover from any account (own album, outbox or sent copies). */
+    private val _articleCovers = MutableStateFlow<Map<Int, Uri>>(emptyMap())
+    val articleCovers: StateFlow<Map<Int, Uri>> = _articleCovers.asStateFlow()
+
     /** Clean photos waiting in the outbox: deviceId → number → count. */
     private val _outbox = MutableStateFlow<Map<String, Map<Int, Int>>>(emptyMap())
     val outbox: StateFlow<Map<String, Map<Int, Int>>> = _outbox.asStateFlow()
@@ -101,9 +105,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun albumPhotos(album: String): List<Uri> =
         withContext(Dispatchers.IO) { runCatching { repo.gallery.albumPhotos(repo.base, album) }.getOrDefault(emptyList()) }
 
-    /** Clean photos still waiting to be sent to [deviceId]. */
-    suspend fun outboxPhotos(deviceId: String, number: Int): List<Uri> =
-        withContext(Dispatchers.IO) { repo.outbox.files(deviceId, number).map { Uri.fromFile(it) } }
+    /** Photos for [deviceId]'s account kept on this phone: waiting to be sent, then reduced copies of the sent ones. */
+    suspend fun outboxPhotos(deviceId: String, number: Int): List<Uri> = withContext(Dispatchers.IO) {
+        (repo.outbox.files(deviceId, number) + repo.previews.files(number, deviceId)).map { Uri.fromFile(it) }
+    }
 
     init {
         // Each phone keeps its albums where its own gallery shows them.
@@ -168,15 +173,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() = viewModelScope.launch {
         val base = repo.base
         val s = state.value
+        val p = s.parent
+        var articleCovers = emptyMap<Int, Uri>()
         val (albums, outbox) = withContext(Dispatchers.IO) {
             val a = runCatching { repo.gallery.albums(base) }.getOrDefault(emptyMap())
-            val o = s.parent?.children?.associate { d ->
-                d.id to repo.outbox.pending(d.id).mapValues { it.value.size }
-            } ?: emptyMap()
-            a to o
+            val pending = p?.children?.associate { d -> d.id to repo.outbox.pending(d.id) } ?: emptyMap()
+            if (p != null) {
+                articleCovers = p.articles.filter { !it.released }.mapNotNull { art ->
+                    val own = a[Sku.format(p.self.prefix, art.number, p.digits)]?.cover
+                    val cover = own
+                        ?: p.children.firstNotNullOfOrNull { d -> pending[d.id]?.get(art.number)?.firstOrNull() }?.let { Uri.fromFile(it) }
+                        ?: repo.previews.files(art.number).firstOrNull()?.let { Uri.fromFile(it) }
+                    cover?.let { art.number to it }
+                }.toMap()
+            }
+            a to pending.mapValues { (_, byNumber) -> byNumber.mapValues { it.value.size } }
         }
         _counts.value = albums.mapValues { it.value.count }
         _covers.value = albums.mapValues { it.value.cover }
+        _articleCovers.value = articleCovers
         _outbox.value = outbox
     }
 

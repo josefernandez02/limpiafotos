@@ -28,6 +28,7 @@ class Repo(context: Context) {
     val gallery = Gallery(context)
     val outbox = Outbox(context.filesDir)
     val gemini = Gemini(context.contentResolver)
+    val previews = Previews(context.filesDir)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
@@ -186,6 +187,7 @@ class Repo(context: Context) {
     private suspend fun deleteLocalForParent(number: Int): List<Uri> = withContext(Dispatchers.IO) {
         val p = parent()
         outbox.deleteNumber(number)
+        previews.deleteNumber(number)
         gallery.deleteAlbum(base, sku(p.self, number, p.digits))
     }
 
@@ -221,7 +223,10 @@ class Repo(context: Context) {
     // ---------- delivery ----------
 
     suspend fun delivered(childId: String, number: Int, count: Int) {
-        withContext(Dispatchers.IO) { outbox.delete(childId, number) }
+        withContext(Dispatchers.IO) {
+            previews.keep(number, childId, outbox.files(childId, number))
+            outbox.delete(childId, number)
+        }
         store.update { s -> s.copy(parent = Catalog.markDelivered(s.parent!!, number, childId, count)) }
     }
 

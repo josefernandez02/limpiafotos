@@ -8,6 +8,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -82,9 +85,12 @@ private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
 @Composable
 fun ParentHome(vm: MainViewModel, p: ParentState) {
     val counts by vm.counts.collectAsStateWithLifecycle()
-    val covers by vm.covers.collectAsStateWithLifecycle()
+    val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
-    val active = p.articles.count { !it.released }
+    // Sold or deleted articles stay only until the other phones confirm; they are not shown.
+    val shown = p.articles.filter { !it.released }.sortedByDescending { it.number }
+    val pending = p.articles.size - shown.size
+    val active = shown.size
     Scaffold(
         topBar = {
             Header("Artículos", if (active == 1) "1 en catálogo" else "$active en catálogo") {
@@ -101,7 +107,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             ) { Icon(Icons.Default.Add, contentDescription = "Nuevo artículo") }
         },
     ) { padding ->
-        if (p.articles.isEmpty()) {
+        if (shown.isEmpty()) {
             Empty("Pulsa + para crear tu primer artículo", Modifier.padding(padding))
             return@Scaffold
         }
@@ -110,65 +116,88 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(p.articles.sortedByDescending { it.number }, key = { it.number }) { a ->
-                ArticleRow(vm, p, a, counts, covers, outbox)
+            if (pending > 0) {
+                item(key = "pending") {
+                    Muted(
+                        if (pending == 1) "1 artículo vendido o eliminado se quitará de los otros móviles al conectar"
+                        else "$pending artículos vendidos o eliminados se quitarán de los otros móviles al conectar",
+                        Modifier.padding(start = 4.dp, bottom = 2.dp),
+                    )
+                }
+            }
+            items(shown, key = { it.number }) { a ->
+                ArticleRow(vm, p, a, counts, covers[a.number], outbox)
             }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ArticleRow(
     vm: MainViewModel,
     p: ParentState,
     a: Article,
     counts: Map<String, Int>,
-    covers: Map<String, android.net.Uri>,
+    cover: android.net.Uri?,
     outbox: Map<String, Map<Int, Int>>,
 ) {
-    val own = Sku.format(p.self.prefix, a.number, p.digits)
     val title = Catalog.listingText(p, a.number, p.self)?.title
-    Tile(
-        modifier = if (a.released) Modifier.alpha(0.55f) else Modifier,
-        onClick = if (a.released) null else ({ vm.go(Screen.Article(a.number)) }),
-    ) {
+    Tile(onClick = { vm.go(Screen.Article(a.number)) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Cover(covers[own])
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Cover(cover)
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 18.sp))
                     Ledger.lot(p, a.lotId)?.let { Pill(it.name) }
                 }
-                when {
-                    a.released -> {
-                        // Sold if a sale was recorded for this article; otherwise it was deleted.
-                        val sold = p.sales.any { it.number == a.number && it.soldAt >= a.createdAt }
-                        Muted(if (sold) "Vendido · conecta para terminar" else "Eliminado · conecta para terminar")
-                    }
-                    title != null -> Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    else -> Muted("Sin datos del anuncio")
+                if (title != null) {
+                    Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                } else {
+                    Muted("Sin datos del anuncio")
                 }
-                if (!a.released) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (d in Catalog.devices(p)) {
-                            val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
-                            val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
-                            else (a.delivered[d.id] ?: 0) + waiting
-                            when {
-                                d.id in a.uploaded -> Pill("${d.prefix} ✓ Subido", strong = true)
-                                waiting > 0 -> Pill("${d.prefix} $n ↑")
-                                else -> Pill("${d.prefix} $n")
-                            }
-                        }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for (d in Catalog.devices(p)) {
+                        val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
+                        val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
+                        else (a.delivered[d.id] ?: 0) + waiting
+                        AccountChip(d.prefix, uploaded = d.id in a.uploaded, photos = n, sending = waiting > 0)
                     }
                 }
             }
-            if (!a.released) {
-                IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
-                    Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
+            IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
+                Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
+    }
+}
+
+/**
+ * One account on a row: "SH ✓" filled when it is published in Vinted,
+ * otherwise "SH 4" with its photos (↑ while still being sent). Short enough
+ * to fit several accounts and wrap cleanly when there are many.
+ */
+@Composable
+private fun AccountChip(prefix: String, uploaded: Boolean, photos: Int, sending: Boolean) {
+    val bg = if (uploaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
+    val fg = if (uploaded) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    Row(
+        Modifier.alpha(if (!uploaded && photos == 0) 0.6f else 1f)
+            .clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(prefix, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = fg, maxLines = 1, softWrap = false)
+        Text(
+            when {
+                uploaded -> " ✓"
+                sending -> " $photos ↑"
+                else -> " $photos"
+            },
+            style = MaterialTheme.typography.labelMedium,
+            color = if (uploaded) fg else MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            softWrap = false,
+        )
     }
 }
 
