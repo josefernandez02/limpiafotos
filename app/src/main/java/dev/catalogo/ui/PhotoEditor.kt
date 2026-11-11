@@ -96,7 +96,9 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     }
     val list = slots
     val changed = list != null && (list.map { it.source } != original || list.any { it.bytes != null })
-    val leave = { if (changed) confirmLeave = true else vm.back() }
+    val leave: () -> Unit = {
+        if (changed) confirmLeave = true else vm.back()
+    }
     BackHandler(enabled = cropping == null && !saving) { leave() }
 
     fun move(from: Int, to: Int) {

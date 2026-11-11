@@ -186,11 +186,16 @@ fun Choice(text: String, selected: Boolean, onClick: () -> Unit) {
 
 /** Three rising bars: the inventory tab. */
 val ChartIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
-    androidx.compose.material.icons.materialIcon(name = "Catalogo.Chart") {
-        androidx.compose.material.icons.materialPath {
-            moveTo(4f, 20f); lineTo(4f, 13f); lineTo(8f, 13f); lineTo(8f, 20f); close()
-            moveTo(10f, 20f); lineTo(10f, 8f); lineTo(14f, 8f); lineTo(14f, 20f); close()
-            moveTo(16f, 20f); lineTo(16f, 4f); lineTo(20f, 4f); lineTo(20f, 20f); close()
-        }
-    }
+    androidx.compose.ui.graphics.vector.ImageVector.Builder(
+        name = "Catalogo.Chart",
+        defaultWidth = 24.dp,
+        defaultHeight = 24.dp,
+        viewportWidth = 24f,
+        viewportHeight = 24f,
+    ).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M4,20V13H8V20Z M10,20V8H14V20Z M16,20V4H20V20Z",
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(androidx.compose.ui.graphics.Color.Black),
+    ).build()
 }
