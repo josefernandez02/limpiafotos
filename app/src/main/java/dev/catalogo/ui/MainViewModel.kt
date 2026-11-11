@@ -118,6 +118,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Each phone keeps its albums where its own gallery shows them.
         run {
             repo.ensureDistinctStyles()
+            repo.adoptAccounts()
             reportMoves(repo.adoptFolder(dev.catalogo.data.Folders.auto()))
             refresh()
         }

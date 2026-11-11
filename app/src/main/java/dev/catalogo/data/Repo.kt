@@ -98,24 +98,49 @@ class Repo(context: Context) {
 
     /**
      * Keeps the copies waiting for other phones equal to this phone's album
-     * (after new photos, a new order or a crop). Copies already delivered are
-     * not touched: that phone already has its photos.
+     * (after new photos, a new order or a crop). Only copies are touched:
+     * photos taken for another account, or already delivered, are left alone.
      */
     suspend fun refreshCopies(number: Int) = withContext(Dispatchers.IO) {
         val p = parent()
         val a = Catalog.article(p, number) ?: return@withContext
-        // Articles from before accounts were chosen keep their photos as they are.
-        if (a.accounts.isEmpty()) return@withContext
         val own = gallery.albumPhotos(base, sku(p.self, number, p.digits))
         for (c in p.children) {
+            if (outbox.hasOriginals(c.id, number)) continue
             val wanted = c.id in a.accounts
             val delivered = (a.delivered[c.id] ?: 0) > 0
             when {
-                !wanted -> outbox.delete(c.id, number)
-                delivered -> Unit
-                own.isEmpty() -> outbox.delete(c.id, number)
-                else -> outbox.replace(c.id, number, own.mapNotNull { uri -> resolver.openInputStream(uri)?.use { it.readBytes() } })
+                delivered && wanted -> Unit
+                !wanted || delivered || own.isEmpty() -> outbox.deleteCopies(c.id, number)
+                else -> outbox.replaceCopies(c.id, number, own.mapNotNull { uri -> resolver.openInputStream(uri)?.use { it.readBytes() } })
             }
+        }
+    }
+
+    /**
+     * Articles from before accounts were chosen get the accounts they really
+     * use: where they are uploaded, where photos went or are waiting to go,
+     * and this phone if its album has photos. Runs once per article.
+     */
+    suspend fun adoptAccounts() {
+        val p = state.parent ?: return
+        val legacy = p.articles.filter { !it.released && it.accounts.isEmpty() }
+        if (legacy.isEmpty()) return
+        val found = withContext(Dispatchers.IO) {
+            val counts = runCatching { gallery.counts(base) }.getOrDefault(emptyMap())
+            legacy.associate { a ->
+                val own = if ((counts[sku(p.self, a.number, p.digits)] ?: 0) > 0) setOf(p.self.id) else emptySet()
+                val waiting = p.children.filter { outbox.count(it.id, a.number) > 0 }.map { it.id }.toSet()
+                a.number to (a.targets + own + waiting)
+            }
+        }
+        store.update { s ->
+            var next = s.parent ?: return@update s
+            for ((n, accounts) in found) {
+                if (accounts.isEmpty() || Catalog.article(next, n)?.accounts?.isNotEmpty() == true) continue
+                next = Catalog.setAccounts(next, n, accounts)
+            }
+            s.copy(parent = next)
         }
     }
 
