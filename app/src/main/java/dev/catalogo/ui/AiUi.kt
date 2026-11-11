@@ -75,7 +75,6 @@ fun AiTile(vm: MainViewModel, p: ParentState, article: Article) {
                     Spacer(Modifier.width(12.dp))
                     Text("Mirando las fotos… $seconds s", style = MaterialTheme.typography.titleMedium)
                 }
-                Muted("Suele tardar entre 10 y 40 segundos. Puedes salir de esta pantalla: el resultado se guarda solo.")
                 OutlinedButton(
                     onClick = { vm.cancelAi(number) },
                     modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
@@ -87,10 +86,8 @@ fun AiTile(vm: MainViewModel, p: ParentState, article: Article) {
                     Text(run.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
                 }
                 when {
-                    !hasKey -> Muted("Pon tu clave de Gemini en Ajustes para usar la IA.")
-                    article.ai == null -> Muted("Haz las fotos y la IA preparará el título, la categoría y el color.")
-                    Catalog.freshAi(p, number) == null ->
-                        Muted("Has cambiado datos después de generar: se usan los títulos automáticos. Vuelve a generar.")
+                    !hasKey -> Muted("Falta la clave de Gemini (Ajustes)")
+                    article.ai != null && Catalog.freshAi(p, number) == null -> Muted("Datos cambiados: vuelve a generar")
                 }
                 FilledTonalButton(
                     onClick = { picking = true },
@@ -147,7 +144,7 @@ private fun PhotoPicker(vm: MainViewModel, number: Int, onDismiss: () -> Unit, o
                     photos == null -> CircularProgressIndicator(Modifier.size(24.dp), strokeWidth = 2.dp)
                     photos!!.isEmpty() -> Text("Este artículo no tiene fotos. Hazlas primero.")
                     else -> {
-                        Muted("Elige de 1 a ${Ai.PHOTOS}. Lo ideal: delante, detrás y la etiqueta.")
+                        Muted("De 1 a ${Ai.PHOTOS}")
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (uri in photos!!) {
                                 val index = picked.indexOf(uri)

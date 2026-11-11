@@ -49,6 +49,8 @@ import androidx.compose.ui.draw.clip
 import dev.catalogo.core.KeywordKind
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Listing
+import dev.catalogo.core.Measures
+import androidx.compose.ui.text.input.KeyboardType
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
@@ -72,11 +74,30 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var keywords by remember { mutableStateOf(start.keywords) }
     var notes by remember { mutableStateOf(start.notes) }
     var gender by remember { mutableStateOf(start.gender) }
+    var noBrand by remember { mutableStateOf(start.noBrand) }
+    var noLabel by remember { mutableStateOf(start.noLabel) }
+    var waist by remember { mutableStateOf(start.flat.waist) }
+    var chest by remember { mutableStateOf(start.flat.chest) }
+    var length by remember { mutableStateOf(start.flat.length) }
+    var aiNotes by remember { mutableStateOf(start.aiNotes) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
 
-    val listing = Listing(type, brand.trim(), model.trim(), size.trim(), condition, keywords, notes.trim(), gender)
+    val listing = Listing(
+        type = type,
+        brand = if (noBrand) "" else brand.trim(),
+        model = if (noBrand) "" else model.trim(),
+        size = size.trim(),
+        condition = condition,
+        keywords = keywords,
+        notes = notes.trim(),
+        gender = gender,
+        noBrand = noBrand,
+        noLabel = noLabel,
+        flat = Measures(waist.trim(), chest.trim(), length.trim()),
+        aiNotes = aiNotes.trim(),
+    )
     val group = Garments.type(type)?.group
 
     @Composable
@@ -110,19 +131,26 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (creating) {
-                Muted(
-                    "Pon lo que la IA no puede adivinar. Después haces las fotos y la IA prepara el anuncio.",
-                    Modifier.padding(start = 4.dp, top = 4.dp),
-                )
-            }
-
             Section("Prenda")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(brand, { brand = it }, "Marca", Modifier.weight(1f), capitalize = true)
-                Field(model, { model = it }, "Modelo", Modifier.weight(1f), capitalize = true)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!noBrand) Field(brand, { brand = it }, "Marca", Modifier.weight(1f), capitalize = true)
+                else Muted("Sin marca", Modifier.weight(1f).padding(start = 4.dp))
+                Choice("Sin marca", noBrand) { noBrand = !noBrand }
             }
-            Field(size, { size = it }, "Talla (W31 L32, M, 42…)", capitalize = true)
+            if (!noBrand) Field(model, { model = it }, "Modelo", capitalize = true)
+
+            Section("Talla")
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Field(size, { size = it }, if (noLabel) "Talla aproximada" else "Talla", Modifier.weight(1f), capitalize = true)
+                Choice("Sin etiqueta", noLabel) { noLabel = !noLabel }
+            }
+            if (noLabel || waist.isNotBlank() || chest.isNotBlank() || length.isNotBlank()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Cm(waist, { waist = it }, "Cintura", Modifier.weight(1f))
+                    Cm(chest, { chest = it }, "Pecho", Modifier.weight(1f))
+                    Cm(length, { length = it }, "Largo", Modifier.weight(1f))
+                }
+            }
             if (!creating) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Muted("Sexo", Modifier.padding(start = 4.dp, end = 4.dp))
@@ -132,26 +160,34 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             }
 
             Section("Época")
-            Muted("Solo si la sabes; puedes marcar varias. La IA no la adivina.", Modifier.padding(start = 4.dp))
             Keywords(listOf(KeywordKind.EPOCH))
 
             Section("Estado")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 for (c in Condition.entries) Choice(c.label, condition == c) { condition = c }
             }
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it.replace('\n', ' ').take(120) },
-                label = { Text("Notas (opcional)") },
+                label = { Text("Notas del estado") },
                 placeholder = { Text("Tiene manchas") },
-                supportingText = { Text("Se añade detrás del estado en la descripción.") },
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Section("IA")
+            OutlinedTextField(
+                value = aiNotes,
+                onValueChange = { aiNotes = it.take(300) },
+                label = { Text("Notas para la IA") },
+                placeholder = { Text("Made in Argentina") },
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                minLines = 2,
                 modifier = Modifier.fillMaxWidth(),
             )
 
             if (!creating) {
                 Section("Tipo y palabras clave")
-                Muted("Lo rellena la IA. Cámbialo solo si se equivoca. Mantén pulsada una palabra para ver qué significa.", Modifier.padding(start = 4.dp))
                 key(type) {
                     TypePicker(type) { picked ->
                         type = picked
@@ -170,7 +206,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             if (lot != null) {
                 Muted("Coste por prenda: ${Money.format(Ledger.unitCost(lot))}", Modifier.padding(start = 4.dp))
             } else {
-                MoneyField(cost, { cost = it }, "Coste de la prenda (opcional)")
+                MoneyField(cost, { cost = it }, "Coste de la prenda")
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -291,5 +327,19 @@ private fun Field(value: String, onChange: (String) -> Unit, label: String, modi
         singleLine = true,
         keyboardOptions = KeyboardOptions(capitalization = if (capitalize) KeyboardCapitalization.Words else KeyboardCapitalization.None),
         modifier = modifier.fillMaxWidth(),
+    )
+}
+
+/** Flat measure in whole centimetres. */
+@Composable
+private fun Cm(value: String, onChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { onChange(it.filter(Char::isDigit).take(3)) },
+        label = { Text(label) },
+        suffix = { Text("cm") },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier,
     )
 }

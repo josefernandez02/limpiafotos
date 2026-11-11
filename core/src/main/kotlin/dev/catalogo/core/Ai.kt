@@ -25,6 +25,8 @@ data class AiResult(
     val colors: List<String> = emptyList(),
     val titles: Map<String, String> = emptyMap(),
     val model: String = "",
+    /** Without "#" and without the SKU, which the description adds last. */
+    val hashtags: List<String> = emptyList(),
 )
 
 /** One answer of the AI, already checked against the closed lists. */
@@ -38,21 +40,28 @@ data class AiSuggestion(
     /** Device id to title. */
     val titles: Map<String, String>,
     val findings: List<String>,
+    val hashtags: List<String> = emptyList(),
+    /** Brand and model read in the photos, only when the user left them blank. */
+    val brand: String? = null,
+    val model: String? = null,
 ) {
     /** The listing with the suggestions applied; what the user typed always wins. */
     fun applyTo(listing: Listing): Listing {
         val newType = listing.type.ifEmpty { type.orEmpty() }
         val group = Garments.type(newType)?.group
         val words = (listing.keywords + keywords).distinct().filter { Garments.keyword(it)?.appliesTo(group) == true }
+        val canBrand = !listing.noBrand
         return listing.copy(
             type = newType,
             keywords = words,
             gender = listing.gender ?: gender,
             size = listing.size.ifBlank { sizeLabel.orEmpty() },
+            brand = if (canBrand) listing.brand.ifBlank { brand.orEmpty() } else listing.brand,
+            model = if (canBrand) listing.model.ifBlank { model.orEmpty() } else listing.model,
         )
     }
 
-    fun result(applied: Listing, model: String) = AiResult(Ai.basis(applied), category, colors, titles, model)
+    fun result(applied: Listing, model: String) = AiResult(Ai.basis(applied), category, colors, titles, model, hashtags)
 }
 
 class AiException(message: String) : Exception(message)
@@ -69,64 +78,98 @@ object Ai {
     data class Account(val id: String, val prefix: String, val style: Int)
 
     /** Data the titles depend on; when it changes the stored titles are stale. */
-    fun basis(l: Listing): String =
-        listOf(l.type, l.brand.trim().lowercase(), l.model.trim().lowercase(), l.keywords.sorted().joinToString(","))
+    fun basis(l: Listing): String {
+        val base = listOf(l.type, l.brand.trim().lowercase(), l.model.trim().lowercase(), l.keywords.sorted().joinToString(","))
             .joinToString("|")
+        // Appended only when used, so results saved by older versions stay valid.
+        val extra = buildString {
+            if (l.noBrand) append("|sin-marca")
+            if (l.aiNotes.isNotBlank()) append("|n:").append(l.aiNotes.trim().lowercase())
+        }
+        return base + extra
+    }
 
+    /** How each listing style orders its title. */
     private val VOICES = listOf(
-        "Directa, estilo tienda vintage: marca y modelo delante, luego estética/época, corte, material, tipo de prenda y un detalle.",
-        "Distinta a la otra: empieza por la época o la estética, usa sinónimos (Denim Pants, Jumper, Hooded Sweatshirt, Trainers) y otro orden.",
+        """Marca Modelo [Corte con nombre propio] Prenda Vintage Época Classic [Corte] Fit Color
+           Levi's 501 Jeans Vintage 90s Classic Straight Fit Blue
+           Levi's 517 Bootcut Jeans Vintage 90s Classic Straight Fit Khaki
+           Levi's 711 Skinny Jeans Vintage 2000s Classic Skinny Fit Black
+           Levi's 512 Made in USA Slim Fit Tapered Leg Jeans Vintage 90s Classic White
+           Sin marca: Flare Jeans Vintage Y2K Low Rise Dark Blue · Leather Jacket Vintage 90s Biker Black""",
+        """Vintage Época Marca Modelo Corte Prenda [Estilo] Color, con sinónimos (Straight Leg, Denim, Trousers…)
+           Vintage 90s Levis 501 Straight Leg Jeans Washed Blue
+           Vintage 2000s Levis 711 Skinny Denim Jeans Black
+           Sin marca: Vintage Y2K Low Rise Flared Jeans Dark Blue · Vintage 90s Biker Leather Jacket Black""",
     )
 
     fun prompt(listing: Listing, accounts: List<Account>): String {
         val type = Garments.type(listing.type)
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
-            put("marca", listing.brand.trim().ifEmpty { null })
+            put("marca", if (listing.noBrand) "SIN MARCA" else listing.brand.trim().ifEmpty { null })
             put("modelo", listing.model.trim().ifEmpty { null })
             put("talla", listing.size.trim().ifEmpty { null })
+            put("sin_etiqueta_de_talla", listing.noLabel)
+            putJsonObject("medidas_en_plano_cm") {
+                put("cintura", listing.flat.waist.trim().ifEmpty { null })
+                put("pecho", listing.flat.chest.trim().ifEmpty { null })
+                put("largo", listing.flat.length.trim().ifEmpty { null })
+            }
             put("sexo", listing.gender?.label?.lowercase())
             put("tipo_prenda", type?.id)
             putJsonArray("epoca") { epochs.forEach { add(it.en[0]) } }
             putJsonArray("palabras") {
                 listing.keywords.mapNotNull(Garments::keyword).filter { it.kind != KeywordKind.EPOCH }.forEach { add(it.id) }
             }
+            put("notas_del_vendedor", listing.aiNotes.trim().ifEmpty { null })
         }
         return """
-            Eres un experto en vender ropa de segunda mano en Vinted España. Analizas las fotos de UNA prenda y devuelves los datos de su anuncio.
+            Eres un experto en vender ropa de segunda mano en Vinted España. Analizas las fotos de UNA prenda y devuelves los datos de su anuncio. Puede ser de cualquier marca o no tener marca, y de cualquier tipo: vaqueros, chaquetas, sudaderas, camisas, calzado, bolsos…
 
             1. REGLAS
-            - DATOS_DEL_USUARIO son correctos y mandan: no cambies marca, modelo, talla, sexo ni época si vienen.
-            - Describe solo lo que se ve en las fotos. No deduzcas por lo que una marca o modelo "suele tener".
-            - Si algo no se ve con seguridad, déjalo vacío (null o lista vacía). Mejor quedarse corto que inventar.
+            - DATOS_DEL_USUARIO son correctos y mandan: no cambies lo que viene relleno.
+            - notas_del_vendedor son hechos que da el vendedor aunque no se vean (p. ej. "Made in Argentina"). Úsalos donde más ventas den: en el título, en los hashtags o en ambos. No copies frases enteras.
+            - Describe solo lo que se ve en las fotos o dice el vendedor. Si algo no se ve con seguridad, déjalo vacío (null o lista vacía).
             - Devuelve solo el JSON pedido.
 
-            2. OBSERVA (campo "hallazgos", rellénalo antes que nada)
-            Etiquetas, logos, bordados, parches, texto legible, tejido, lavado, corte y detalles. Cada hallazgo con dónde se ve.
+            2. OBSERVA ("hallazgos", rellénalo antes que nada)
+            Etiquetas, logos, parches, bordados, texto legible, tejido, lavado, corte y detalles; cada uno con dónde se ve.
 
-            3. CLASIFICA
-            - tipo_prenda: uno de TIPOS. Si el usuario ya lo dio, devuelve ese.
+            3. COMPLETA LO QUE FALTA
+            - marca: solo si marca es null. Escríbela si se lee o es inconfundible (p. ej. la pestaña roja de Levi's en el bolsillo trasero). Si no, null. Si es "SIN MARCA", null.
+            - modelo: solo si modelo es null y se lee en una etiqueta o parche (p. ej. "501" en el parche de cuero). Si no, null.
+            - talla: solo si talla es null. Primero la que se lea en una etiqueta, tal cual. Si no hay etiqueta, estímala con las medidas en plano, la forma y las fotos:
+              · Pantalones de hombre: W = cintura en plano × 2 / 2,54, redondeada (42 cm → W33). Nunca confundas los cm con la W.
+              · Pantalones de mujer y todo lo demás: talla en letra XS, S, M, L, XL o XXL (el pecho en plano manda en prendas de arriba).
+              · Si no hay base razonable, null.
+            - tipo_prenda: uno de TIPOS. Si viene, devuelve ese.
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
-            - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si dudas, el más habitual para esa prenda en Vinted.
-            - categoria: la ruta MÁS CONCRETA de CATEGORIAS que encaje con la prenda y con el sexo elegido.
-            - colores: 1 o 2 de COLORES, el color del TEJIDO (no del fondo, la luz, las sombras, etiquetas ni costuras). Principal primero.
-            - talla_etiqueta: solo si el usuario no dio talla y se lee en una etiqueta, escrita tal cual. Si no, null.
+            - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
+            - categoria: la ruta MÁS CONCRETA de CATEGORIAS que encaje con la prenda y el sexo.
+            - colores: 1 o 2 de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Principal primero.
 
             4. TÍTULOS (en inglés, uno por cuenta dentro de "titulos")
-            El objetivo es salir en más búsquedas de Vinted y que den ganas de abrir el anuncio.
-            - Empieza por lo más buscado: la marca y el modelo si existen. El tipo de prenda va siempre.
-            - Añade lo que la gente escribe al buscar: estética, la época del usuario, corte, material y detalles de PALABRAS que se vean.
-            - Época: solo la de DATOS_DEL_USUARIO. Si no hay, ninguna década ni "Y2K". "Vintage" solo si está entre las palabras.
-            - Color: solo si es un tono con nombre que se busca y hace atractiva la prenda (Navy, Burgundy, Olive, Forest Green, Cream, Brown, Baby Blue…). Nunca Black, White, Grey ni Blue genéricos, salvo en vaqueros negros o grises ("Black Jeans").
-            - Nunca talla, estado, precio, SKU, emojis, signos, mayúsculas sostenidas ni relleno ("Amazing", "Look", "Must Have", "Rare" si no está entre las palabras).
-            - Title Case, máximo $TITLE_MAX caracteres, que se lea natural y no como una lista de etiquetas.
-            - Cada cuenta tiene su voz (CUENTAS). Los títulos de cuentas distintas no pueden tener el mismo orden ni la misma redacción.
+            Vinted muestra la foto, no el título: el título sirve para salir en las búsquedas. Mete las palabras que la gente escribe, en un orden natural.
+            - Sigue el orden y los ejemplos de la cuenta (CUENTAS). Si falta un dato (marca, modelo, época), sáltalo; nunca lo inventes.
+            - Época: solo la de DATOS_DEL_USUARIO y una sola vez (Y2K o 2000s, nunca las dos). "Vintage" si hay época o la prenda es claramente vintage.
+            - Corte o forma visible: Straight, Slim, Skinny, Bootcut, Flare, Baggy, Wide Leg, Oversized, Boxy, Cropped…
+            - Hasta 2 palabras de estilo SOLO si encajan de verdad: Workwear, Streetwear, Old Money, Retro, Preppy, Grunge, Washed, Faded, Denim…
+            - Termina con el color en inglés y con el matiz real: Blue, Light Blue, Dark Blue, Black, Grey, White, Khaki, Beige, Brown, Navy, Burgundy, Cream, Olive…
+            - Nunca talla, estado, precio, SKU, emojis, signos ni relleno (Amazing, Must Have, Rare…).
+            - Title Case, máximo $TITLE_MAX caracteres. Las cuentas no pueden tener el mismo título.
+
+            5. HASHTAGS ("hashtags": de 10 a 12, sin #, minúsculas, sin tildes ni espacios)
+            Son palabras que los compradores escriben al buscar en Vinted; tienen que atraer ventas, no quedar bonitos.
+            - En este orden: marca y marca+modelo (levis, levis501) · prenda en inglés y en español (jeans, vaqueros, vaquerosvintage) · corte (straightjeans, bootcut) · época (90s, 90sfashion; con Y2K pon y2k y 2000s) · estilo (streetwear, workwear, oldmoney) · lo útil de notas_del_vendedor (madeinusa).
+            - Mezcla inglés y español. Nada que no sea cierto ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, vinted, vintedfrance, instafashion).
+            - Sin SKU ni códigos: la app los añade al final.
 
             DATOS_DEL_USUARIO
             $user
 
-            CUENTAS
-            ${accounts.joinToString("\n") { "${it.prefix}: ${VOICES[it.style.mod(VOICES.size)]}" }}
+            CUENTAS (orden del título y ejemplos)
+            ${accounts.joinToString("\n") { "${it.prefix}: ${VOICES[it.style.mod(VOICES.size)].trimIndent()}" }}
 
             TIPOS (id|nombre)
             ${Garments.types.joinToString("\n") { "${it.id}|${it.en[0]}" }}
@@ -138,8 +181,12 @@ object Ai {
         """.trimIndent()
     }
 
-    /** Gemini generateContent body: prompt, photos (base64 JPEG) and the strict answer schema. */
-    fun request(listing: Listing, accounts: List<Account>, photos: List<String>): String = buildJsonObject {
+    /**
+     * Gemini generateContent body: prompt, photos (base64 JPEG) and the strict
+     * answer schema. [thinking] keeps the model's reasoning short (not off):
+     * enough to read labels and choose the category, much faster than the default.
+     */
+    fun request(listing: Listing, accounts: List<Account>, photos: List<String>, model: String = "", thinking: Boolean = true): String = buildJsonObject {
         putJsonArray("contents") {
             addJsonObject {
                 put("role", "user")
@@ -154,9 +201,20 @@ object Ai {
         putJsonObject("generationConfig") {
             put("responseMimeType", "application/json")
             put("responseSchema", schema(accounts))
-            put("temperature", 0.6)
+            put("temperature", 0.5)
+            if (thinking) thinkingConfig(model)?.let { put("thinkingConfig", it) }
         }
     }.toString()
+
+    /** Short reasoning: a small budget on 2.5 models, level "low" on 3 and later; nothing for unknown names. */
+    fun thinkingConfig(model: String): JsonObject? {
+        val version = Regex("gemini-(\\d+)(?:\\.(\\d+))?").find(model)?.groupValues?.get(1)?.toIntOrNull() ?: return null
+        return when {
+            version >= 3 -> buildJsonObject { put("thinkingLevel", "low") }
+            model.contains("2.5") && !model.endsWith("-lite") -> buildJsonObject { put("thinkingBudget", 1024) }
+            else -> null
+        }
+    }
 
     private fun schema(accounts: List<Account>): JsonObject {
         fun str(enum: List<String>? = null, nullable: Boolean = false) = buildJsonObject {
@@ -180,8 +238,11 @@ object Ai {
             "sexo" to str(listOf("hombre", "mujer"), nullable = true),
             "categoria" to str(Vinted.categories, nullable = true),
             "colores" to arr(str(Vinted.colors), max = 2),
-            "talla_etiqueta" to str(nullable = true),
+            "marca" to str(nullable = true),
+            "modelo" to str(nullable = true),
+            "talla" to str(nullable = true),
             "titulos" to obj(accounts.associate { it.prefix to str() }),
+            "hashtags" to arr(str(), max = 14),
         )
         return obj(props)
     }
@@ -217,15 +278,22 @@ object Ai {
         val category = o["categoria"]?.str()?.takeIf { it in Vinted.categories }
             ?.takeIf { finalGender == null || it.startsWith(finalGender.label + " ") }
         val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2)
-        val sizeLabel = o["talla_etiqueta"]?.str()?.trim()?.take(20)?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
+        val sizeLabel = (o["talla"] ?: o["talla_etiqueta"])?.str()?.trim()?.take(20)?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
+        val brand = o["marca"]?.str()?.let(::cleanName)?.takeIf { listing.brand.isBlank() && !listing.noBrand }
+            ?.takeUnless { it.equals("sin marca", ignoreCase = true) }
+        val model = o["modelo"]?.str()?.let(::cleanName)?.takeIf { listing.model.isBlank() && !listing.noBrand }
+        val codes = accounts.map { Regex("^${Regex.escape(it.prefix.lowercase())}\\d+$") }
+        val hashtags = ListingWriter.clean(o.strings("hashtags")).filterNot { t -> codes.any { it.matches(t) } }
         val titleObj = o["titulos"] as? JsonObject
         val seen = HashSet<String>()
         val titles = accounts.mapNotNull { a ->
             titleObj?.get(a.prefix)?.str()?.let(::cleanTitle)?.takeIf { it.isNotEmpty() && seen.add(it.lowercase()) }?.let { a.id to it }
         }.toMap()
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
-        return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings)
+        return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model)
     }
+
+    private fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().trim('"', '.').take(40)
 
     private fun cleanTitle(raw: String): String {
         var t = raw.replace(Regex("[\\r\\n\\t]+"), " ").replace(Regex("\\s+"), " ").trim().trim('"', '.', '-', ' ')

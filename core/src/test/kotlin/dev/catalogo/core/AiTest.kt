@@ -117,9 +117,49 @@ class AiTest {
         assertNull(Vinted.letterSize("W32 L34", null))
         assertNull(Vinted.letterSize("M", Gender.MEN))
         val l = Listing(size = "W32 L34", gender = Gender.MEN)
-        assertTrue(ListingWriter.description(l, 0, "", "SH1").startsWith("👕 Talla: W32 L34 (equivale a una M)\n"))
+        assertTrue(ListingWriter.description(l, 0, "", "SH1").startsWith("🏷️ Talla: W32 L34 (equivale a una M)\n"))
         assertTrue(ListingWriter.description(l, 1, "", "SA1").startsWith("🏷️ Talla W32 L34 · M\n"))
-        assertTrue(ListingWriter.description(l.copy(gender = null), 0, "", "SH1").startsWith("👕 Talla: W32 L34\n"))
+        assertTrue(ListingWriter.description(l.copy(gender = null), 0, "", "SH1").startsWith("🏷️ Talla: W32 L34\n"))
+    }
+
+    @Test
+    fun `brand, model, size and hashtags fill only what the user left blank`() {
+        val answer = """{"marca":"Levi's","modelo":"505","talla":"W33","titulos":{},
+            "hashtags":["#Levis","levis505","Vaqueros Vintage","sh0019","sa12","ootd!","levis"]}"""
+        val blank = Listing(noLabel = true, flat = Measures(waist = "42"))
+        val s = Ai.parse(answer, blank, accounts)
+        assertEquals("Levi's", s.brand)
+        assertEquals("505", s.model)
+        assertEquals(listOf("levis", "levis505", "vaquerosvintage", "ootd"), s.hashtags)
+        val applied = s.applyTo(blank)
+        assertEquals("W33", applied.size)
+        assertEquals("Levi's", applied.brand)
+        val noBrand = Ai.parse(answer, Listing(noBrand = true, size = "M"), accounts)
+        assertNull(noBrand.brand)
+        assertNull(noBrand.model)
+        assertNull(noBrand.sizeLabel)
+        assertNull(Ai.parse(answer, levis, accounts).brand, "the user typed the brand")
+    }
+
+    @Test
+    fun `seller notes and missing data reach the prompt, and thinking stays short`() {
+        val prompt = Ai.prompt(Listing(noBrand = true, noLabel = true, flat = Measures(chest = "55"), aiNotes = "Made in Argentina"), accounts)
+        assertTrue("\"marca\":\"SIN MARCA\"" in prompt, prompt)
+        assertTrue("\"pecho\":\"55\"" in prompt)
+        assertTrue("\"notas_del_vendedor\":\"Made in Argentina\"" in prompt)
+        assertEquals("1024", Ai.thinkingConfig("gemini-2.5-flash")!!["thinkingBudget"].toString())
+        assertNull(Ai.thinkingConfig("gemini-2.5-flash-lite"))
+        assertEquals("\"low\"", Ai.thinkingConfig("gemini-3-flash")!!["thinkingLevel"].toString())
+        assertNull(Ai.thinkingConfig("gemini-flash-latest"))
+        assertFalse("thinkingConfig" in Ai.request(levis, accounts, listOf("A"), "gemini-3-flash", thinking = false))
+        assertTrue("thinkingConfig" in Ai.request(levis, accounts, listOf("A"), "gemini-3-flash"))
+    }
+
+    @Test
+    fun `old ai results stay valid and seller notes make titles stale`() {
+        val l = levis.copy(type = "jeans")
+        assertEquals("jeans|levi's|501|90s", Ai.basis(l))
+        assertTrue(Ai.basis(l.copy(aiNotes = "Made in USA")) != Ai.basis(l))
     }
 
     @Test

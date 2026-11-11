@@ -19,7 +19,9 @@ import kotlinx.serialization.json.jsonObject
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.SocketTimeoutException
 import java.net.URL
+import java.net.UnknownHostException
 
 /**
  * Google Gemini (free tier of AI Studio). Asks Google which Flash models the
@@ -37,25 +39,39 @@ class Gemini(private val resolver: ContentResolver) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
-            val body = Ai.request(listing, accounts, images)
             var last: AiException? = null
             for (model in models(key)) {
-                val (code, text) = try {
-                    post("$BASE/models/$model:generateContent", key, body)
-                } catch (e: IOException) {
-                    throw AiException("Sin conexión con Gemini")
-                }
-                when {
-                    code == 200 -> {
-                        val answer = Ai.answerText(text)
-                        return@withContext Answer(Ai.parse(answer, listing, accounts), model)
+                var thinking = true
+                while (true) {
+                    val body = Ai.request(listing, accounts, images, model, thinking)
+                    val (code, text) = try {
+                        post("$BASE/models/$model:generateContent", key, body)
+                    } catch (e: SocketTimeoutException) {
+                        last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
+                        break // try the next, lighter model
+                    } catch (e: UnknownHostException) {
+                        throw AiException("Sin internet")
+                    } catch (e: IOException) {
+                        throw AiException("Se ha cortado la conexión con Gemini. Vuelve a intentarlo.")
                     }
-                    code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
-                        throw AiException("La clave de Gemini no es válida")
-                    // Out of free quota, overloaded or gone: next model.
-                    code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
-                    code == 404 || code >= 500 -> last = AiException("Gemini no responde ahora, prueba en un rato")
-                    else -> throw AiException("Gemini ha dado un error ($code)")
+                    when {
+                        code == 200 -> {
+                            val answer = Ai.answerText(text)
+                            return@withContext Answer(Ai.parse(answer, listing, accounts), model)
+                        }
+                        code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
+                            throw AiException("La clave de Gemini no es válida")
+                        // A model that does not accept the reasoning setting: same model without it.
+                        code == 400 && thinking && "thinking" in text.lowercase() -> {
+                            thinking = false
+                            continue
+                        }
+                        // Out of free quota, overloaded or gone: next model.
+                        code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
+                        code == 404 || code >= 500 -> last = AiException("Gemini no responde ahora, prueba en un rato")
+                        else -> throw AiException("Gemini ha dado un error ($code)")
+                    }
+                    break
                 }
             }
             throw last ?: AiException("No hay modelos de Gemini disponibles")
@@ -111,7 +127,7 @@ class Gemini(private val resolver: ContentResolver) {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 15_000
-            c.readTimeout = 60_000
+            c.readTimeout = if (body != null) 150_000 else 20_000
             c.setRequestProperty("x-goog-api-key", key.trim())
             if (body != null) {
                 c.requestMethod = "POST"

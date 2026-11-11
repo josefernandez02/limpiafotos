@@ -12,6 +12,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import dev.catalogo.core.Garments
 import dev.catalogo.core.Listing
 import dev.catalogo.core.ListingWriter
+import dev.catalogo.core.Measures
 import dev.catalogo.core.ParentState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -356,7 +357,7 @@ fun DeviceDialog(
 
 private val SAMPLE = Listing(
     type = "jeans", brand = "Levi's", model = "501", size = "W31 L32",
-    keywords = listOf("vintage", "90s", "straight", "faded"),
+    keywords = listOf("vintage", "90s", "straight", "faded"), flat = Measures(waist = "40", length = "104"),
 )
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -364,7 +365,7 @@ private val SAMPLE = Listing(
 fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
     val device = Catalog.device(p, deviceId) ?: return
     var style by remember { mutableIntStateOf(device.style) }
-    var text by remember { mutableStateOf(TextFieldValue(device.template.ifBlank { ListingWriter.defaultTemplate(device.style) })) }
+    var text by remember { mutableStateOf(TextFieldValue(ListingWriter.upgrade(device.template, device.style))) }
     val sample = p.articles.firstOrNull { it.listing != null && !it.released }?.listing ?: SAMPLE
     val sku = Sku.format(device.prefix, 54, p.digits)
 
@@ -401,7 +402,6 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Section("Estilo")
-            Muted("Cada estilo usa otras palabras y otro orden en los títulos.")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (s in 0 until Garments.STYLES) {
                     Choice("Estilo ${s + 1}", style == s) {
@@ -419,9 +419,8 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                 minLines = 10,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Muted("Se rellenan solos:")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (token in listOf("{talla}", "{estado}", "{sku}")) Choice(token, false) { insert(token) }
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (token in listOf("{talla}", "{medidas}", "{estado}", "{hashtags}", "{sku}")) Choice(token, false) { insert(token) }
             }
 
             Section("Vista previa")
@@ -441,28 +440,57 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
 
 @Composable
 private fun GeminiKeyTile(vm: MainViewModel, saved: String) {
-    var key by remember(saved) { mutableStateOf(saved) }
+    var editing by remember(saved) { mutableStateOf(saved.isBlank()) }
+    var key by remember(saved) { mutableStateOf("") }
+    var confirmDelete by remember { mutableStateOf(false) }
     Tile {
-        Muted(
-            if (saved.isBlank()) "Para generar títulos con IA. Es gratis: entra en aistudio.google.com, pulsa " +
-                "\"Get API key\", crea una clave y pégala aquí."
-            else "Clave guardada. Solo se usa en este móvil.",
-        )
+        if (!editing) {
+            Row2(
+                left = {
+                    Column {
+                        Text("Clave guardada", style = MaterialTheme.typography.titleMedium)
+                        Muted("•••• ${saved.takeLast(4)}")
+                    }
+                },
+                right = { TextButton(onClick = { editing = true }) { Text("Cambiar") } },
+            )
+            return@Tile
+        }
+        if (saved.isBlank()) Muted("aistudio.google.com → Get API key")
         OutlinedTextField(
             value = key,
             onValueChange = { key = it.trim().take(100) },
-            label = { Text("Clave de Gemini") },
+            label = { Text(if (saved.isBlank()) "Clave de Gemini" else "Clave nueva") },
             singleLine = true,
             visualTransformation = PasswordVisualTransformation(),
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
         )
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (saved.isNotBlank()) {
-                OutlinedButton(onClick = { vm.setGeminiKey("") }, modifier = Modifier.weight(1f)) { Text("Borrar") }
+                OutlinedButton(onClick = { editing = false; key = "" }, modifier = Modifier.weight(1f)) { Text("Cancelar") }
             }
-            FilledTonalButton(onClick = { vm.setGeminiKey(key) }, enabled = key.isNotBlank() && key != saved, modifier = Modifier.weight(1f)) {
-                Text("Guardar clave")
+            FilledTonalButton(onClick = { vm.setGeminiKey(key) }, enabled = key.length >= 20 && key != saved, modifier = Modifier.weight(1f)) {
+                Text("Guardar")
             }
         }
+        if (saved.isNotBlank()) {
+            TextButton(onClick = { confirmDelete = true }, modifier = Modifier.padding(top = 4.dp)) {
+                Text("Quitar la clave", color = MaterialTheme.colorScheme.error)
+            }
+        }
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("¿Quitar la clave?") },
+            text = { Text("La IA dejará de funcionar hasta que pongas otra.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; vm.setGeminiKey("") }) {
+                    Text("Quitar", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancelar") } },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        )
     }
 }

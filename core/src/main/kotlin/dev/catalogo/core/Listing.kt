@@ -67,7 +67,26 @@ data class Listing(
     val notes: String = "",
     /** Chosen by the AI or the user; gives the letter size of W sizes. */
     val gender: Gender? = null,
+    /** The garment has no brand: the AI must not look for one. */
+    val noBrand: Boolean = false,
+    /** No size label: [size], if any, is an estimate ("aprox.") made from [flat] and the photos. */
+    val noLabel: Boolean = false,
+    /** Flat measures in cm, shown under the size when filled in. */
+    val flat: Measures = Measures(),
+    /** What the seller wants the AI to take into account ("Made in Argentina"). */
+    val aiNotes: String = "",
 )
+
+/** Main flat measures in centimetres; blank when not taken. */
+@Serializable
+data class Measures(val waist: String = "", val chest: String = "", val length: String = "") {
+    fun isEmpty() = waist.isBlank() && chest.isBlank() && length.isBlank()
+
+    /** "Cintura 42 cm · Largo 104 cm" */
+    fun text(): String = listOf("Cintura" to waist, "Pecho" to chest, "Largo" to length)
+        .filter { it.second.isNotBlank() }
+        .joinToString(" · ") { "${it.first} ${it.second.trim()} cm" }
+}
 
 @Serializable
 data class ListingText(val title: String, val description: String)
@@ -141,7 +160,7 @@ object Garments {
         Keyword("70s", "70s", E, listOf("70s", "1970s"), "Años 70: colores tierra, campana, estampados."),
         Keyword("80s", "80s", E, listOf("80s", "1980s"), "Años 80: colores vivos, chándales de nylon, hombreras."),
         Keyword("90s", "90s", E, listOf("90s", "1990s"), "Años 90: ropa ancha, logos grandes, vaqueros holgados."),
-        Keyword("y2k", "y2k", E, listOf("Y2K", "Early 2000s"), "Estilo de los 2000: tiro bajo, ajustado, logos y brillos."),
+        Keyword("y2k", "y2k", E, listOf("Y2K", "Y2K"), "Estilo de los 2000: tiro bajo, ajustado, logos y brillos."),
         // Estética
         Keyword("vintage", "vintage", A, listOf("Vintage", "Retro"), "Prenda antigua (unos 20 años o más) o con ese aire."),
         Keyword("retro", "retro", A, listOf("Retro", "Old School"), "Nueva, pero inspirada en otra década."),
@@ -229,66 +248,98 @@ object Garments {
 }
 
 /**
- * Deterministic titles and descriptions. Each listing style ([style] 0 or 1)
- * uses its own vocabulary, order and phrasing so two accounts never publish
- * the same text for the same article.
+ * Titles, descriptions and hashtags. Each listing style ([style] 0 or 1)
+ * uses its own order and phrasing so two accounts never publish the same
+ * text. AI titles and hashtags replace the deterministic ones when present.
  */
 object ListingWriter {
     const val TITLE_MAX = 100
     const val DESCRIPTION_MAX = 2000
+    const val HASHTAGS_MAX = 12
 
     private val TEMPLATES = listOf(
         """
-        👕 Talla: {talla}
+        🏷️ Talla: {talla}
+        📏 Medidas en plano: {medidas}
         ✨ Estado: {estado}
-        📦 Envío: En 24 horas
+        🚚 Envío: 24 horas
 
-        🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar.
-        💬 ¿Tienes alguna duda? Escríbeme y te respondo lo antes posible.
+        🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!
 
-        #vintage #branded #y2k #vintagefashion #ootd #vintedfrance #aesthetic #2000s #90s #stylefinds #retrofashion #{sku}
+        {hashtags}
         """,
         """
         🏷️ Talla {talla}
+        📏 {medidas} (en plano)
         ✅ {estado}
         🚚 Lo envío en 24h
 
-        👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!
-        🤝 Si te surge cualquier pregunta, mándame un mensaje sin compromiso.
+        👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!
 
-        #vintagestyle #thrifted #streetwear #y2kfashion #retro #vinted #90sfashion #outfit #secondhand #fashionfinds #vintageclothing #{sku}
+        {hashtags}
         """,
     ).map { it.trimIndent() }
 
-    /** Lines of templates saved before measures were removed; they are dropped. */
-    private val LEGACY_LINES = setOf(
-        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla.",
-        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla",
-        "ℹ️ Nota: medidas aproximadas en plano, úsalas como guía junto con la talla.",
+    /** Lines of older templates: dropped (null) or replaced by the current wording. */
+    private val LEGACY_LINES: Map<String, String?> = mapOf(
+        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla." to null,
+        "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla" to null,
+        "ℹ️ Nota: medidas aproximadas en plano, úsalas como guía junto con la talla." to null,
+        "💬 ¿Tienes alguna duda? Escríbeme y te respondo lo antes posible." to null,
+        "🤝 Si te surge cualquier pregunta, mándame un mensaje sin compromiso." to null,
+        "👕 Talla: {talla}" to "🏷️ Talla: {talla}",
+        "📦 Envío: En 24 horas" to "🚚 Envío: 24 horas",
+        "🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar." to
+            "🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!",
+        "👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!" to
+            "👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!",
     )
 
     fun defaultTemplate(style: Int): String = TEMPLATES[style.mod(TEMPLATES.size)]
 
+    /**
+     * Brings a template saved by an older version up to date: old lines are
+     * replaced, a line of fixed hashtags becomes {hashtags} and the measures
+     * line goes under the size.
+     */
+    fun upgrade(template: String, style: Int): String {
+        if (template.isBlank()) return defaultTemplate(style)
+        val lines = template.lines().mapNotNull { line ->
+            val t = line.trim()
+            when {
+                t in LEGACY_LINES -> LEGACY_LINES[t]
+                t.startsWith("#") && t.split(Regex("\\s+")).all { it.startsWith("#") } -> "{hashtags}"
+                else -> line
+            }
+        }.toMutableList()
+        if (lines.none { "{medidas}" in it }) {
+            val at = lines.indexOfFirst { "{talla}" in it }
+            if (at >= 0) lines.add(at + 1, defaultTemplate(style).lines().first { "{medidas}" in it })
+        }
+        return lines.joinToString("\n")
+    }
+
     fun title(listing: Listing, style: Int): String {
         val s = style.mod(Garments.STYLES)
         val type = Garments.type(listing.type)
-        val typeName = type?.en?.get(s).orEmpty()
+        val typeName = type?.en?.get(0).orEmpty()
         val brand = if (s == 1) listing.brand.replace("'", "").replace("’", "") else listing.brand
         val words = listing.keywords.mapNotNull(Garments::keyword).filter { it.appliesTo(type?.group) }
         fun of(kind: KeywordKind) = words.filter { it.kind == kind }.map { it.en[s] }
         val epoch = of(KeywordKind.EPOCH)
-        val aesthetic = of(KeywordKind.AESTHETIC)
-        val fit = of(KeywordKind.FIT)
+        val vintage = if (epoch.isNotEmpty() || "vintage" in listing.keywords) "Vintage" else ""
+        val aesthetic = words.filter { it.kind == KeywordKind.AESTHETIC && it.id != "vintage" }.map { it.en[0] }
+        val fit = words.filter { it.kind == KeywordKind.FIT }.map { it.en[if (s == 0) 1 else 0] }
         val material = of(KeywordKind.MATERIAL)
         val detail = of(KeywordKind.DETAIL)
 
         // (text, priority): lower priority is dropped first when the title is too long.
         val parts: List<Pair<String, Int>> = if (s == 0) {
-            listOf(brand to 9, listing.model to 8) + aesthetic.map { it to 6 } + epoch.map { it to 6 } +
-                fit.map { it to 5 } + material.map { it to 4 } + (typeName to 9) + detail.map { it to 3 }
+            listOf(brand to 9, listing.model to 8, typeName to 9, vintage to 7) + epoch.map { it to 7 } +
+                fit.map { it to 5 } + aesthetic.map { it to 4 } + material.map { it to 4 } + detail.map { it to 3 }
         } else {
-            epoch.map { it to 6 } + aesthetic.reversed().map { it to 6 } + listOf(brand to 9, listing.model to 8) +
-                material.map { it to 4 } + fit.map { it to 5 } + (typeName to 9) + detail.reversed().map { it to 3 }
+            listOf(vintage to 7) + epoch.map { it to 7 } + listOf(brand to 9, listing.model to 8) + fit.map { it to 5 } +
+                listOf(typeName to 9) + material.map { it to 4 } + aesthetic.reversed().map { it to 4 } + detail.reversed().map { it to 3 }
         }
         val seen = HashSet<String>()
         val clean = parts.map { (t, p) -> t.trim().replace(Regex("\\s+"), " ") to p }
@@ -302,15 +353,18 @@ object ListingWriter {
         return clean.joinToString(" ") { it.first }.take(TITLE_MAX).trim()
     }
 
-    fun description(listing: Listing, style: Int, template: String, sku: String): String {
+    /** [hashtags] (without #) come from the AI; null uses the ones made from the listing. */
+    fun description(listing: Listing, style: Int, template: String, sku: String, hashtags: List<String>? = null): String {
         val s = style.mod(Garments.STYLES)
+        val tags = (hashtags?.takeIf { it.isNotEmpty() } ?: hashtags(listing)).let { if (s == 1) reorder(it) else it }
         val values = mapOf(
             "{talla}" to size(listing, s),
+            "{medidas}" to listing.flat.text(),
             "{estado}" to state(listing, s),
+            "{hashtags}" to (tags.map { "#$it" } + "#$sku").joinToString(" "),
             "{sku}" to sku,
         )
-        val body = (template.ifBlank { defaultTemplate(s) }).lines().mapNotNull { line ->
-            if ("{medidas}" in line || line.trim() in LEGACY_LINES) return@mapNotNull null
+        val body = upgrade(template, s).lines().mapNotNull { line ->
             var out = line
             for ((key, value) in values) {
                 if (key in out) {
@@ -326,14 +380,16 @@ object ListingWriter {
             .take(DESCRIPTION_MAX)
     }
 
-    fun text(listing: Listing, style: Int, template: String, sku: String) =
-        ListingText(title(listing, style), description(listing, style, template, sku))
+    fun text(listing: Listing, style: Int, template: String, sku: String, hashtags: List<String>? = null) =
+        ListingText(title(listing, style), description(listing, style, template, sku, hashtags))
 
-    /** "W32 L34 (equivale a una M)": W sizes also show their letter size. */
+    /** "W32 L34 (equivale a una M)"; an estimated size says "aprox.". */
     fun size(listing: Listing, style: Int): String {
         val size = listing.size.trim()
-        val letter = Vinted.letterSize(size, listing.gender) ?: return size
-        return if (style.mod(Garments.STYLES) == 0) "$size (equivale a una $letter)" else "$size · $letter"
+        if (size.isEmpty()) return ""
+        val shown = if (listing.noLabel) "$size aprox." else size
+        val letter = Vinted.letterSize(size, listing.gender) ?: return shown
+        return if (style.mod(Garments.STYLES) == 0) "$shown (equivale a una $letter)" else "$shown · $letter"
     }
 
     /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas (revisar imágenes)". */
@@ -361,6 +417,51 @@ object ListingWriter {
             Condition.GOOD -> "En buen estado, con un uso ligero"
             Condition.FAIR -> "Usado, con señales de uso visibles"
         }
+    }
+
+    /** Hashtags made from the listing alone, for articles without AI: brand, garment, era, fit and style. */
+    fun hashtags(listing: Listing): List<String> {
+        val type = Garments.type(listing.type)
+        val words = listing.keywords.mapNotNull(Garments::keyword).filter { it.appliesTo(type?.group) }
+        val brand = if (listing.noBrand) "" else tag(listing.brand)
+        val out = mutableListOf<String>()
+        if (brand.isNotEmpty()) {
+            out += brand
+            if (listing.model.isNotBlank()) out += brand + tag(listing.model)
+        }
+        if (type != null) {
+            out += tag(type.en[0])
+            out += tag(type.label.substringBefore(" /").substringBefore(" ("))
+        }
+        val old = words.any { it.kind == KeywordKind.EPOCH || it.id == "vintage" }
+        if (old) {
+            out += "vintage"
+            if (brand.isNotEmpty()) out += brand + "vintage"
+        }
+        for (w in words) {
+            out += when (w.id) {
+                "y2k" -> listOf("y2k", "2000s")
+                "90s", "80s", "70s" -> listOf(w.id, w.id + "fashion")
+                "vintage" -> emptyList()
+                else -> listOf(tag(w.en[0]))
+            }
+        }
+        return clean(out)
+    }
+
+    /** Lowercase, no accents, spaces or symbols; no duplicates; at most [HASHTAGS_MAX]. */
+    fun clean(tags: List<String>): List<String> =
+        tags.map(::tag).filter { it.length in 2..30 }.distinct().take(HASHTAGS_MAX)
+
+    private fun tag(text: String): String = java.text.Normalizer.normalize(text.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "")
+        .replace(Regex("[^a-z0-9]"), "")
+
+    /** Second account: same tags in another order, so both descriptions are not identical. */
+    private fun reorder(tags: List<String>): List<String> {
+        if (tags.size < 4) return tags
+        val half = tags.size / 2
+        return tags.take(2) + tags.drop(half) + tags.subList(2, half)
     }
 
     /** One line, no final full stop, first letter in capitals. */

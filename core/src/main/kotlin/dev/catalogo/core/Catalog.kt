@@ -78,8 +78,9 @@ object Catalog {
     /** Title and description of [number] as [device] publishes it. */
     fun listingText(s: ParentState, number: Int, device: Device): ListingText? {
         val listing = article(s, number)?.listing ?: return null
-        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits))
-        val title = freshAi(s, number)?.titles?.get(device.id)?.takeIf { it.isNotBlank() } ?: return text
+        val ai = freshAi(s, number)
+        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits), ai?.hashtags)
+        val title = ai?.titles?.get(device.id)?.takeIf { it.isNotBlank() } ?: return text
         return text.copy(title = title)
     }
 

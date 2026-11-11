@@ -142,7 +142,11 @@ private fun ArticleRow(
     cover: android.net.Uri?,
     outbox: Map<String, Map<Int, Int>>,
 ) {
-    val title = Catalog.listingText(p, a.number, p.self)?.title
+    // Until the AI writes the title, the row shows what was typed instead of a provisional title.
+    val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
+        ?: a.listing?.let { l ->
+            listOf(if (l.noBrand) "Sin marca" else l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null }
+        }
     Tile(onClick = { vm.go(Screen.Article(a.number)) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Cover(cover)

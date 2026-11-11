@@ -122,6 +122,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- navigation ----------
 
     fun go(screen: Screen) {
+        if (_stack.value.last() == screen) return
         _stack.value = _stack.value + screen
     }
 
@@ -148,8 +149,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
+    /** Replaces the top screen; never leaves the same screen twice in a row (back would seem broken). */
     private fun replaceTop(screen: Screen) {
-        _stack.value = _stack.value.dropLast(1) + screen
+        val rest = _stack.value.dropLast(1)
+        _stack.value = if (rest.lastOrNull() == screen) rest else rest + screen
     }
 
     fun clearMessage() {
