@@ -30,7 +30,7 @@ import java.net.UnknownHostException
  */
 class Gemini(private val resolver: ContentResolver) {
 
-    data class Answer(val suggestion: AiSuggestion, val model: String)
+    data class Answer(val suggestion: AiSuggestion, val model: String, val seconds: Int)
 
     private var models: List<String>? = null
 
@@ -39,6 +39,7 @@ class Gemini(private val resolver: ContentResolver) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
+            val started = System.currentTimeMillis()
             var last: AiException? = null
             for (model in models(key)) {
                 var thinking = true
@@ -57,7 +58,8 @@ class Gemini(private val resolver: ContentResolver) {
                     when {
                         code == 200 -> {
                             val answer = Ai.answerText(text)
-                            return@withContext Answer(Ai.parse(answer, listing, accounts), model)
+                            val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
+                            return@withContext Answer(Ai.parse(answer, listing, accounts), model, seconds)
                         }
                         code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
                             throw AiException("La clave de Gemini no es válida")
@@ -115,7 +117,7 @@ class Gemini(private val resolver: ContentResolver) {
             decoded
         }
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
@@ -127,7 +129,7 @@ class Gemini(private val resolver: ContentResolver) {
         val c = URL(url).openConnection() as HttpURLConnection
         try {
             c.connectTimeout = 15_000
-            c.readTimeout = if (body != null) 150_000 else 20_000
+            c.readTimeout = if (body != null) ANSWER_TIMEOUT else 20_000
             c.setRequestProperty("x-goog-api-key", key.trim())
             if (body != null) {
                 c.requestMethod = "POST"
@@ -145,7 +147,10 @@ class Gemini(private val resolver: ContentResolver) {
 
     companion object {
         private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
-        private const val MAX_SIDE = 1280
+        /** Enough to read labels; smaller photos make the answer faster. */
+        private const val MAX_SIDE = 1024
+        /** Past this the model is stuck: the next, lighter one is tried. */
+        private const val ANSWER_TIMEOUT = 75_000
         /** "gemini-2.5-flash", "gemini-3-flash-lite"…; no previews, image, audio or dated variants. */
         private val STABLE = Regex("gemini-(\\d+(?:\\.\\d+)?)-flash(?:-lite)?")
         private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")

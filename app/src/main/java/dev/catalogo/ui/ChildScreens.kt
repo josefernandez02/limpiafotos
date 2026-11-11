@@ -140,7 +140,7 @@ fun AlbumScreen(vm: MainViewModel, child: ChildState, number: Int) {
                     enabled = n > 0,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
                     shape = RoundedCornerShape(14.dp),
-                ) { Text("Subir") }
+                ) { OneLine("Subir") }
             }
             Section("Anuncio")
             ListingCard(vm, child.listings[number])

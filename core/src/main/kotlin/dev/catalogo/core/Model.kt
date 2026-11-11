@@ -58,7 +58,15 @@ data class Article(
     val ai: AiResult? = null,
     /** Per device id: the listing found in that account's Vinted wardrobe. */
     val vinted: Map<String, VintedItem> = emptyMap(),
-)
+    /** Accounts (device ids) chosen to publish this article in; usually one. */
+    val accounts: Set<String> = emptySet(),
+) {
+    /** Chosen accounts; articles from before the choice existed use where they went. */
+    val targets: Set<String> get() = accounts.ifEmpty { uploaded + delivered.filterValues { it > 0 }.keys }
+
+    /** Chosen for some account and not yet published in every chosen one. */
+    val toUpload: Boolean get() = targets.isEmpty() || !uploaded.containsAll(targets)
+}
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */
 @Serializable

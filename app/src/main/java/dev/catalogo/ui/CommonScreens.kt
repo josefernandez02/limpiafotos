@@ -132,12 +132,12 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
                                 onClick = start,
                                 modifier = Modifier.weight(1f).height(54.dp),
                                 shape = RoundedCornerShape(18.dp),
-                            ) { Text("Conectar de nuevo") }
+                            ) { OneLine("Conectar de nuevo") }
                             Button(
                                 onClick = done,
                                 modifier = Modifier.weight(1f).height(54.dp),
                                 shape = RoundedCornerShape(18.dp),
-                            ) { Text("Hecho") }
+                            ) { OneLine("Hecho") }
                         }
                     }
                 }
@@ -468,7 +468,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                         onClick = { text = TextFieldValue(ListingWriter.defaultTemplate(style)) },
                         modifier = Modifier.weight(1f).height(54.dp),
                         shape = RoundedCornerShape(18.dp),
-                    ) { Text("Restablecer") }
+                    ) { OneLine("Restablecer") }
                     Button(
                         onClick = {
                             val custom = text.text.trim().takeIf { it != ListingWriter.defaultTemplate(style) } ?: ""
@@ -476,7 +476,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                         },
                         modifier = Modifier.weight(1f).height(54.dp),
                         shape = RoundedCornerShape(18.dp),
-                    ) { Text("Guardar") }
+                    ) { OneLine("Guardar") }
                 }
             }
         },
@@ -551,7 +551,7 @@ private fun GeminiKeyTile(vm: MainViewModel, saved: String) {
         )
         Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (saved.isNotBlank()) {
-                OutlinedButton(onClick = { editing = false; key = "" }, modifier = Modifier.weight(1f)) { Text("Cancelar") }
+                OutlinedButton(onClick = { editing = false; key = "" }, modifier = Modifier.weight(1f)) { OneLine("Cancelar") }
             }
             FilledTonalButton(onClick = { vm.setGeminiKey(key) }, enabled = key.length >= 20 && key != saved, modifier = Modifier.weight(1f)) {
                 Text("Guardar")

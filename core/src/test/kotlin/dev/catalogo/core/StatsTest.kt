@@ -48,3 +48,24 @@ class StatsTest {
         assertNull(k.medianDays)
     }
 }
+
+class AccountsTest {
+    private val samsung = Device("p", "Samsung", "SH")
+    private val poco = Device("c1", "Poco", "SA", "s1", style = 1)
+
+    @Test
+    fun `chosen accounts drive what is left to upload`() {
+        var (s, n) = Catalog.create(ParentState(self = samsung, children = listOf(poco)), 0)
+        assertTrue(Catalog.article(s, n)!!.toUpload, "no account chosen yet")
+        s = Catalog.setAccounts(s, n, setOf("c1", "ghost"))
+        assertEquals(setOf("c1"), Catalog.article(s, n)!!.targets)
+        s = Catalog.setUploaded(s, n, "c1", true)
+        kotlin.test.assertFalse(Catalog.article(s, n)!!.toUpload)
+        s = Catalog.setUploaded(s, n, "p", true)
+        assertEquals(setOf("p", "c1"), Catalog.article(s, n)!!.targets, "uploading somewhere adds that account")
+        s = Catalog.setAccounts(s, n, setOf("p"))
+        assertEquals(setOf("p"), Catalog.article(s, n)!!.uploaded)
+        val old = Article(9, 0, delivered = mapOf("c1" to 3))
+        assertEquals(setOf("c1"), old.targets, "older articles keep where their photos went")
+    }
+}

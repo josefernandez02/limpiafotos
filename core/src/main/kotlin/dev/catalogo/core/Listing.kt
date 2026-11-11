@@ -392,13 +392,11 @@ object ListingWriter {
         return if (style.mod(Garments.STYLES) == 0) "$shown (equivale a una $letter)" else "$shown · $letter"
     }
 
-    /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas (revisar imágenes)". */
+    /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas". */
     fun state(listing: Listing, style: Int): String {
-        val s = style.mod(Garments.STYLES)
-        val base = condition(listing.condition, s)
+        val base = condition(listing.condition, style.mod(Garments.STYLES))
         val note = cleanNote(listing.notes)
-        if (note.isEmpty()) return base
-        return "$base. $note " + if (s == 0) "(revisar imágenes)" else "(ver fotos)"
+        return if (note.isEmpty()) base else "$base. $note"
     }
 
     fun condition(c: Condition, style: Int): String = if (style.mod(Garments.STYLES) == 0) {

@@ -45,7 +45,7 @@ class AiTest {
         assertEquals(listOf("straight", "faded"), s.keywords)
         assertEquals(Gender.MEN, s.gender)
         assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", s.category)
-        assertEquals(listOf("Azul", "Azul claro"), s.colors)
+        assertEquals(listOf("Azul"), s.colors, "two shades of one colour are one colour")
         assertNull(s.sizeLabel, "the user already gave a size")
         assertEquals(mapOf("p" to "Levi's 501 Straight Leg Jeans 90s Faded", "c1" to "1990s Levis 501 Denim Pants Sun Faded"), s.titles)
         assertEquals(listOf("Etiqueta Levi's 501"), s.findings)
@@ -147,7 +147,7 @@ class AiTest {
         assertTrue("\"marca\":\"SIN MARCA\"" in prompt, prompt)
         assertTrue("\"pecho\":\"55\"" in prompt)
         assertTrue("\"notas_del_vendedor\":\"Made in Argentina\"" in prompt)
-        assertEquals("1024", Ai.thinkingConfig("gemini-2.5-flash")!!["thinkingBudget"].toString())
+        assertEquals("512", Ai.thinkingConfig("gemini-2.5-flash")!!["thinkingBudget"].toString())
         assertNull(Ai.thinkingConfig("gemini-2.5-flash-lite"))
         assertEquals("\"low\"", Ai.thinkingConfig("gemini-3-flash")!!["thinkingLevel"].toString())
         assertNull(Ai.thinkingConfig("gemini-flash-latest"))
@@ -160,6 +160,20 @@ class AiTest {
         val l = levis.copy(type = "jeans")
         assertEquals("jeans|levi's|501|90s", Ai.basis(l))
         assertTrue(Ai.basis(l.copy(aiNotes = "Made in USA")) != Ai.basis(l))
+    }
+
+    @Test
+    fun `categories written loosely still match one path`() {
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Ai.matchCategory("hombre > ropa > vaqueros > vaqueros rectos"))
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Ai.matchCategory("Hombre › Ropa › Vaqueros › Vaqueros rectos "))
+        assertNull(Ai.matchCategory("Ropa › Cosas raras"))
+        val prompt = Ai.prompt(Listing(gender = Gender.WOMEN), accounts)
+        assertTrue("Mujer › Ropa › Vestidos › Midi" in prompt)
+        assertFalse("Hombre › Ropa › Vaqueros" in prompt)
+        val body = Ai.request(levis, accounts, listOf("A"))
+        assertFalse("Vaqueros rectos" in body.substringAfter("responseSchema"), "no category enum in the schema")
+        val two = Ai.parse("""{"colores":["Negro","Blanco"]}""", Listing(), accounts)
+        assertEquals(listOf("Negro", "Blanco"), two.colors)
     }
 
     @Test

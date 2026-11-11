@@ -95,7 +95,10 @@ fun AiTile(vm: MainViewModel, p: ParentState, article: Article) {
                     modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 4.dp),
                     shape = RoundedCornerShape(16.dp),
                 ) { Text(if (article.ai == null) "Generar anuncio con IA" else "Volver a generar con IA") }
-                article.ai?.let { VintedInfo(article.listing?.gender, it) }
+                article.ai?.let { ai ->
+                    VintedInfo(article.listing?.gender, ai)
+                    if (ai.seconds > 0) Muted("${ai.seconds} s · ${ai.model}", Modifier.padding(top = 6.dp), maxLines = 1)
+                }
             }
         }
     }

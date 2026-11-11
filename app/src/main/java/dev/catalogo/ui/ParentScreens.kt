@@ -85,11 +85,11 @@ private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
 
 // ---------- Artículos (tab) ----------
 
-/** List filter: everything, nothing uploaded yet, missing in one account, or sold in Vinted. */
+/** List filter: everything, still to upload, one account's articles, or sold in Vinted. */
 private sealed interface Filter {
     data object All : Filter
-    data object NotUploaded : Filter
-    data class Missing(val deviceId: String) : Filter
+    data object ToUpload : Filter
+    data class Account(val deviceId: String) : Filter
     data object SoldInVinted : Filter
 }
 
@@ -107,8 +107,8 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     val shown = active.filter { a ->
         when (val f = filter) {
             Filter.All -> true
-            Filter.NotUploaded -> a.uploaded.isEmpty()
-            is Filter.Missing -> f.deviceId !in a.uploaded
+            Filter.ToUpload -> a.toUpload
+            is Filter.Account -> f.deviceId in a.targets
             Filter.SoldInVinted -> a.soldInVinted()
         }
     }
@@ -143,12 +143,12 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             item(key = "filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
-                    val none = active.count { it.uploaded.isEmpty() }
-                    item { Choice("Sin subir · $none", filter == Filter.NotUploaded) { filter = Filter.NotUploaded } }
+                    val todo = active.count { it.toUpload }
+                    item { Choice("Por subir · $todo", filter == Filter.ToUpload) { filter = Filter.ToUpload } }
                     if (devices.size > 1) {
                         items(devices, key = { it.id }) { d ->
-                            val missing = active.count { d.id !in it.uploaded }
-                            Choice("Falta en ${d.label} · $missing", filter == Filter.Missing(d.id)) { filter = Filter.Missing(d.id) }
+                            val n = active.count { d.id in it.targets }
+                            Choice("${d.label} · $n", filter == Filter.Account(d.id)) { filter = Filter.Account(d.id) }
                         }
                     }
                     val sold = active.count { it.soldInVinted() }
@@ -206,36 +206,27 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                UploadBar(devices.map { it.id in a.uploaded })
-                val up = devices.count { it.id in a.uploaded }
+                // Only the accounts chosen for this article: usually one, so it reads the same with many accounts.
+                val targets = devices.filter { it.id in a.targets }
                 Muted(
                     listOfNotNull(
+                        if (targets.isEmpty()) "Sin cuenta" else targets.joinToString(" · ") { d ->
+                            d.label + if (d.id in a.uploaded) " ✓" else ""
+                        },
                         when {
-                            up == 0 -> "Sin subir"
-                            up == devices.size -> if (devices.size == 1) "Subido" else "Subido en todas"
-                            else -> "Subido en $up de ${devices.size}"
+                            targets.isEmpty() -> null
+                            a.toUpload -> "Por subir"
+                            else -> "Subido"
                         },
                         if (favourites > 0) "♥ $favourites" else null,
                         if (sending > 0) "$sending fotos por enviar" else null,
                     ).joinToString(" · "),
+                    maxLines = 1,
                 )
             }
             IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-        }
-    }
-}
-
-/** One thin segment per account, filled where the article is published: readable with 2 or 12 accounts. */
-@Composable
-private fun UploadBar(states: List<Boolean>) {
-    Row(Modifier.fillMaxWidth().height(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-        for (on in states) {
-            Box(
-                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(2.dp))
-                    .background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest),
-            )
         }
     }
 }
@@ -307,75 +298,75 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 }
             }
 
-            Section("Cuentas")
-            for (d in Catalog.devices(p)) {
-                val sku = Sku.format(d.prefix, number, p.digits)
-                val isSelf = d.id == p.self.id
-                val waiting = if (isSelf) 0 else outbox[d.id]?.get(number) ?: 0
-                val detail = if (isSelf) {
-                    photos(counts[sku] ?: 0)
-                } else {
-                    val sent = article.delivered[d.id] ?: 0
-                    listOfNotNull(
-                        if (sent > 0) "$sent enviadas" else null,
-                        if (waiting > 0) "$waiting por enviar" else null,
-                    ).joinToString(" · ").ifEmpty { "Sin fotos" }
+            // Photos are always taken here; other accounts get a copy when chosen.
+            val ownSku = Sku.format(p.self.prefix, number, p.digits)
+            val ownCount = counts[ownSku] ?: 0
+            val waitingAll = outbox.values.sumOf { it[number] ?: 0 }
+            val strip by produceState(emptyList<android.net.Uri>(), ownSku, ownCount, waitingAll) {
+                value = vm.albumPhotos(ownSku).ifEmpty { vm.aiPhotos(number) }
+            }
+            Section("Fotos")
+            Tile {
+                if (strip.isEmpty()) Muted("Sin fotos") else PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) })
+                Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(
+                        onClick = { vm.startSession(number, p.self.id) { openCamera(context, vm) } },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { OneLine(if (ownCount == 0) "Hacer fotos" else "Añadir fotos") }
+                    FilledTonalButton(
+                        onClick = { vm.go(Screen.Photos(number, p.self.id)) },
+                        enabled = ownCount > 0,
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { OneLine("Ordenar y recortar") }
                 }
-                val version = if (isSelf) counts[sku] ?: 0 else waiting
-                val strip by produceState(emptyList<android.net.Uri>(), sku, version) {
-                    value = if (isSelf) vm.albumPhotos(sku) else vm.outboxPhotos(d.id, number)
-                }
-                val uploaded = d.id in article.uploaded
-                Tile {
-                    Row2(
-                        left = {
-                            Column {
-                                Text(d.label, style = MaterialTheme.typography.titleMedium)
-                                Muted("$sku · $detail")
-                            }
-                        },
-                        right = {
-                            Muted(if (uploaded) "Subido" else "No subido", Modifier.padding(end = 8.dp))
-                            Switch(checked = uploaded, onCheckedChange = { vm.setUploaded(number, d.id, it) })
-                        },
-                    )
-                    article.vinted[d.id]?.let { v ->
-                        Muted(
-                            listOfNotNull(
-                                v.price?.let(Money::format),
-                                v.views?.let { "$it visitas" },
-                                v.favourites?.let { "♥ $it" },
-                                when (v.status) {
-                                    "reserved" -> "reservado"
-                                    "hidden" -> "oculto"
-                                    "sold" -> "vendido"
-                                    else -> null
-                                },
-                            ).joinToString(" · "),
-                        )
+            }
+
+            Section("Publicar en")
+            val devices = Catalog.devices(p)
+            val targets = article.targets
+            Tile {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (d in devices) {
+                        val on = d.id in targets
+                        Choice(d.label, on) { vm.setAccounts(number, if (on) targets - d.id else targets + d.id) }
                     }
-                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 8.dp))
-                    Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilledTonalButton(
-                            onClick = { vm.startSession(number, d.id) { openCamera(context, vm) } },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(14.dp),
-                        ) { Text("Fotos") }
-                        if (isSelf || waiting > 0) {
-                            FilledTonalButton(
-                                onClick = { vm.go(Screen.Photos(number, d.id)) },
-                                enabled = strip.isNotEmpty(),
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(14.dp),
-                            ) { Text("Editar") }
-                        }
-                        if (isSelf) {
-                            FilledTonalButton(
-                                onClick = { vm.stage(number) },
-                                enabled = (counts[sku] ?: 0) > 0,
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(14.dp),
-                            ) { Text("Subir") }
+                }
+                if (targets.isEmpty()) Muted("Elige en qué cuenta lo vas a subir", Modifier.padding(top = 6.dp))
+                for (d in devices.filter { it.id in targets }) {
+                    val isSelf = d.id == p.self.id
+                    val uploaded = d.id in article.uploaded
+                    val waiting = outbox[d.id]?.get(number) ?: 0
+                    val sent = article.delivered[d.id] ?: 0
+                    val v = article.vinted[d.id]
+                    Column(Modifier.fillMaxWidth().padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(d.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val detail = listOfNotNull(
+                            when {
+                                isSelf -> null
+                                waiting > 0 -> "$waiting fotos se enviarán al ${d.name} al conectar"
+                                sent > 0 -> "Fotos en el ${d.name}"
+                                else -> "Sin fotos para el ${d.name}"
+                            },
+                            v?.price?.let(Money::format),
+                            v?.views?.let { "$it visitas" },
+                            v?.favourites?.let { "♥ $it" },
+                            when (v?.status) {
+                                "reserved" -> "reservado"
+                                "hidden" -> "oculto"
+                                "sold" -> "vendido"
+                                else -> null
+                            },
+                        )
+                        if (detail.isNotEmpty()) Muted(detail.joinToString(" · "))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Choice("Por subir", !uploaded) { vm.setUploaded(number, d.id, false) }
+                            Choice("Subido", uploaded) { vm.setUploaded(number, d.id, true) }
+                            if (isSelf && !uploaded) {
+                                Spacer(Modifier.weight(1f))
+                                TextButton(onClick = { vm.stage(number) }, enabled = ownCount > 0) { OneLine("Preparar fotos") }
+                            }
                         }
                     }
                 }
@@ -385,13 +376,13 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             AiTile(vm, p, article)
 
             Section("Anuncio")
-            val devices = Catalog.devices(p)
-            if (devices.size > 1) {
+            val listed = devices.filter { it.id in targets }.ifEmpty { devices }
+            if (listed.size > 1) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(devices, key = { it.id }) { d -> Choice(d.label, shown == d.id) { shown = d.id } }
+                    items(listed, key = { it.id }) { d -> Choice(d.label, shown == d.id) { shown = d.id } }
                 }
             }
-            val device = devices.firstOrNull { it.id == shown } ?: p.self
+            val device = listed.firstOrNull { it.id == shown } ?: listed.first()
             ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
             Spacer(Modifier.height(8.dp))
         }

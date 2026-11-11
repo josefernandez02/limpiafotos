@@ -27,6 +27,8 @@ data class AiResult(
     val model: String = "",
     /** Without "#" and without the SKU, which the description adds last. */
     val hashtags: List<String> = emptyList(),
+    /** How long the answer took, to see if the AI is getting slow. */
+    val seconds: Int = 0,
 )
 
 /** One answer of the AI, already checked against the closed lists. */
@@ -61,7 +63,8 @@ data class AiSuggestion(
         )
     }
 
-    fun result(applied: Listing, model: String) = AiResult(Ai.basis(applied), category, colors, titles, model, hashtags)
+    fun result(applied: Listing, model: String, seconds: Int = 0) =
+        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds)
 }
 
 class AiException(message: String) : Exception(message)
@@ -146,8 +149,8 @@ object Ai {
             - tipo_prenda: uno de TIPOS. Si viene, devuelve ese.
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
             - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
-            - categoria: la ruta MÁS CONCRETA de CATEGORIAS que encaje con la prenda y el sexo.
-            - colores: 1 o 2 de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Principal primero.
+            - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda y el sexo.
+            - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
 
             4. TÍTULOS (en inglés, uno por cuenta dentro de "titulos")
             Vinted muestra la foto, no el título: el título sirve para salir en las búsquedas. Mete las palabras que la gente escribe, en un orden natural.
@@ -177,8 +180,39 @@ object Ai {
             PALABRAS (id|en inglés|qué significa)
             ${Garments.keywords.filter { it.kind != KeywordKind.EPOCH }.joinToString("\n") { "${it.id}|${it.en[0]}|${it.help}" }}
 
-            CATEGORIAS y COLORES: los valores permitidos están en el esquema de respuesta.
+            COLORES: ${Vinted.colors.joinToString(", ")}
+
+            CATEGORIAS
+            ${categoriesFor(listing.gender).joinToString("\n")}
         """.trimIndent()
+    }
+
+    /** Categories for the user's gender, or all when it is not known. */
+    private fun categoriesFor(gender: Gender?): List<String> =
+        if (gender == null) Vinted.categories else Vinted.categories.filter { it.startsWith(gender.label + " ") }
+
+    /** Families of close shades: two colours of the same family are one colour seen in two lights. */
+    private val SHADES = listOf(
+        setOf("Beige", "Crema", "Caqui", "Albaricoque"),
+        setOf("Azul", "Azul claro", "Azul marino", "Turquesa"),
+        setOf("Verde", "Verde oscuro", "Menta", "Caqui"),
+        setOf("Rojo", "Burdeos", "Coral"),
+        setOf("Rosa", "Lila", "Morado", "Coral"),
+        setOf("Amarillo", "Mostaza", "Dorado"),
+        setOf("Gris", "Plateado"),
+        setOf("Marrón", "Caqui", "Beige"),
+    )
+
+    /** A category as the AI wrote it, matched to the list even with small differences. */
+    fun matchCategory(raw: String): String? {
+        val text = raw.trim()
+        Vinted.categories.firstOrNull { it == text }?.let { return it }
+        fun norm(x: String) = x.lowercase().replace(Regex("\\s*[›>/|]\\s*"), "›").replace(Regex("\\s+"), " ").trim()
+        val n = norm(text)
+        Vinted.categories.firstOrNull { norm(it) == n }?.let { return it }
+        // The last two levels are usually enough to tell which one it is.
+        val tail = n.split('›').takeLast(2).joinToString("›")
+        return Vinted.categories.filter { norm(it).endsWith(tail) }.singleOrNull()
     }
 
     /**
@@ -211,7 +245,7 @@ object Ai {
         val version = Regex("gemini-(\\d+)(?:\\.(\\d+))?").find(model)?.groupValues?.get(1)?.toIntOrNull() ?: return null
         return when {
             version >= 3 -> buildJsonObject { put("thinkingLevel", "low") }
-            model.contains("2.5") && !model.endsWith("-lite") -> buildJsonObject { put("thinkingBudget", 1024) }
+            model.contains("2.5") && !model.endsWith("-lite") -> buildJsonObject { put("thinkingBudget", 512) }
             else -> null
         }
     }
@@ -232,11 +266,12 @@ object Ai {
             put("propertyOrdering", JsonArray(props.keys.map(::JsonPrimitive)))
         }
         val props = linkedMapOf<String, JsonElement>(
-            "hallazgos" to arr(obj(mapOf("detalle" to str(), "prueba" to str()))),
+            "hallazgos" to arr(obj(mapOf("detalle" to str(), "prueba" to str())), max = 6),
             "tipo_prenda" to str(Garments.types.map { it.id }, nullable = true),
             "palabras" to arr(str(Garments.keywords.filter { it.kind != KeywordKind.EPOCH }.map { it.id })),
             "sexo" to str(listOf("hombre", "mujer"), nullable = true),
-            "categoria" to str(Vinted.categories, nullable = true),
+            // Free text checked afterwards: an enum of hundreds of paths makes the answer much slower.
+            "categoria" to str(nullable = true),
             "colores" to arr(str(Vinted.colors), max = 2),
             "marca" to str(nullable = true),
             "modelo" to str(nullable = true),
@@ -275,9 +310,11 @@ object Ai {
             else -> null
         }
         val finalGender = listing.gender ?: gender
-        val category = o["categoria"]?.str()?.takeIf { it in Vinted.categories }
+        val category = o["categoria"]?.str()?.let(::matchCategory)
             ?.takeIf { finalGender == null || it.startsWith(finalGender.label + " ") }
-        val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2)
+        val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2).let { c ->
+            if (c.size == 2 && SHADES.any { c[0] in it && c[1] in it }) c.take(1) else c
+        }
         val sizeLabel = (o["talla"] ?: o["talla_etiqueta"])?.str()?.trim()?.take(20)?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
         val brand = o["marca"]?.str()?.let(::cleanName)?.takeIf { listing.brand.isBlank() && !listing.noBrand }
             ?.takeUnless { it.equals("sin marca", ignoreCase = true) }

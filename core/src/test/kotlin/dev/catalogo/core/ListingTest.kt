@@ -135,8 +135,8 @@ class ListingTest {
     fun `notes follow the condition as a sentence`() {
         for (note in listOf("Tiene manchas", "tiene manchas.", "  Tiene\n manchas ")) {
             val l = jeans.copy(notes = note)
-            assertTrue(ListingWriter.description(l, 0, "", "SH1").contains("✨ Estado: Muy buen estado. Tiene manchas (revisar imágenes)\n"), note)
-            assertTrue(ListingWriter.description(l, 1, "", "SA1").contains("✅ En muy buen estado. Tiene manchas (ver fotos)\n"), note)
+            assertTrue(ListingWriter.description(l, 0, "", "SH1").contains("✨ Estado: Muy buen estado. Tiene manchas\n"), note)
+            assertTrue(ListingWriter.description(l, 1, "", "SA1").contains("✅ En muy buen estado. Tiene manchas\n"), note)
         }
         assertEquals("Buen estado, con ligeros signos de uso", ListingWriter.state(jeans.copy(condition = Condition.GOOD, notes = " . "), 0))
     }

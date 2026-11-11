@@ -73,8 +73,8 @@ class Repo(context: Context) {
         store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost, ai)) }
     }
 
-    suspend fun applyAi(number: Int, suggestion: AiSuggestion, model: String) {
-        store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model)) }
+    suspend fun applyAi(number: Int, suggestion: AiSuggestion, model: String, seconds: Int) {
+        store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model, seconds)) }
     }
 
     suspend fun setGeminiKey(key: String) {
@@ -83,6 +83,40 @@ class Repo(context: Context) {
 
     suspend fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) {
         store.update { s -> s.copy(parent = Catalog.setUploaded(s.parent!!, number, deviceId, uploaded)) }
+    }
+
+    /**
+     * Accounts [number] will be published in. The photos are always taken on
+     * this phone: a chosen account of another phone gets a copy of them, sent
+     * on the next connection; an account no longer chosen loses the copy that
+     * was still waiting.
+     */
+    suspend fun setAccounts(number: Int, accounts: Set<String>) {
+        store.update { s -> s.copy(parent = Catalog.setAccounts(s.parent!!, number, accounts)) }
+        refreshCopies(number)
+    }
+
+    /**
+     * Keeps the copies waiting for other phones equal to this phone's album
+     * (after new photos, a new order or a crop). Copies already delivered are
+     * not touched: that phone already has its photos.
+     */
+    suspend fun refreshCopies(number: Int) = withContext(Dispatchers.IO) {
+        val p = parent()
+        val a = Catalog.article(p, number) ?: return@withContext
+        // Articles from before accounts were chosen keep their photos as they are.
+        if (a.accounts.isEmpty()) return@withContext
+        val own = gallery.albumPhotos(base, sku(p.self, number, p.digits))
+        for (c in p.children) {
+            val wanted = c.id in a.accounts
+            val delivered = (a.delivered[c.id] ?: 0) > 0
+            when {
+                !wanted -> outbox.delete(c.id, number)
+                delivered -> Unit
+                own.isEmpty() -> outbox.delete(c.id, number)
+                else -> outbox.replace(c.id, number, own.mapNotNull { uri -> resolver.openInputStream(uri)?.use { it.readBytes() } })
+            }
+        }
     }
 
     suspend fun setAccount(id: String, account: String, profile: String) {
@@ -126,7 +160,7 @@ class Repo(context: Context) {
             val album = sku(p.self, number, p.digits)
             val old = gallery.albumPhotos(base, album)
             for (b in bytes) gallery.save(base, album, b)
-            gallery.delete(old)
+            gallery.delete(old).also { refreshCopies(number) }
         } else {
             outbox.replace(deviceId, number, bytes)
             emptyList()
@@ -189,6 +223,7 @@ class Repo(context: Context) {
             }
         }
         endSession()
+        if (target.id == p.self.id) refreshCopies(session.number)
         return photos
     }
 

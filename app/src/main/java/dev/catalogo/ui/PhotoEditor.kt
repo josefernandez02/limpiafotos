@@ -28,6 +28,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -132,22 +135,17 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                     Muted("Guardando…")
                     LinearProgressIndicator(Modifier.fillMaxWidth())
                 } else {
-                    if (list != null && sel != null && sel in list.indices) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            FilledTonalIconButton(onClick = { move(sel, sel - 1) }, enabled = sel > 0) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Mover antes")
-                            }
-                            FilledTonalIconButton(onClick = { move(sel, sel + 1) }, enabled = sel < list.size - 1) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Mover después")
-                            }
-                            FilledTonalButton(onClick = { move(sel, 0) }, enabled = sel > 0, modifier = Modifier.weight(1f)) { Text("Portada") }
-                            FilledTonalButton(onClick = { cropping = sel }, modifier = Modifier.weight(1f)) { Text("Recortar") }
-                            FilledTonalIconButton(onClick = {
-                                slots = list.filterIndexed { i, _ -> i != sel }
-                                selected = null
-                            }, enabled = list.size > 1) {
-                                Icon(Icons.Default.Delete, contentDescription = "Quitar")
-                            }
+                    // Always visible, enabled once a photo is chosen: five equal tools.
+                    val on = list != null && sel != null && sel in list.indices
+                    val i = sel ?: -1
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Tool(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Antes", on && i > 0) { move(i, i - 1) }
+                        Tool(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Después", on && i < (list?.size ?: 0) - 1) { move(i, i + 1) }
+                        Tool(Icons.Default.Star, "Portada", on && i > 0) { move(i, 0) }
+                        Tool(CropIcon, "Recortar", on) { cropping = i }
+                        Tool(Icons.Default.Delete, "Quitar", on && (list?.size ?: 0) > 1) {
+                            slots = list.orEmpty().filterIndexed { k, _ -> k != i }
+                            selected = null
                         }
                     }
                     BigButton(
@@ -218,6 +216,32 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     }
 }
 
+/** Icon with its name underneath, all the same width: a tidy, symmetric toolbar. */
+@Composable
+private fun Tool(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
+    val color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.35f)
+    Column(
+        Modifier.width(64.dp).clip(RoundedCornerShape(14.dp)).clickable(enabled = enabled, onClick = onClick).padding(vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHighest),
+            contentAlignment = Alignment.Center,
+        ) { Icon(icon, contentDescription = null, tint = color) }
+        Text(label, style = MaterialTheme.typography.labelMedium, color = color, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+/** Two crossing corners: the crop tool. */
+private val CropIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.ui.graphics.vector.ImageVector.Builder("Catalogo.Crop", 24.dp, 24.dp, 24f, 24f).addPath(
+        pathData = androidx.compose.ui.graphics.vector.PathParser().parsePathString(
+            "M7,2H9V15H22V17H17V22H15V17H7Z M2,7H7V9H2Z M11,7H17V13H15V9H11Z",
+        ).toNodes(),
+        fill = androidx.compose.ui.graphics.SolidColor(Color.Black),
+    ).build()
+}
+
 @Composable
 private fun SlotImage(slot: Slot, modifier: Modifier) {
     val bytes = slot.bytes
@@ -274,8 +298,14 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
             BottomActions {
                 if (img != null) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { framing = Crop.fit(img.width, img.height) }, modifier = Modifier.weight(1f)) { Text("Entera") }
-                        OutlinedButton(onClick = { framing = Crop.cover(img.width, img.height) }, modifier = Modifier.weight(1f)) { Text("Rellenar") }
+                        OutlinedButton(
+                            onClick = { framing = framing?.copy(dx = 0f, dy = 0f) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) { OneLine("Centrar") }
+                        OutlinedButton(
+                            onClick = { framing = Crop.cover(img.width, img.height) },
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) { OneLine("Restablecer") }
                     }
                 }
                 BigButton(if (working) "Aplicando…" else "Aplicar", enabled = framing != null && !working, onClick = {
@@ -298,12 +328,17 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                 Canvas(
                     Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)).background(loaded?.second ?: Color(0xFF2A2C2F))
                         .pointerInput(img) {
-                            detectTransformGestures { _, pan, zoom, _ ->
+                            detectTransformGestures { centroid, pan, zoom, _ ->
                                 val cur = framing ?: return@detectTransformGestures
+                                val scale = (cur.scale * zoom).coerceIn(0.3f, 6f)
+                                val k = scale / cur.scale
+                                // Zoom around the fingers: the point under them stays put.
+                                val cx = (centroid.x - size.width / 2f) / frameW
+                                val cy = (centroid.y - size.height / 2f) / frameW
                                 framing = cur.copy(
-                                    scale = (cur.scale * zoom).coerceIn(0.3f, 6f),
-                                    dx = (cur.dx + pan.x / frameW).coerceIn(-1.5f, 1.5f),
-                                    dy = (cur.dy + pan.y / frameW).coerceIn(-2f, 2f),
+                                    scale = scale,
+                                    dx = (cx + (cur.dx - cx) * k + pan.x / frameW).coerceIn(-1.5f, 1.5f),
+                                    dy = (cy + (cur.dy - cy) * k + pan.y / frameW).coerceIn(-2f, 2f),
                                 )
                             }
                         },

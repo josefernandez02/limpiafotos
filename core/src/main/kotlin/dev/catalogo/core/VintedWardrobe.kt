@@ -100,6 +100,7 @@ object VintedWardrobe {
             if (remote.status == "sold") sold += a.number
             a.copy(
                 uploaded = a.uploaded + deviceId,
+                accounts = a.targets + deviceId,
                 vinted = a.vinted + (deviceId to VintedItem(remote.id, remote.price, remote.views, remote.favourites, remote.status, now)),
             )
         }

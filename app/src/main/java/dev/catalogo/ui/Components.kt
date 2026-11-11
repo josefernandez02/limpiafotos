@@ -138,8 +138,15 @@ fun Section(title: String) {
 }
 
 @Composable
-fun Muted(text: String, modifier: Modifier = Modifier) {
-    Text(text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = modifier)
+fun Muted(text: String, modifier: Modifier = Modifier, maxLines: Int = Int.MAX_VALUE) {
+    Text(
+        text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = modifier,
+        maxLines = maxLines,
+        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+    )
 }
 
 @Composable
@@ -247,4 +254,10 @@ fun rememberWithPermissions(permissions: Array<String>, onDenied: () -> Unit, on
         val missing = permissions.filter { ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED }
         if (missing.isEmpty()) onGranted() else launcher.launch(missing.toTypedArray())
     }
+}
+
+/** Button text that never breaks into two lines ("Recor / tar"); it shortens with … if it must. */
+@Composable
+fun OneLine(text: String, modifier: Modifier = Modifier) {
+    Text(text, modifier = modifier, maxLines = 1, softWrap = false, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
 }

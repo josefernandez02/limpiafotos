@@ -25,11 +25,11 @@ object Catalog {
     }
 
     /** Applies an AI answer to [number]: listing data the user left empty and the titles. */
-    fun applyAi(s: ParentState, number: Int, suggestion: AiSuggestion, model: String): ParentState {
+    fun applyAi(s: ParentState, number: Int, suggestion: AiSuggestion, model: String, seconds: Int = 0): ParentState {
         val a = article(s, number) ?: return s
         if (a.released) return s
         val applied = suggestion.applyTo(a.listing ?: Listing())
-        return replace(s, a.copy(listing = applied, ai = suggestion.result(applied, model)))
+        return replace(s, a.copy(listing = applied, ai = suggestion.result(applied, model, seconds)))
     }
 
     /** AI data of [number] while it still matches the listing (null when stale or absent). */
@@ -42,11 +42,26 @@ object Catalog {
     /** Accounts the AI writes titles for: every phone, in order. */
     fun aiAccounts(s: ParentState): List<Ai.Account> = devices(s).map { Ai.Account(it.id, it.prefix, it.style) }
 
-    /** Marks whether [deviceId]'s account already has [number] published on Vinted. */
+    /** Marks whether [deviceId]'s account already has [number] published on Vinted (and so is one of its accounts). */
     fun setUploaded(s: ParentState, number: Int, deviceId: String, uploaded: Boolean): ParentState {
         val a = article(s, number) ?: return s
         if (a.released || device(s, deviceId) == null) return s
-        return replace(s, a.copy(uploaded = if (uploaded) a.uploaded + deviceId else a.uploaded - deviceId))
+        return replace(
+            s,
+            a.copy(
+                uploaded = if (uploaded) a.uploaded + deviceId else a.uploaded - deviceId,
+                accounts = if (uploaded) a.targets + deviceId else a.targets,
+            ),
+        )
+    }
+
+    /** Accounts [number] will be published in. Unknown devices are ignored. */
+    fun setAccounts(s: ParentState, number: Int, accounts: Set<String>): ParentState {
+        val a = article(s, number) ?: return s
+        if (a.released) return s
+        val known = devices(s).map { it.id }.toSet()
+        val chosen = accounts.filter { it in known }.toSet()
+        return replace(s, a.copy(accounts = chosen, uploaded = a.uploaded.filter { it in chosen }.toSet()))
     }
 
     /**
@@ -126,7 +141,7 @@ object Catalog {
         var next = s.copy(children = s.children.filter { it.id != id })
         for (a in next.articles) {
             next = if (a.released) settle(next, a.copy(pendingRelease = a.pendingRelease - id))
-            else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id, vinted = a.vinted - id))
+            else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id, vinted = a.vinted - id, accounts = a.accounts - id))
         }
         return next
     }

@@ -57,7 +57,7 @@ object Stats {
         }
         val accounts = Catalog.devices(s).map { d ->
             val mine = sales.filter { it.deviceId == d.id }
-            Account(d.id, d.label, mine.size, mine.sumOf { it.price }, stock.count { d.id in it.uploaded })
+            Account(d.id, d.label, mine.size, mine.sumOf { it.price }, stock.count { d.id in it.targets })
         }
         val brands = sales.filter { it.brand.isNotBlank() }
             .groupingBy { it.brand.lowercase().replace("’", "'") }.eachCount()
@@ -67,7 +67,7 @@ object Stats {
         return Kpis(
             inStock = stock.size,
             stockCost = stock.sumOf { Ledger.costOf(s, it) ?: 0 },
-            notUploaded = stock.count { it.uploaded.isEmpty() },
+            notUploaded = stock.count { it.toUpload },
             aged30 = olderThan(30),
             aged60 = olderThan(60),
             aged90 = olderThan(90),

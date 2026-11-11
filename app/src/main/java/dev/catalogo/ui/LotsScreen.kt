@@ -47,6 +47,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.ui.text.style.TextOverflow
 
 /**
  * Inventory: the numbers that matter (stock, sales, profit, speed, age),
@@ -81,22 +83,22 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "kpis") {
+                // Pairs of equal tiles: same height, one line each, so the grid stays symmetric.
+                val tiles = listOf(
+                    Triple("Beneficio", Money.format(k.profit), k.roi?.let { "ROI $it %" } ?: "sin costes"),
+                    Triple("Ingresos", Money.format(k.revenue), if (k.sold == 1) "1 venta" else "${k.sold} ventas"),
+                    Triple("Vendido", k.sellThrough?.let { "$it %" } ?: "—", "del total"),
+                    Triple("Días en venderse", k.medianDays?.toString() ?: "—", "mediana"),
+                    Triple("En stock", "${k.inStock}", "coste ${Money.format(k.stockCost)}"),
+                    Triple("Precio medio", k.averagePrice?.let(Money::format) ?: "—", "por venta"),
+                    Triple("Por subir", "${k.notUploaded}", "en stock"),
+                    Triple("+60 días", "${k.aged60}", "${k.aged90} de +90 días"),
+                )
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Kpi("Beneficio", Money.format(k.profit), k.roi?.let { "ROI $it %" }, Modifier.weight(1f))
-                        Kpi("Ingresos", Money.format(k.revenue), "${k.sold} vendidos", Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Kpi("Vendido", k.sellThrough?.let { "$it %" } ?: "—", "del total", Modifier.weight(1f))
-                        Kpi("Tarda en venderse", k.medianDays?.let { "$it días" } ?: "—", "mediana", Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Kpi("En stock", "${k.inStock}", "coste ${Money.format(k.stockCost)}", Modifier.weight(1f))
-                        Kpi("Precio medio", k.averagePrice?.let(Money::format) ?: "—", "por venta", Modifier.weight(1f))
-                    }
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Kpi("Sin subir", "${k.notUploaded}", "en ninguna cuenta", Modifier.weight(1f))
-                        Kpi("Más de 60 días", "${k.aged60}", "en stock · ${k.aged90} de +90", Modifier.weight(1f))
+                    for (pair in tiles.chunked(2)) {
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            for ((label, value, detail) in pair) Kpi(label, value, detail, Modifier.weight(1f).fillMaxHeight())
+                        }
                     }
                 }
             }
@@ -133,17 +135,22 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                         Text("Más tiempo en stock", style = MaterialTheme.typography.titleMedium)
                         for ((a, days) in oldest) {
                             val l = a.listing
-                            Row2(
-                                left = {
-                                    Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 15.sp))
-                                    Text(
-                                        "  " + listOfNotNull(l?.brand?.takeIf { it.isNotBlank() }, l?.model?.takeIf { it.isNotBlank() }).joinToString(" "),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        maxLines = 1,
-                                    )
-                                },
-                                right = { TextButton(onClick = { vm.go(Screen.Article(a.number)) }) { Text("$days días") } },
-                            )
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.go(Screen.Article(a.number)) }
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 15.sp))
+                                Text(
+                                    listOfNotNull(l?.brand?.takeIf { it.isNotBlank() }, l?.model?.takeIf { it.isNotBlank() }).joinToString(" ").ifBlank { "—" },
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f),
+                                )
+                                Muted("$days días", maxLines = 1)
+                            }
                         }
                     }
                 }
@@ -181,11 +188,11 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
 }
 
 @Composable
-private fun Kpi(label: String, value: String, detail: String?, modifier: Modifier = Modifier) {
+private fun Kpi(label: String, value: String, detail: String, modifier: Modifier = Modifier) {
     Tile(modifier) {
-        Muted(label)
-        Text(value, style = Mono.copy(fontSize = 22.sp), maxLines = 1)
-        if (detail != null) Muted(detail)
+        Muted(label, maxLines = 1)
+        Text(value, style = Mono.copy(fontSize = 22.sp), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
+        Muted(detail, maxLines = 1)
     }
 }
 
@@ -193,7 +200,8 @@ private fun Kpi(label: String, value: String, detail: String?, modifier: Modifie
 @Composable
 private fun BarRow(label: String, detail: String, fraction: Float) {
     Column(Modifier.padding(top = 8.dp)) {
-        Row2(left = { Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1) }, right = { Muted(detail) })
+        Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Muted(detail, maxLines = 1)
         Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
             Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.primary))
         }

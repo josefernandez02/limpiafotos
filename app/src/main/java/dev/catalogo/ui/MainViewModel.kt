@@ -272,7 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val listing = Catalog.article(p, number)?.listing ?: Listing()
                 val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
                 ensureActive()
-                repo.applyAi(number, answer.suggestion, answer.model)
+                repo.applyAi(number, answer.suggestion, answer.model, answer.seconds)
                 _message.value = "Anuncio preparado"
                 null
             } catch (e: CancellationException) {
@@ -301,6 +301,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) = run {
         repo.setUploaded(number, deviceId, uploaded)
+    }
+
+    fun setAccounts(number: Int, accounts: Set<String>) = run {
+        repo.setAccounts(number, accounts)
+        refresh()
     }
 
     fun setAccount(id: String, account: String, profile: String, done: () -> Unit) = run {
