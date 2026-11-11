@@ -103,6 +103,13 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
         if (isParent) vm.sync.startParent() else vm.sync.startChild()
     }
     LaunchedEffect(Unit) { start() }
+    // The transfer stops if the screen turns off: keep it on while this screen is open.
+    val view = androidx.compose.ui.platform.LocalView.current
+    androidx.compose.runtime.DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+    val outbox by vm.outbox.collectAsStateWithLifecycle()
 
     val done: () -> Unit = { if (isParent) vm.tab(Screen.Home) else vm.back() }
     Scaffold(
@@ -143,6 +150,38 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            val p = state.parent
+            if (p != null && p.children.isNotEmpty()) {
+                item {
+                    Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        for (c in p.children) {
+                            val photos = outbox[c.id]?.values?.sum() ?: 0
+                            val releases = p.articles.count { it.released && c.id in it.pendingRelease }
+                            val synced = status.log.any { it == "Listo: ${c.name}" }
+                            Tile {
+                                Row2(
+                                    left = {
+                                        Column {
+                                            Text(c.label, style = MaterialTheme.typography.titleMedium)
+                                            Muted(
+                                                when {
+                                                    synced && photos == 0 && releases == 0 -> "Al día"
+                                                    photos == 0 && releases == 0 -> "Nada pendiente"
+                                                    else -> listOfNotNull(
+                                                        if (photos > 0) "$photos fotos por enviar" else null,
+                                                        if (releases > 0) "$releases por quitar" else null,
+                                                    ).joinToString(" · ")
+                                                },
+                                            )
+                                        }
+                                    },
+                                    right = { if (synced) Pill("✓", strong = true) },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
             items(status.log) { line -> Text(line, style = MaterialTheme.typography.bodyLarge) }
             if (status.running && !status.working) {
                 item {
@@ -192,15 +231,22 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
     Scaffold(topBar = { Bar("Ajustes", onBack = { vm.back() }) }) { padding ->
         Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             if (p != null) {
-                Section("Dispositivos")
+                Section("Cuentas y móviles")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (d in Catalog.devices(p)) {
                         Tile(onClick = { editing = d }) {
                             Row2(
                                 left = {
                                     Column {
-                                        Text(d.name, style = MaterialTheme.typography.titleMedium)
-                                        Muted(if (d.id == p.self.id) "Principal · estilo ${d.style + 1}" else "Secundario · estilo ${d.style + 1}")
+                                        Text(d.label, style = MaterialTheme.typography.titleMedium)
+                                        Muted(
+                                            listOfNotNull(
+                                                d.name.takeIf { d.account.isNotBlank() },
+                                                if (d.id == p.self.id) "Principal" else "Secundario",
+                                                "estilo ${d.style + 1}",
+                                                if (d.vintedId.isBlank()) "sin perfil de Vinted" else null,
+                                            ).joinToString(" · "),
+                                        )
                                     }
                                 },
                                 right = { Pill(d.prefix) },
@@ -249,12 +295,16 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
         }
     }
 
+    var accountOf by remember { mutableStateOf<Device?>(null) }
+    accountOf?.let { d -> AccountDialog(vm, d) { accountOf = null } }
+
     val device = editing
     if (device != null && p != null) {
         val isChild = device.id != p.self.id
         var confirmRemove by remember(device.id) { mutableStateOf(false) }
         val extraButtons: @Composable () -> Unit = {
             Column {
+                TextButton(onClick = { editing = null; accountOf = device }) { Text("Cuenta de Vinted") }
                 TextButton(onClick = { editing = null; vm.go(Screen.Template(device.id)) }) { Text("Estilo y plantilla del anuncio") }
                 if (isChild) {
                     TextButton(onClick = { confirmRemove = true }) { Text("Desvincular", color = MaterialTheme.colorScheme.error) }
@@ -353,6 +403,40 @@ fun DeviceDialog(
     )
 }
 
+/** Vinted user name and profile link of the account a phone publishes in. */
+@Composable
+private fun AccountDialog(vm: MainViewModel, device: Device, onDismiss: () -> Unit) {
+    var account by remember { mutableStateOf(device.account) }
+    var profile by remember { mutableStateOf(if (device.vintedId.isBlank()) "" else "https://www.vinted.es/member/${device.vintedId}") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cuenta de Vinted · ${device.name}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = account,
+                    onValueChange = { account = it.trim().take(40) },
+                    label = { Text("Usuario") },
+                    placeholder = { Text("shiorawear") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = profile,
+                    onValueChange = { profile = it.trim().take(200) },
+                    label = { Text("Enlace del perfil") },
+                    placeholder = { Text("vinted.es/member/123456-shiorawear") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = { vm.setAccount(device.id, account, profile, onDismiss) }) { Text("Guardar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
+}
+
 // ---------- listing style and template ----------
 
 private val SAMPLE = Listing(
@@ -376,7 +460,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
     }
 
     Scaffold(
-        topBar = { Bar("Anuncio · ${device.name}", onBack = { vm.back() }) },
+        topBar = { Bar("Anuncio · ${device.label}", onBack = { vm.back() }) },
         bottomBar = {
             BottomActions {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

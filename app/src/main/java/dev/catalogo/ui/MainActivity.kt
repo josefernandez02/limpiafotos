@@ -9,6 +9,13 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.Box
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -73,22 +80,41 @@ private fun App(vm: MainViewModel) {
     BackHandler(enabled = (stack.size > 1 || onSecondaryTab) && !sessionOpen) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {
-        val parent = state.parent
-        val top = stack.last()
-        val child = state.child
-        when {
-            state.role == null -> SetupScreen(vm)
-            parent != null && top == Screen.Review && parent.session != null -> ReviewScreen(vm, parent)
-            parent != null && parent.session != null -> SessionScreen(vm, parent)
-            top == Screen.Connect -> ConnectScreen(vm, state)
-            top == Screen.Settings -> SettingsScreen(vm, state)
-            parent != null && top is Screen.Template -> TemplateScreen(vm, parent, top.deviceId)
-            parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
-            parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
-            parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
-            parent != null -> ParentHome(vm, parent)
-            child != null && top is Screen.Album -> AlbumScreen(vm, child, top.number)
-            state.role == Role.CHILD -> ChildHome(vm, state)
+        // Forward slides in from the right, back from the left, tabs cross-fade.
+        AnimatedContent(
+            targetState = stack,
+            contentKey = { it.last() },
+            transitionSpec = {
+                val forward = targetState.size > initialState.size
+                val back = targetState.size < initialState.size
+                when {
+                    forward -> (slideInHorizontally(tween(260)) { it / 4 } + fadeIn(tween(200))) togetherWith fadeOut(tween(160))
+                    back -> (slideInHorizontally(tween(260)) { -it / 4 } + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(tween(220)) { it / 4 } + fadeOut(tween(160)))
+                    else -> fadeIn(tween(180)) togetherWith fadeOut(tween(140))
+                }
+            },
+            label = "screens",
+        ) { shownStack ->
+            val parent = state.parent
+            val top = shownStack.last()
+            val child = state.child
+            when {
+                state.role == null -> SetupScreen(vm)
+                parent != null && top == Screen.Review && parent.session != null -> ReviewScreen(vm, parent)
+                parent != null && parent.session != null -> SessionScreen(vm, parent)
+                top == Screen.Connect -> ConnectScreen(vm, state)
+                top == Screen.Settings -> SettingsScreen(vm, state)
+                parent != null && top is Screen.Template -> TemplateScreen(vm, parent, top.deviceId)
+                parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
+                parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
+                parent != null && top is Screen.Photos -> PhotosScreen(vm, parent, top.number, top.deviceId)
+                parent != null && top == Screen.Vinted -> VintedScreen(vm, parent)
+                parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
+                parent != null -> ParentHome(vm, parent)
+                child != null && top is Screen.Album -> AlbumScreen(vm, child, top.number)
+                state.role == Role.CHILD -> ChildHome(vm, state)
+            }
         }
         val viewer by vm.viewer.collectAsStateWithLifecycle()
         viewer?.let { v -> ViewerScreen(v.photos, v.start, onClose = { vm.closeViewer() }) }

@@ -126,7 +126,7 @@ object Catalog {
         var next = s.copy(children = s.children.filter { it.id != id })
         for (a in next.articles) {
             next = if (a.released) settle(next, a.copy(pendingRelease = a.pendingRelease - id))
-            else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id))
+            else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id, vinted = a.vinted - id))
         }
         return next
     }
@@ -141,6 +141,24 @@ object Catalog {
             val children = s.children.map { if (it.id == id) it.copy(name = cleanName, prefix = cleanPrefix) else it }
             s.copy(children = children, configVersion = s.configVersion + 1)
         }
+    }
+
+    /**
+     * Vinted account of a phone: its user name and the profile link
+     * ("https://www.vinted.es/member/123456-shiorawear"), from which the
+     * member id is taken. A link without a name fills the name too.
+     */
+    fun setAccount(s: ParentState, id: String, account: String, profile: String): ParentState {
+        val link = VintedWardrobe.profile(profile)
+        if (profile.isNotBlank() && link == null) throw CatalogException("Enlace de perfil no válido")
+        val name = account.trim().removePrefix("@").ifBlank { link?.second.orEmpty() }
+        if (name.length > 40) throw CatalogException("Nombre de cuenta demasiado largo")
+        if (name.isNotBlank() && devices(s).any { it.id != id && it.account.equals(name, ignoreCase = true) }) {
+            throw CatalogException("Esa cuenta ya está en otro móvil")
+        }
+        fun Device.update() = copy(account = name, vintedId = link?.first.orEmpty())
+        return if (id == s.self.id) s.copy(self = s.self.update())
+        else s.copy(children = s.children.map { if (it.id == id) it.update() else it }, configVersion = s.configVersion + 1)
     }
 
     fun setDigits(s: ParentState, digits: Int): ParentState {

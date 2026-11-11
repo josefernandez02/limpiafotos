@@ -16,6 +16,25 @@ data class Device(
     val style: Int = 0,
     /** Description template; blank means the style's default. */
     val template: String = "",
+    /** Vinted user name of the account this phone publishes in ("shiorawear"). */
+    val account: String = "",
+    /** Numeric Vinted member id, taken from the profile link; used to read the wardrobe. */
+    val vintedId: String = "",
+) {
+    /** What the user calls this account: its Vinted name, or the phone's name until there is one. */
+    val label: String get() = account.ifBlank { name }
+}
+
+/** An article as found in a Vinted wardrobe on the last check. */
+@Serializable
+data class VintedItem(
+    val id: String,
+    val price: Long? = null,
+    val views: Int? = null,
+    val favourites: Int? = null,
+    /** "active", "reserved", "hidden" or "sold". */
+    val status: String = "active",
+    val checkedAt: Long = 0,
 )
 
 /**
@@ -37,6 +56,8 @@ data class Article(
     /** Devices whose Vinted account already has this article published. */
     val uploaded: Set<String> = emptySet(),
     val ai: AiResult? = null,
+    /** Per device id: the listing found in that account's Vinted wardrobe. */
+    val vinted: Map<String, VintedItem> = emptyMap(),
 )
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */

@@ -44,6 +44,10 @@ sealed interface Screen {
     data class Template(val deviceId: String) : Screen
     /** A child's album. */
     data class Album(val number: Int) : Screen
+    /** Order, cover and crop of [deviceId]'s photos of [number]. */
+    data class Photos(val number: Int, val deviceId: String) : Screen
+    /** Reads every account's Vinted wardrobe. */
+    data object Vinted : Screen
 }
 
 private const val VINTED_PACKAGE = "fr.vinted"
@@ -299,6 +303,104 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repo.setUploaded(number, deviceId, uploaded)
     }
 
+    fun setAccount(id: String, account: String, profile: String, done: () -> Unit) = run {
+        repo.setAccount(id, account, profile)
+        done()
+    }
+
+    // ---------- Vinted wardrobes ----------
+
+    /** Progress and result of reading the wardrobes, one line per account. */
+    data class VintedCheck(val running: Boolean, val lines: List<String>, val sold: List<Int> = emptyList())
+
+    private val _vinted = MutableStateFlow<VintedCheck?>(null)
+    val vinted: StateFlow<VintedCheck?> = _vinted.asStateFlow()
+
+    /**
+     * Reads every account that has a profile link, page by page, through
+     * [fetch] (a request made by the Vinted page itself) and links the
+     * listings found to their articles.
+     */
+    fun checkVinted(fetch: suspend (String) -> Pair<Int, String>) {
+        if (_vinted.value?.running == true) return
+        viewModelScope.launch {
+            val p = repo.state.parent ?: return@launch
+            val accounts = Catalog.devices(p).filter { it.vintedId.isNotBlank() }
+            if (accounts.isEmpty()) {
+                _vinted.value = VintedCheck(false, listOf("Añade el enlace del perfil de Vinted de cada cuenta en Ajustes"))
+                return@launch
+            }
+            val lines = ArrayList<String>()
+            val sold = ArrayList<Int>()
+            for (d in accounts) {
+                _vinted.value = VintedCheck(true, lines + "${d.label}: leyendo…")
+                val line = try {
+                    val items = ArrayList<dev.catalogo.core.VintedWardrobe.Remote>()
+                    for (page in 1..dev.catalogo.core.VintedWardrobe.MAX_PAGES) {
+                        val (code, body) = fetch(dev.catalogo.core.VintedWardrobe.path(d.vintedId, page))
+                        when (code) {
+                            200 -> Unit
+                            401, 403 -> throw CatalogException("Vinted pide iniciar sesión o una comprobación: hazlo arriba y vuelve a pulsar")
+                            0 -> throw CatalogException("Sin conexión con Vinted")
+                            else -> throw CatalogException("Vinted ha respondido $code")
+                        }
+                        val got = dev.catalogo.core.VintedWardrobe.parse(body)
+                        if (got.isEmpty()) break
+                        items += got
+                    }
+                    val r = repo.applyWardrobe(d.id, items)
+                    sold += r.sold
+                    buildString {
+                        append("${d.label}: ${items.size} anuncios, ${r.found} enlazados")
+                        if (r.newlyUploaded > 0) append(", ${r.newlyUploaded} marcados como subidos")
+                        if (r.unmatched.isNotEmpty()) append(", ${r.unmatched.size} sin reconocer")
+                    }
+                } catch (e: CatalogException) {
+                    "${d.label}: ${e.message}"
+                } catch (e: Exception) {
+                    "${d.label}: error (${e.message ?: e.javaClass.simpleName})"
+                }
+                lines += line
+            }
+            _vinted.value = VintedCheck(false, lines, sold.distinct())
+            refresh()
+        }
+    }
+
+    fun clearVinted() {
+        if (_vinted.value?.running != true) _vinted.value = null
+    }
+
+    // ---------- photo editing ----------
+
+    /** Photos of [deviceId] for [number] that can be edited on this phone, in order. */
+    suspend fun editablePhotos(number: Int, deviceId: String): List<Uri> {
+        val p = repo.state.parent ?: return emptyList()
+        return if (deviceId == p.self.id) albumPhotos(Sku.format(p.self.prefix, number, p.digits))
+        else withContext(Dispatchers.IO) { repo.outbox.files(deviceId, number).map { Uri.fromFile(it) } }
+    }
+
+    /** The framed photo as JPEG bytes, made off the main thread. */
+    suspend fun renderCrop(uri: Uri, framing: dev.catalogo.data.Framing): ByteArray = withContext(Dispatchers.Default) {
+        dev.catalogo.data.Crop.render(getApplication<Application>().contentResolver, uri, framing)
+    }
+
+    private val _savingPhotos = MutableStateFlow(false)
+    val savingPhotos: StateFlow<Boolean> = _savingPhotos.asStateFlow()
+
+    fun savePhotos(number: Int, deviceId: String, photos: List<dev.catalogo.data.Repo.EditedPhoto>) = run {
+        if (photos.isEmpty()) throw CatalogException("Deja al menos una foto")
+        _savingPhotos.value = true
+        try {
+            askToDelete(repo.rewritePhotos(number, deviceId, photos))
+            _message.value = "Fotos guardadas"
+            back()
+        } finally {
+            _savingPhotos.value = false
+            refresh()
+        }
+    }
+
     fun saveLot(id: String?, name: String, priceText: String, quantityText: String, done: () -> Unit) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio no válido")
         val quantity = quantityText.trim().toIntOrNull() ?: throw CatalogException("Número de prendas no válido")
@@ -376,10 +478,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun sellOnParent(number: Int, priceText: String, costText: String) = run {
+    /** [account]: the phone whose Vinted account sold it (the main phone when null). */
+    fun sellOnParent(number: Int, priceText: String, costText: String, account: String? = null) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
         val cost = if (costText.isBlank()) null else Money.parse(costText) ?: throw CatalogException("Coste no válido")
-        askToDelete(repo.sellOnParent(number, price, cost))
+        askToDelete(repo.sellOnParent(number, price, cost, account))
         back()
     }
 

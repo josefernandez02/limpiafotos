@@ -39,26 +39,29 @@ import dev.catalogo.core.Ledger
 import dev.catalogo.core.Lot
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
-import java.util.Calendar
+import dev.catalogo.core.Sku
+import dev.catalogo.core.Stats
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.draw.clip
 
-private fun monthStart(): Long = Calendar.getInstance().apply {
-    set(Calendar.DAY_OF_MONTH, 1)
-    set(Calendar.HOUR_OF_DAY, 0)
-    set(Calendar.MINUTE, 0)
-    set(Calendar.SECOND, 0)
-    set(Calendar.MILLISECOND, 0)
-}.timeInMillis
-
+/**
+ * Inventory: the numbers that matter (stock, sales, profit, speed, age),
+ * sales per month, per account and per brand, what is getting old, and lots.
+ */
 @Composable
 fun LotsScreen(vm: MainViewModel, p: ParentState) {
     var editing by remember { mutableStateOf<Lot?>(null) }
     var creating by remember { mutableStateOf(false) }
-    val month = Ledger.totalsBetween(p, monthStart(), Long.MAX_VALUE)
-    val all = Ledger.totals(p.sales)
+    val now = remember(p) { System.currentTimeMillis() }
+    val k = remember(p) { Stats.kpis(p, now) }
 
     Scaffold(
         topBar = {
-            Header("Lotes", if (p.lots.size == 1) "1 lote" else "${p.lots.size} lotes") {
+            Header("Inventario", if (k.inStock == 1) "1 en stock" else "${k.inStock} en stock") {
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             }
         },
@@ -74,21 +77,80 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
     ) { padding ->
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item {
-                Tile {
-                    Row2(left = { Muted("Este mes") }, right = { Muted("${month.count} ventas") })
-                    Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        Figure("Ingresos", Money.format(month.revenue), Modifier.weight(1f))
-                        Figure("Beneficio", Money.format(month.profit), Modifier.weight(1f))
+            item(key = "kpis") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Kpi("Beneficio", Money.format(k.profit), k.roi?.let { "ROI $it %" }, Modifier.weight(1f))
+                        Kpi("Ingresos", Money.format(k.revenue), "${k.sold} vendidos", Modifier.weight(1f))
                     }
-                    Muted("Total: ${all.count} ventas · ${Money.format(all.revenue)} · beneficio ${Money.format(all.profit)}", Modifier.padding(top = 8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Kpi("Vendido", k.sellThrough?.let { "$it %" } ?: "—", "del total", Modifier.weight(1f))
+                        Kpi("Tarda en venderse", k.medianDays?.let { "$it días" } ?: "—", "mediana", Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Kpi("En stock", "${k.inStock}", "coste ${Money.format(k.stockCost)}", Modifier.weight(1f))
+                        Kpi("Precio medio", k.averagePrice?.let(Money::format) ?: "—", "por venta", Modifier.weight(1f))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Kpi("Sin subir", "${k.notUploaded}", "en ninguna cuenta", Modifier.weight(1f))
+                        Kpi("Más de 60 días", "${k.aged60}", "en stock · ${k.aged90} de +90", Modifier.weight(1f))
+                    }
                 }
             }
+            item(key = "months") {
+                Tile {
+                    Text("Ingresos por mes", style = MaterialTheme.typography.titleMedium)
+                    MonthBars(k.months)
+                }
+            }
+            if (k.accounts.size > 1 || k.sold > 0) {
+                item(key = "accounts") {
+                    Tile {
+                        Text("Por cuenta", style = MaterialTheme.typography.titleMedium)
+                        val max = k.accounts.maxOf { it.revenue }.coerceAtLeast(1)
+                        for (a in k.accounts) {
+                            BarRow(a.label, "${a.sold} vendidos · ${Money.format(a.revenue)} · ${a.listed} subidos", a.revenue.toFloat() / max)
+                        }
+                    }
+                }
+            }
+            if (k.brands.isNotEmpty()) {
+                item(key = "brands") {
+                    Tile {
+                        Text("Marcas más vendidas", style = MaterialTheme.typography.titleMedium)
+                        val max = k.brands.first().second.coerceAtLeast(1)
+                        for ((brand, n) in k.brands.take(5)) BarRow(brand, if (n == 1) "1 venta" else "$n ventas", n.toFloat() / max)
+                    }
+                }
+            }
+            val oldest = Stats.oldest(p, now)
+            if (oldest.isNotEmpty()) {
+                item(key = "oldest") {
+                    Tile {
+                        Text("Más tiempo en stock", style = MaterialTheme.typography.titleMedium)
+                        for ((a, days) in oldest) {
+                            val l = a.listing
+                            Row2(
+                                left = {
+                                    Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 15.sp))
+                                    Text(
+                                        "  " + listOfNotNull(l?.brand?.takeIf { it.isNotBlank() }, l?.model?.takeIf { it.isNotBlank() }).joinToString(" "),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                    )
+                                },
+                                right = { TextButton(onClick = { vm.go(Screen.Article(a.number)) }) { Text("$days días") } },
+                            )
+                        }
+                    }
+                }
+            }
+            item(key = "lots-title") { Section("Lotes") }
             if (p.lots.isEmpty()) {
-                item { Muted("Pulsa + para crear un lote", Modifier.padding(top = 24.dp, start = 4.dp)) }
+                item(key = "lots-empty") { Muted("Pulsa + para crear un lote", Modifier.padding(start = 4.dp)) }
             }
             items(p.lots.sortedByDescending { it.createdAt }, key = { it.id }) { lot ->
                 val st = Ledger.stats(p, lot)
@@ -98,7 +160,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                         left = { Text(lot.name, style = MaterialTheme.typography.titleMedium) },
                         right = { Pill(if (st.profit >= 0) "+${Money.format(st.profit)}" else Money.format(st.profit), strong = st.profit >= 0) },
                     )
-                    Muted("${st.sold}/${lot.quantity} vendidas · ${st.inStock} en catálogo · ${Money.format(Ledger.unitCost(lot))} por prenda")
+                    Muted("${st.sold}/${lot.quantity} vendidas · ${st.inStock} en stock · ${Money.format(Ledger.unitCost(lot))} por prenda")
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -119,10 +181,57 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
 }
 
 @Composable
-private fun Figure(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(value, style = Mono.copy(fontSize = 22.sp))
+private fun Kpi(label: String, value: String, detail: String?, modifier: Modifier = Modifier) {
+    Tile(modifier) {
         Muted(label)
+        Text(value, style = Mono.copy(fontSize = 22.sp), maxLines = 1)
+        if (detail != null) Muted(detail)
+    }
+}
+
+/** A labelled horizontal bar: one value per row, one colour. */
+@Composable
+private fun BarRow(label: String, detail: String, fraction: Float) {
+    Column(Modifier.padding(top = 8.dp)) {
+        Row2(left = { Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1) }, right = { Muted(detail) })
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
+            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.primary))
+        }
+    }
+}
+
+/**
+ * Revenue of the last months as thin bars on a shared baseline. The latest
+ * month is labelled; tapping a bar shows its numbers.
+ */
+@Composable
+private fun MonthBars(months: List<Stats.Month>) {
+    var picked by remember(months) { mutableStateOf(months.lastIndex) }
+    val max = months.maxOfOrNull { it.revenue }?.coerceAtLeast(1) ?: 1
+    val names = listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+    months.getOrNull(picked)?.let { m ->
+        Muted("${names[m.month.monthValue - 1]} ${m.month.year}: ${m.sold} ventas · ${Money.format(m.revenue)} · beneficio ${Money.format(m.profit)}")
+    }
+    Row(
+        Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        months.forEachIndexed { i, m ->
+            Column(
+                Modifier.weight(1f).fillMaxHeight().clickable { picked = i },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom,
+            ) {
+                val f = m.revenue.toFloat() / max
+                Box(
+                    Modifier.fillMaxWidth(0.55f).fillMaxHeight(0.82f * f.coerceAtLeast(0.02f))
+                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                        .background(if (i == picked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary),
+                )
+                Text(names[m.month.monthValue - 1], style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
     }
 }
 

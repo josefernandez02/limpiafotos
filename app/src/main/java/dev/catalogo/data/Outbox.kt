@@ -9,18 +9,30 @@ class Outbox(filesDir: File) {
 
     private fun dir(deviceId: String, number: Int) = File(File(root, deviceId), number.toString())
 
-    fun add(deviceId: String, number: Int, bytes: ByteArray) {
+    fun add(deviceId: String, number: Int, bytes: ByteArray): File {
         val dir = dir(deviceId, number).apply { mkdirs() }
         val tmp = File(dir, ".${Auth.newId()}.part")
         tmp.writeBytes(bytes)
-        if (!tmp.renameTo(File(dir, "${Auth.newId()}.jpg"))) {
+        val out = File(dir, "${Auth.newId()}.jpg")
+        if (!tmp.renameTo(out)) {
             tmp.delete()
             error("No se pudo guardar la foto")
         }
+        return out
     }
 
     fun files(deviceId: String, number: Int): List<File> =
-        dir(deviceId, number).listFiles { f -> f.isFile && f.name.endsWith(".jpg") }?.sortedBy { it.lastModified() } ?: emptyList()
+        dir(deviceId, number).listFiles { f -> f.isFile && f.name.endsWith(".jpg") }
+            ?.sortedWith(compareBy({ it.lastModified() }, { it.name })) ?: emptyList()
+
+    /** Replaces the photos waiting for [deviceId] with [photos], in this order. */
+    fun replace(deviceId: String, number: Int, photos: List<ByteArray>) {
+        val old = files(deviceId, number)
+        val start = System.currentTimeMillis()
+        // Random names: the modification time, a second apart, keeps the order.
+        photos.forEachIndexed { i, bytes -> add(deviceId, number, bytes).setLastModified(start + i * 1000L) }
+        old.forEach { it.delete() }
+    }
 
     /** number → files, for every album waiting for [deviceId]. */
     fun pending(deviceId: String): Map<Int, List<File>> =

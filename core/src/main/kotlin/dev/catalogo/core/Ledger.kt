@@ -22,6 +22,10 @@ data class Sale(
     val cost: Long?,
     val lotId: String?,
     val soldAt: Long,
+    /** When the article was created, to know how long it took to sell. */
+    val listedAt: Long? = null,
+    val brand: String = "",
+    val type: String = "",
 )
 
 object Money {
@@ -87,11 +91,13 @@ object Ledger {
      * Records the sale of [number] (sold through [deviceId]) and releases it on
      * every phone. An article already released is not sold twice.
      */
-    fun sell(s: ParentState, number: Int, deviceId: String, price: Long, cost: Long?, now: Long): ParentState {
+    fun sell(s: ParentState, number: Int, deviceId: String, price: Long, cost: Long?, now: Long, account: String = deviceId): ParentState {
         val a = Catalog.article(s, number) ?: return s
         val fromChild = deviceId != s.self.id
         if (a.released) return if (fromChild) Catalog.release(s, number, confirmedBy = deviceId) else s
-        val sale = Sale(number, deviceId, price, cost ?: costOf(s, a), a.lotId, now)
+        val l = a.listing
+        val brand = if (l == null || l.noBrand) "" else l.brand.trim()
+        val sale = Sale(number, account, price, cost ?: costOf(s, a), a.lotId, now, a.createdAt, brand, l?.type.orEmpty())
         val withSale = s.copy(sales = s.sales + sale)
         return if (fromChild) Catalog.release(withSale, number, confirmedBy = deviceId) else Catalog.release(withSale, number)
     }

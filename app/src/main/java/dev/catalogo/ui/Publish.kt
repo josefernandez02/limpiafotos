@@ -42,6 +42,7 @@ import dev.catalogo.core.ListingText
 /** Bottom tabs of the main phone. */
 @Composable
 fun MainTabs(vm: MainViewModel, current: Screen) {
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow, tonalElevation = 0.dp) {
         val colors = NavigationBarItemDefaults.colors(
             indicatorColor = MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -52,21 +53,21 @@ fun MainTabs(vm: MainViewModel, current: Screen) {
         )
         NavigationBarItem(
             selected = current == Screen.Home,
-            onClick = { vm.tab(Screen.Home) },
+            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Home) },
             icon = { Icon(Icons.Default.Home, contentDescription = null) },
             label = { Text("Artículos") },
             colors = colors,
         )
         NavigationBarItem(
             selected = current == Screen.Lots,
-            onClick = { vm.tab(Screen.Lots) },
-            icon = { Icon(Icons.Default.ShoppingCart, contentDescription = null) },
-            label = { Text("Lotes") },
+            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Lots) },
+            icon = { Icon(ChartIcon, contentDescription = null) },
+            label = { Text("Inventario") },
             colors = colors,
         )
         NavigationBarItem(
             selected = current == Screen.Connect,
-            onClick = { vm.tab(Screen.Connect) },
+            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Connect) },
             icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
             label = { Text("Conectar") },
             colors = colors,
@@ -140,8 +141,10 @@ fun SellDialog(
     costHint: String?,
     onDismiss: () -> Unit,
     onConfirm: (price: String, cost: String) -> Unit,
+    initialPrice: String = "",
+    extra: (@Composable () -> Unit)? = null,
 ) {
-    var price by remember { mutableStateOf("") }
+    var price by remember { mutableStateOf(initialPrice) }
     var cost by remember { mutableStateOf(initialCost ?: "") }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -151,6 +154,7 @@ fun SellDialog(
                 Muted("Se borrarán sus fotos en todos los móviles.")
                 MoneyField(price, { price = it }, "Precio de venta")
                 if (initialCost != null) MoneyField(cost, { cost = it }, "Coste", hint = costHint)
+                extra?.invoke()
             }
         },
         confirmButton = {
@@ -178,4 +182,15 @@ fun Choice(text: String, selected: Boolean, onClick: () -> Unit) {
         ),
         border = null,
     )
+}
+
+/** Three rising bars: the inventory tab. */
+val ChartIcon: androidx.compose.ui.graphics.vector.ImageVector by lazy {
+    androidx.compose.material.icons.materialIcon(name = "Catalogo.Chart") {
+        androidx.compose.material.icons.materialPath {
+            moveTo(4f, 20f); lineTo(4f, 13f); lineTo(8f, 13f); lineTo(8f, 20f); close()
+            moveTo(10f, 20f); lineTo(10f, 8f); lineTo(14f, 8f); lineTo(14f, 20f); close()
+            moveTo(16f, 20f); lineTo(16f, 4f); lineTo(20f, 4f); lineTo(20f, 20f); close()
+        }
+    }
 }

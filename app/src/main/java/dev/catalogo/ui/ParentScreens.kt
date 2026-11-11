@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -45,6 +47,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -82,18 +85,39 @@ private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
 
 // ---------- Artículos (tab) ----------
 
+/** List filter: everything, nothing uploaded yet, missing in one account, or sold in Vinted. */
+private sealed interface Filter {
+    data object All : Filter
+    data object NotUploaded : Filter
+    data class Missing(val deviceId: String) : Filter
+    data object SoldInVinted : Filter
+}
+
+private fun Article.soldInVinted() = vinted.values.any { it.status == "sold" }
+
 @Composable
 fun ParentHome(vm: MainViewModel, p: ParentState) {
-    val counts by vm.counts.collectAsStateWithLifecycle()
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
+    var filter by remember { mutableStateOf<Filter>(Filter.All) }
+    val devices = Catalog.devices(p)
     // Sold or deleted articles stay only until the other phones confirm; they are not shown.
-    val shown = p.articles.filter { !it.released }.sortedByDescending { it.number }
-    val pending = p.articles.size - shown.size
-    val active = shown.size
+    val active = p.articles.filter { !it.released }.sortedByDescending { it.number }
+    val pending = p.articles.size - active.size
+    val shown = active.filter { a ->
+        when (val f = filter) {
+            Filter.All -> true
+            Filter.NotUploaded -> a.uploaded.isEmpty()
+            is Filter.Missing -> f.deviceId !in a.uploaded
+            Filter.SoldInVinted -> a.soldInVinted()
+        }
+    }
     Scaffold(
         topBar = {
-            Header("Artículos", if (active == 1) "1 en catálogo" else "$active en catálogo") {
+            Header("Artículos", if (active.size == 1) "1 en catálogo" else "${active.size} en catálogo") {
+                if (devices.any { it.vintedId.isNotBlank() }) {
+                    TextButton(onClick = { vm.go(Screen.Vinted) }) { Text("Vinted") }
+                }
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             }
         },
@@ -107,67 +131,94 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             ) { Icon(Icons.Default.Add, contentDescription = "Nuevo artículo") }
         },
     ) { padding ->
-        if (shown.isEmpty()) {
+        if (active.isEmpty()) {
             Empty("Pulsa + para crear tu primer artículo", Modifier.padding(padding))
             return@Scaffold
         }
         LazyColumn(
             modifier = Modifier.padding(padding),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (pending > 0) {
-                item(key = "pending") {
-                    Muted(
-                        if (pending == 1) "1 artículo vendido o eliminado se quitará de los otros móviles al conectar"
-                        else "$pending artículos vendidos o eliminados se quitarán de los otros móviles al conectar",
-                        Modifier.padding(start = 4.dp, bottom = 2.dp),
-                    )
+            item(key = "filters") {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
+                    item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
+                    val none = active.count { it.uploaded.isEmpty() }
+                    item { Choice("Sin subir · $none", filter == Filter.NotUploaded) { filter = Filter.NotUploaded } }
+                    if (devices.size > 1) {
+                        items(devices, key = { it.id }) { d ->
+                            val missing = active.count { d.id !in it.uploaded }
+                            Choice("Falta en ${d.label} · $missing", filter == Filter.Missing(d.id)) { filter = Filter.Missing(d.id) }
+                        }
+                    }
+                    val sold = active.count { it.soldInVinted() }
+                    if (sold > 0) item { Choice("Vendido en Vinted · $sold", filter == Filter.SoldInVinted) { filter = Filter.SoldInVinted } }
                 }
             }
+            val toSend = outbox.values.sumOf { it.values.sum() }
+            if (pending > 0 || toSend > 0) {
+                item(key = "pending") {
+                    Tile(onClick = { vm.tab(Screen.Connect) }) {
+                        Row2(
+                            left = {
+                                Muted(
+                                    listOfNotNull(
+                                        if (toSend > 0) "$toSend fotos por enviar" else null,
+                                        if (pending > 0) "$pending por quitar en otros móviles" else null,
+                                    ).joinToString(" · "),
+                                )
+                            },
+                            right = { Text("Conectar", style = MaterialTheme.typography.labelLarge) },
+                        )
+                    }
+                }
+            }
+            if (shown.isEmpty()) item(key = "none") { Muted("Ningún artículo", Modifier.padding(start = 4.dp, top = 16.dp)) }
             items(shown, key = { it.number }) { a ->
-                ArticleRow(vm, p, a, counts, covers[a.number], outbox)
+                ArticleRow(vm, p, a, covers[a.number], outbox.values.sumOf { it[a.number] ?: 0 }, Modifier.animateItem())
             }
         }
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ArticleRow(
-    vm: MainViewModel,
-    p: ParentState,
-    a: Article,
-    counts: Map<String, Int>,
-    cover: android.net.Uri?,
-    outbox: Map<String, Map<Int, Int>>,
-) {
+private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: android.net.Uri?, sending: Int, modifier: Modifier) {
     // Until the AI writes the title, the row shows what was typed instead of a provisional title.
     val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
         ?: a.listing?.let { l ->
             listOf(if (l.noBrand) "Sin marca" else l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null }
         }
-    Tile(onClick = { vm.go(Screen.Article(a.number)) }) {
+    val devices = Catalog.devices(p)
+    val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
+    Tile(modifier, onClick = { vm.go(Screen.Article(a.number)) }) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Cover(cover)
+            Cover(cover, size = 64.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 18.sp))
                     Ledger.lot(p, a.lotId)?.let { Pill(it.name) }
+                    if (a.soldInVinted()) Pill("Vendido en Vinted", strong = true)
                 }
-                if (title != null) {
-                    Text(title, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                } else {
-                    Muted("Sin datos del anuncio")
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    for (d in Catalog.devices(p)) {
-                        val waiting = if (d.id == p.self.id) 0 else outbox[d.id]?.get(a.number) ?: 0
-                        val n = if (d.id == p.self.id) counts[Sku.format(d.prefix, a.number, p.digits)] ?: 0
-                        else (a.delivered[d.id] ?: 0) + waiting
-                        AccountChip(d.prefix, uploaded = d.id in a.uploaded, photos = n, sending = waiting > 0)
-                    }
-                }
+                Text(
+                    title ?: "Sin datos",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (title == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                UploadBar(devices.map { it.id in a.uploaded })
+                val up = devices.count { it.id in a.uploaded }
+                Muted(
+                    listOfNotNull(
+                        when {
+                            up == 0 -> "Sin subir"
+                            up == devices.size -> if (devices.size == 1) "Subido" else "Subido en todas"
+                            else -> "Subido en $up de ${devices.size}"
+                        },
+                        if (favourites > 0) "♥ $favourites" else null,
+                        if (sending > 0) "$sending fotos por enviar" else null,
+                    ).joinToString(" · "),
+                )
             }
             IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -176,37 +227,22 @@ private fun ArticleRow(
     }
 }
 
-/**
- * One account on a row: "SH ✓" filled when it is published in Vinted,
- * otherwise "SH 4" with its photos (↑ while still being sent). Short enough
- * to fit several accounts and wrap cleanly when there are many.
- */
+/** One thin segment per account, filled where the article is published: readable with 2 or 12 accounts. */
 @Composable
-private fun AccountChip(prefix: String, uploaded: Boolean, photos: Int, sending: Boolean) {
-    val bg = if (uploaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest
-    val fg = if (uploaded) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Row(
-        Modifier.alpha(if (!uploaded && photos == 0) 0.6f else 1f)
-            .clip(RoundedCornerShape(50)).background(bg).padding(horizontal = 10.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(prefix, style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = fg, maxLines = 1, softWrap = false)
-        Text(
-            when {
-                uploaded -> " ✓"
-                sending -> " $photos ↑"
-                else -> " $photos"
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = if (uploaded) fg else MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
-            softWrap = false,
-        )
+private fun UploadBar(states: List<Boolean>) {
+    Row(Modifier.fillMaxWidth().height(4.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (on in states) {
+            Box(
+                Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(2.dp))
+                    .background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest),
+            )
+        }
     }
 }
 
 // ---------- Ficha del artículo ----------
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val context = LocalContext.current
@@ -216,6 +252,9 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     var selling by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var shown by remember { mutableStateOf(p.self.id) }
+    var soldBy by remember(article?.vinted) {
+        mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.self.id)
+    }
 
     Scaffold(
         topBar = {
@@ -256,34 +295,80 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 Ledger.costOf(p, article)?.let { Pill("Coste ${Money.format(it)}") }
             }
 
-            Section("Fotos")
+            article.vinted.entries.firstOrNull { it.value.status == "sold" }?.let { (deviceId, item) ->
+                Tile {
+                    Text("Vendido en Vinted", style = MaterialTheme.typography.titleMedium)
+                    Muted(listOfNotNull(Catalog.device(p, deviceId)?.label, item.price?.let(Money::format)).joinToString(" · "))
+                    FilledTonalButton(
+                        onClick = { selling = true },
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("Registrar la venta") }
+                }
+            }
+
+            Section("Cuentas")
             for (d in Catalog.devices(p)) {
                 val sku = Sku.format(d.prefix, number, p.digits)
                 val isSelf = d.id == p.self.id
+                val waiting = if (isSelf) 0 else outbox[d.id]?.get(number) ?: 0
                 val detail = if (isSelf) {
                     photos(counts[sku] ?: 0)
                 } else {
-                    val waiting = outbox[d.id]?.get(number) ?: 0
                     val sent = article.delivered[d.id] ?: 0
                     listOfNotNull(
                         if (sent > 0) "$sent enviadas" else null,
                         if (waiting > 0) "$waiting por enviar" else null,
                     ).joinToString(" · ").ifEmpty { "Sin fotos" }
                 }
-                val version = if (isSelf) counts[sku] ?: 0 else outbox[d.id]?.get(number) ?: 0
+                val version = if (isSelf) counts[sku] ?: 0 else waiting
                 val strip by produceState(emptyList<android.net.Uri>(), sku, version) {
                     value = if (isSelf) vm.albumPhotos(sku) else vm.outboxPhotos(d.id, number)
                 }
+                val uploaded = d.id in article.uploaded
                 Tile {
-                    Text(sku, style = Mono.copy(fontSize = 18.sp))
-                    Muted("${d.name} · $detail")
-                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 10.dp))
+                    Row2(
+                        left = {
+                            Column {
+                                Text(d.label, style = MaterialTheme.typography.titleMedium)
+                                Muted("$sku · $detail")
+                            }
+                        },
+                        right = {
+                            Muted(if (uploaded) "Subido" else "No subido", Modifier.padding(end = 8.dp))
+                            Switch(checked = uploaded, onCheckedChange = { vm.setUploaded(number, d.id, it) })
+                        },
+                    )
+                    article.vinted[d.id]?.let { v ->
+                        Muted(
+                            listOfNotNull(
+                                v.price?.let(Money::format),
+                                v.views?.let { "$it visitas" },
+                                v.favourites?.let { "♥ $it" },
+                                when (v.status) {
+                                    "reserved" -> "reservado"
+                                    "hidden" -> "oculto"
+                                    "sold" -> "vendido"
+                                    else -> null
+                                },
+                            ).joinToString(" · "),
+                        )
+                    }
+                    PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) }, modifier = Modifier.padding(top = 8.dp))
                     Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilledTonalButton(
                             onClick = { vm.startSession(number, d.id) { openCamera(context, vm) } },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(14.dp),
                         ) { Text("Fotos") }
+                        if (isSelf || waiting > 0) {
+                            FilledTonalButton(
+                                onClick = { vm.go(Screen.Photos(number, d.id)) },
+                                enabled = strip.isNotEmpty(),
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) { Text("Editar") }
+                        }
                         if (isSelf) {
                             FilledTonalButton(
                                 onClick = { vm.stage(number) },
@@ -302,30 +387,12 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             Section("Anuncio")
             val devices = Catalog.devices(p)
             if (devices.size > 1) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (d in devices) Choice(d.prefix, shown == d.id) { shown = d.id }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(devices, key = { it.id }) { d -> Choice(d.label, shown == d.id) { shown = d.id } }
                 }
             }
             val device = devices.firstOrNull { it.id == shown } ?: p.self
             ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
-            val uploaded = device.id in article.uploaded
-            if (uploaded) {
-                FilledTonalButton(
-                    onClick = { vm.setUploaded(number, device.id, false) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                ) {
-                    Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.size(8.dp))
-                    Text("Subido en ${device.prefix} · pulsa para desmarcar")
-                }
-            } else {
-                OutlinedButton(
-                    onClick = { vm.setUploaded(number, device.id, true) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
-                    shape = RoundedCornerShape(14.dp),
-                ) { Text("Marcar como subido en ${device.prefix}") }
-            }
             Spacer(Modifier.height(8.dp))
         }
     }
@@ -345,10 +412,19 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
         val cost = Ledger.costOf(p, article)
         SellDialog(
             title = "Vender ${Sku.number(number, p.digits)}",
+            initialPrice = Money.input(article.vinted.values.firstOrNull { it.status == "sold" }?.price),
             initialCost = Money.input(cost),
             costHint = Ledger.lot(p, article.lotId)?.let { "Coste por prenda de ${it.name}" },
             onDismiss = { selling = false },
-            onConfirm = { price, c -> vm.sellOnParent(number, price, c) },
+            onConfirm = { price, c -> vm.sellOnParent(number, price, c, soldBy) },
+            extra = if (Catalog.devices(p).size > 1) {
+                {
+                    Muted("Vendido en")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        for (d in Catalog.devices(p)) Choice(d.label, soldBy == d.id) { soldBy = d.id }
+                    }
+                }
+            } else null,
         )
     }
 }

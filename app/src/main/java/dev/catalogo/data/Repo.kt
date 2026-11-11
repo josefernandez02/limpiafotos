@@ -18,6 +18,7 @@ import dev.catalogo.core.ParentState
 import dev.catalogo.core.Session
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Sync
+import dev.catalogo.core.VintedWardrobe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -82,6 +83,54 @@ class Repo(context: Context) {
 
     suspend fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) {
         store.update { s -> s.copy(parent = Catalog.setUploaded(s.parent!!, number, deviceId, uploaded)) }
+    }
+
+    suspend fun setAccount(id: String, account: String, profile: String) {
+        store.update { s -> s.copy(parent = Catalog.setAccount(s.parent!!, id, account, profile)) }
+    }
+
+    /** Applies one account's Vinted wardrobe to the catalogue. */
+    suspend fun applyWardrobe(deviceId: String, items: List<VintedWardrobe.Remote>): VintedWardrobe.Result {
+        var result = VintedWardrobe.Result(0, 0, emptyList(), emptyList())
+        store.update { s ->
+            val (next, r) = VintedWardrobe.apply(s.parent!!, deviceId, items, System.currentTimeMillis())
+            result = r
+            s.copy(parent = next)
+        }
+        return result
+    }
+
+    // ---------- photo editing (order, cover, crop) ----------
+
+    /** One photo of the edited list: kept as it is, or replaced by new JPEG bytes (a crop). */
+    data class EditedPhoto(val source: Uri, val bytes: ByteArray? = null)
+
+    /** Whether [deviceId]'s photos of [number] are on this phone and can be edited here. */
+    fun editable(number: Int, deviceId: String): Boolean {
+        val p = state.parent ?: return false
+        return if (deviceId == p.self.id) true else outbox.count(deviceId, number) > 0
+    }
+
+    /**
+     * Rewrites the photos of [number] for [deviceId] in the given order, with
+     * the crops applied and without the ones left out. New copies are written
+     * first and the old ones deleted after, so nothing is lost if it stops
+     * halfway. Returns photos only the user can allow deleting.
+     */
+    suspend fun rewritePhotos(number: Int, deviceId: String, photos: List<EditedPhoto>): List<Uri> = withContext(Dispatchers.IO) {
+        val p = parent()
+        val bytes = photos.map { e ->
+            e.bytes ?: resolver.openInputStream(e.source)?.use { it.readBytes() } ?: throw CatalogException("No se pudo leer una foto")
+        }
+        if (deviceId == p.self.id) {
+            val album = sku(p.self, number, p.digits)
+            val old = gallery.albumPhotos(base, album)
+            for (b in bytes) gallery.save(base, album, b)
+            gallery.delete(old)
+        } else {
+            outbox.replace(deviceId, number, bytes)
+            emptyList()
+        }
     }
 
     // ---------- lots ----------
@@ -151,9 +200,11 @@ class Repo(context: Context) {
     // ---------- releases ----------
 
     /** Sold on the parent: record the sale, delete everything local, children follow on next sync. */
-    suspend fun sellOnParent(number: Int, price: Long, cost: Long?): List<Uri> {
+    suspend fun sellOnParent(number: Int, price: Long, cost: Long?, account: String? = null): List<Uri> {
         val consent = deleteLocalForParent(number)
-        store.update { s -> s.copy(parent = Ledger.sell(s.parent!!, number, s.deviceId, price, cost, System.currentTimeMillis())) }
+        store.update { s ->
+            s.copy(parent = Ledger.sell(s.parent!!, number, s.deviceId, price, cost, System.currentTimeMillis(), account ?: s.deviceId))
+        }
         return consent
     }
 

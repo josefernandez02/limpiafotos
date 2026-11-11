@@ -31,7 +31,7 @@ class Gallery(context: Context) {
             arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.RELATIVE_PATH),
             "${MediaStore.Images.Media.RELATIVE_PATH} LIKE ?",
             arrayOf("$base/%"),
-            "${MediaStore.Images.Media.DATE_ADDED} ASC",
+            "${MediaStore.Images.Media.DATE_ADDED} ASC, ${MediaStore.Images.Media._ID} ASC",
         )?.use { c ->
             val id = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val rel = c.getColumnIndexOrThrow(MediaStore.Images.Media.RELATIVE_PATH)
@@ -207,7 +207,7 @@ class Gallery(context: Context) {
             arrayOf(MediaStore.Images.Media._ID, MediaStore.Images.Media.DATE_ADDED),
             selection,
             args,
-            "${MediaStore.Images.Media.DATE_ADDED} ASC",
+            "${MediaStore.Images.Media.DATE_ADDED} ASC, ${MediaStore.Images.Media._ID} ASC",
         )?.use { c ->
             val id = c.getColumnIndexOrThrow(MediaStore.Images.Media._ID)
             val added = c.getColumnIndexOrThrow(MediaStore.Images.Media.DATE_ADDED)
