@@ -80,7 +80,12 @@ class Drafts(private val repo: Repo) {
         val p = repo.state.parent ?: return
         val a = current(number) ?: return
         if (p.self.id !in a.targets) {
-            return set(number, DeskState.REVIEW, "Marca la cuenta ${p.self.label} en «Publicar en»")
+            // With a single phone there is nothing to choose: it goes to this account.
+            if (p.children.isEmpty() && a.accounts.isEmpty()) {
+                repo.setAccounts(number, setOf(p.self.id))
+            } else {
+                return set(number, DeskState.REVIEW, "Marca la cuenta ${p.self.label} en «Publicar en»")
+            }
         }
         if (Catalog.freshAi(p, number) == null) {
             val key = repo.state.geminiKey
@@ -129,6 +134,8 @@ class Drafts(private val repo: Repo) {
             .getOrDefault(emptyList()).take(MAX_PHOTOS)
         if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
         try {
+            // A cheap question first: without the PC, the photos (MBs) are not uploaded every few seconds.
+            repo.desk.status(link)
             val job = repo.desk.send(link, built.ref, built.payload!!, photos)
             repo.updateDesk(number) { d ->
                 d?.copy(ref = built.ref, status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis())

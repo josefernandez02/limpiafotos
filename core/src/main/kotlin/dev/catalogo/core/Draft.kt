@@ -74,7 +74,8 @@ object Draft {
         val category = (fixes.category ?: ai.category)?.takeIf { it in Vinted.categories }
         if (category == null) doubts += "categoria"
         val size = fixes.size ?: vintedSize(listing)
-        if (size.isBlank()) doubts += "talla"
+        // Blank on purpose ("" chosen in «Revisar») means the garment has no size (bags, caps…).
+        if (size.isBlank() && fixes.size == null) doubts += "talla"
         val colors = (fixes.colors ?: ai.colors.mapNotNull(Vinted::color)).filter { it in Vinted.colors }
             .distinct().take(Vinted.MAX_COLORS)
         if (colors.isEmpty()) doubts += "colores"

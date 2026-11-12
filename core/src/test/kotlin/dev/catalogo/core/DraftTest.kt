@@ -84,6 +84,15 @@ class DraftTest {
     }
 
     @Test
+    fun `a garment without size is confirmed with an empty size`() {
+        val (s, a) = state(listing = levis.copy(size = ""))
+        assertEquals(listOf("talla"), Draft.build(s, a, samsung).doubts)
+        val b = Draft.build(s, a, samsung, Draft.Fixes(size = ""))
+        assertTrue(b.ready, "${b.doubts}")
+        assertEquals(JsonNull, b.payload!!["talla"])
+    }
+
+    @Test
     fun `no brand is sent as null`() {
         val (s, a) = state(listing = levis.copy(brand = "", noBrand = true))
         val b = Draft.build(s, a, samsung)

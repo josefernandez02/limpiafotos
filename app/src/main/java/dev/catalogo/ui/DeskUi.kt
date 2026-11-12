@@ -145,7 +145,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     OutlinedTextField(
                         value = size,
                         onValueChange = { size = it.take(20) },
-                        label = { Text("Talla (como en Vinted: W32, M, 42…)") },
+                        label = { Text("Talla (W32, M, 42…; vacía si no lleva)") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -191,7 +191,6 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
         },
         confirmButton = {
             val ok = ("categoria" !in doubts || category != null) &&
-                ("talla" !in doubts || size.isNotBlank()) &&
                 ("colores" !in doubts || colors.isNotEmpty()) &&
                 ("marca" !in doubts || brandOk)
             TextButton(
