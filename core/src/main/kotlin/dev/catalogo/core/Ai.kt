@@ -29,6 +29,10 @@ data class AiResult(
     val hashtags: List<String> = emptyList(),
     /** How long the answer took, to see if the AI is getting slow. */
     val seconds: Int = 0,
+    /** Up to 3 of [Vinted.materials], as the label (or the fabric) shows. */
+    val materials: List<String> = emptyList(),
+    /** Fields the AI is not sure about ([Ai.DOUBT_FIELDS]): the user checks them before the draft. */
+    val doubts: List<String> = emptyList(),
 )
 
 /** One answer of the AI, already checked against the closed lists. */
@@ -46,6 +50,8 @@ data class AiSuggestion(
     /** Brand and model read in the photos, only when the user left them blank. */
     val brand: String? = null,
     val model: String? = null,
+    val materials: List<String> = emptyList(),
+    val doubts: List<String> = emptyList(),
 ) {
     /** The listing with the suggestions applied; what the user typed always wins. */
     fun applyTo(listing: Listing): Listing {
@@ -64,7 +70,7 @@ data class AiSuggestion(
     }
 
     fun result(applied: Listing, model: String, seconds: Int = 0) =
-        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds)
+        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts)
 }
 
 class AiException(message: String) : Exception(message)
@@ -77,6 +83,9 @@ class AiException(message: String) : Exception(message)
 object Ai {
     const val TITLE_MAX = 90
     const val PHOTOS = 3
+
+    /** Fields the AI can flag as doubtful ("dudas"). */
+    val DOUBT_FIELDS = listOf("categoria", "talla", "colores", "materiales", "marca")
 
     data class Account(val id: String, val prefix: String, val style: Int)
 
@@ -150,6 +159,8 @@ object Ai {
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
             - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
             - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda y el sexo.
+            - materiales: de MATERIALES, hasta 3, los de la etiqueta de composición si se lee (p. ej. 98% algodón 2% elastano → Algodón, Elastano). Sin etiqueta, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
+            - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
             - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
 
             4. TÍTULOS (en inglés, uno por cuenta dentro de "titulos")
@@ -182,6 +193,8 @@ object Ai {
 
             COLORES: ${Vinted.colors.joinToString(", ")}
 
+            MATERIALES: ${Vinted.materials.joinToString(", ")}
+
             CATEGORIAS
             ${categoriesFor(listing.gender).joinToString("\n")}
         """.trimIndent()
@@ -193,11 +206,11 @@ object Ai {
 
     /** Families of close shades: two colours of the same family are one colour seen in two lights. */
     private val SHADES = listOf(
-        setOf("Beige", "Crema", "Caqui", "Albaricoque"),
+        setOf("Beige", "Crema", "Caqui", "Naranja pastel"),
         setOf("Azul", "Azul claro", "Azul marino", "Turquesa"),
         setOf("Verde", "Verde oscuro", "Menta", "Caqui"),
         setOf("Rojo", "Burdeos", "Coral"),
-        setOf("Rosa", "Lila", "Morado", "Coral"),
+        setOf("Rosa", "Fucsia", "Lila", "Morado", "Coral"),
         setOf("Amarillo", "Mostaza", "Dorado"),
         setOf("Gris", "Plateado"),
         setOf("Marrón", "Caqui", "Beige"),
@@ -272,7 +285,9 @@ object Ai {
             "sexo" to str(listOf("hombre", "mujer"), nullable = true),
             // Free text checked afterwards: an enum of hundreds of paths makes the answer much slower.
             "categoria" to str(nullable = true),
-            "colores" to arr(str(Vinted.colors), max = 2),
+            "colores" to arr(str(Vinted.colors), max = Vinted.MAX_COLORS),
+            "materiales" to arr(str(Vinted.materials), max = Vinted.MAX_MATERIALS),
+            "dudas" to arr(str(DOUBT_FIELDS)),
             "marca" to str(nullable = true),
             "modelo" to str(nullable = true),
             "talla" to str(nullable = true),
@@ -327,7 +342,10 @@ object Ai {
             titleObj?.get(a.prefix)?.str()?.let(::cleanTitle)?.takeIf { it.isNotEmpty() && seen.add(it.lowercase()) }?.let { a.id to it }
         }.toMap()
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
-        return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model)
+        val materials = o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS)
+        val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
+        return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
+            materials, doubts)
     }
 
     private fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().trim('"', '.').take(40)

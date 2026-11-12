@@ -60,6 +60,10 @@ data class Article(
     val vinted: Map<String, VintedItem> = emptyMap(),
     /** Accounts (device ids) chosen to publish this article in; usually one. */
     val accounts: Set<String> = emptySet(),
+    /** Price in cents it is listed at in Vinted. */
+    val price: Long? = null,
+    /** Its draft on the PC that uploads it (null = never sent). */
+    val desk: Desk? = null,
 ) {
     /** Chosen accounts; articles from before the choice existed use where they went. */
     val targets: Set<String> get() = accounts.ifEmpty { uploaded + delivered.filterValues { it > 0 }.keys }
@@ -67,6 +71,56 @@ data class Article(
     /** Chosen for some account and not yet published in every chosen one. */
     val toUpload: Boolean get() = targets.isEmpty() || !uploaded.containsAll(targets)
 }
+
+/**
+ * Where an article stands on its way to Vinted through the PC.
+ * Local steps: [PREPARING] (AI and checks queued on this phone), [REVIEW] (something
+ * needs the user), [SENDING]. Then the PC's own: pendiente, en_curso, borrador,
+ * publicado, jugado, revisar, error.
+ */
+@Serializable
+data class Desk(
+    /** Unique for this article's life on the PC (numbers are reused after a sale). */
+    val ref: String,
+    val status: String,
+    /** Why it is in review or failed, in plain words. */
+    val message: String = "",
+    /** Fields to check by hand ([Ai.DOUBT_FIELDS] plus missing data). */
+    val doubts: List<String> = emptyList(),
+    val itemId: String = "",
+    val url: String = "",
+    val game: String = "",
+    val at: Long = 0,
+    /** What the user settled in «Revisar». */
+    val fixes: Draft.Fixes = Draft.Fixes(),
+) {
+    val needsUser: Boolean get() = status == REVIEW || status == "revisar" || status == "error"
+    val working: Boolean get() = status == PREPARING || status == SENDING || status == "pendiente" || status == "en_curso"
+
+    companion object {
+        const val PREPARING = "preparando"
+        const val REVIEW = "revisar_movil"
+        const val SENDING = "enviando"
+
+        /** What the user reads for each status. */
+        fun label(status: String): String = when (status) {
+            PREPARING -> "Preparando con IA"
+            REVIEW, "revisar" -> "Revisar"
+            SENDING -> "Enviando al PC"
+            "pendiente" -> "En cola en el PC"
+            "en_curso" -> "Creando borrador"
+            "borrador" -> "Borrador listo"
+            "publicado" -> "Publicado"
+            "jugado" -> "En juego"
+            "error" -> "Error"
+            else -> status
+        }
+    }
+}
+
+/** The PC that turns articles into Vinted drafts (whatsapp-likes), reached on the LAN or Tailscale. */
+@Serializable
+data class PcLink(val url: String, val token: String)
 
 /** Photos being taken with the system camera for [deviceId]'s album of [number]. */
 @Serializable
@@ -109,6 +163,8 @@ data class AppState(
     val secondary: Boolean = false,
     /** Google AI Studio key; stays on this phone, never synced. */
     val geminiKey: String = "",
+    /** The PC that creates the drafts; stays on this phone, never synced. */
+    val pc: PcLink? = null,
 ) {
     val role: Role? get() = when {
         parent != null -> Role.PARENT

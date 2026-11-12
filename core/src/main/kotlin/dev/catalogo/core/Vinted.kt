@@ -11,12 +11,30 @@ enum class Gender(val label: String) {
 /** Closed lists of Vinted Spain: where a garment is filed and its colours. */
 object Vinted {
 
-    /** Official Vinted colours (Pink and Rose are both shown as Rosa). */
+    /** Colours exactly as the vinted.es upload form shows them (checked on 2026-11-12). */
     val colors: List<String> = listOf(
-        "Negro", "Gris", "Blanco", "Transparente", "Azul marino", "Azul", "Azul claro", "Turquesa", "Verde oscuro",
-        "Verde", "Menta", "Caqui", "Amarillo", "Mostaza", "Naranja", "Albaricoque", "Coral", "Rojo", "Burdeos",
-        "Rosa", "Morado", "Lila", "Marrón", "Beige", "Crema", "Plateado", "Dorado", "Varios",
+        "Negro", "Gris", "Blanco", "Crema", "Beige", "Naranja pastel", "Naranja", "Coral", "Rojo", "Burdeos",
+        "Fucsia", "Rosa", "Morado", "Lila", "Azul claro", "Azul", "Azul marino", "Turquesa", "Menta", "Verde",
+        "Verde oscuro", "Caqui", "Marrón", "Mostaza", "Amarillo", "Plateado", "Dorado", "Varios", "Transparente",
     )
+
+    /** Names used by older versions of the app that the form no longer has. */
+    private val LEGACY_COLORS = mapOf("Albaricoque" to "Naranja pastel")
+
+    /** A stored colour as the form names it today (null if it no longer exists). */
+    fun color(raw: String): String? = (LEGACY_COLORS[raw] ?: raw).takeIf { it in colors }
+
+    /** Materials of the upload form (max. [MAX_MATERIALS]); the PC maps them to Vinted's ids. */
+    val materials: List<String> = listOf(
+        "Acero", "Acrílico", "Algodón", "Alpaca", "Angora", "Ante", "Bambú", "Cachemira", "Cartón", "Cerámica",
+        "Charol", "Chifón", "Cristal", "Cuero sintético", "Elastano", "Encaje", "Fieltro", "Franela", "Goma",
+        "Gomaespuma", "Lana", "Lentejuelas", "Lino", "Lona", "Látex", "Madera", "Malla", "Merino", "Metal", "Mimbre",
+        "Nailon", "Neopreno", "Oro", "Paja", "Pana", "Papel", "Piedra", "Piel", "Piel sintética", "Plata", "Plumón",
+        "Plástico", "Polar", "Poliéster", "Porcelana", "Raso", "Seda", "Silicona", "Terciopelo", "Tul", "Tweed",
+        "Vaquero", "Velvetón", "Viscosa", "Yute",
+    )
+    const val MAX_COLORS = 2
+    const val MAX_MATERIALS = 3
 
     /**
      * Vinted Spain leaf categories for men and women: clothing, shoes,
