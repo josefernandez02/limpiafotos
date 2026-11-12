@@ -143,8 +143,10 @@ class Drafts(private val repo: Repo) {
             }
         } catch (e: CatalogException) {
             val offline = e.message.orEmpty().startsWith("No llego")
-            // Without connection it stays in «Enviando» and is retried; a refusal goes to «Revisar».
-            set(number, if (offline) DeskState.SENDING else DeskState.REVIEW, e.message.orEmpty())
+            // Without connection it stays in «Enviando» and is retried; a refusal goes to «Revisar»,
+            // with the field to fix when the PC names one (size, category…).
+            if (offline) set(number, DeskState.SENDING, e.message.orEmpty())
+            else set(number, DeskState.REVIEW, e.message.orEmpty(), fieldsIn(e.message.orEmpty()))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
@@ -164,6 +166,15 @@ class Drafts(private val repo: Repo) {
                 val jobs = repo.desk.jobs(link).associateBy { it.ref }
                 for (a in onPc) {
                     val job = jobs[a.desk!!.ref] ?: continue
+                    // The PC could not fill a field the user can settle here: it comes back to «Revisar»
+                    // with that field to choose, instead of a retry that would fail the same way.
+                    val fields = if (job.status == "revisar" || job.status == "error") fieldsIn(job.message) else emptyList()
+                    if (fields.isNotEmpty()) {
+                        repo.updateDesk(a.number) { d ->
+                            d?.copy(status = DeskState.REVIEW, message = "PC: ${job.message}", doubts = fields, at = System.currentTimeMillis())
+                        }
+                        continue
+                    }
                     repo.updateDesk(a.number) { d ->
                         d?.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
                     }
@@ -222,6 +233,18 @@ class Drafts(private val repo: Repo) {
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
+
+        /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
+        fun fieldsIn(message: String): List<String> {
+            val m = message.lowercase()
+            return listOfNotNull(
+                "talla".takeIf { "talla" in m },
+                // «…en esta categoría» only says where; it is not about the category itself
+                "categoria".takeIf { Regex("(?<!esta )categor[ií]a").containsMatchIn(m) },
+                "colores".takeIf { "color" in m },
+                "materiales".takeIf { "material" in m },
+            )
+        }
 
         fun label(field: String): String = when (field) {
             "categoria" -> "categoría"

@@ -91,7 +91,8 @@ object Draft {
             if (!settled && d != "marca") doubts += d     // "marca" is handled below
         }
         // An estimated size (no label) is always checked by the user.
-        if (listing.noLabel && options.isNotEmpty() && fixes.size !in options) doubts += "talla"
+        // (with the category still unknown it is asked together with it, in the same «Revisar»)
+        if (listing.noLabel && (category == null || options.isNotEmpty()) && fixes.size !in options) doubts += "talla"
         if ("marca" in ai.doubts && !listing.noBrand && !fixes.brandChecked) doubts += "marca"
 
         if (problems.isNotEmpty()) return Built(ref, null, problems, doubts.toList())

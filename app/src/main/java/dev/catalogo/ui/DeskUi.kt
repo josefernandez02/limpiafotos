@@ -41,25 +41,35 @@ import dev.catalogo.core.Desk
 import dev.catalogo.core.Draft
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.PcLink
+import dev.catalogo.core.Sizes
 import dev.catalogo.core.Vinted
 
 /** The article's way to Vinted through the PC: one button, then its progress. */
 @Composable
-fun DeskTile(vm: MainViewModel, p: ParentState, article: Article, state: AppState) {
+fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppState) {
     val desk = article.desk
     var reviewing by remember { mutableStateOf(false) }
-    Tile {
+    Column(Modifier.fillMaxWidth()) {
         when {
             state.pc == null -> Muted("Conecta el PC en Ajustes para crear el borrador automáticamente")
             desk == null -> Muted("La IA prepara los datos y el PC crea el borrador en Vinted. Puedes seguir con otros artículos.")
             else -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (desk.working) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                // The status itself is the chip next to the account; here only the work in progress.
+                if (desk.working) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(Modifier.width(10.dp))
+                        Muted(
+                            when (desk.status) {
+                                Desk.PREPARING -> "La IA está mirando las fotos…"
+                                Desk.SENDING -> "Enviando fotos y datos al PC…"
+                                "pendiente" -> "En cola: el PC lo hará en el próximo hueco libre"
+                                else -> "El PC está rellenando el formulario de Vinted…"
+                            },
+                        )
                     }
-                    Text(Desk.label(desk.status), style = MaterialTheme.typography.titleMedium)
                 }
+                if (desk.status == "borrador") Muted("Guardado como borrador. Se publica al pulsar Empezar.")
                 val extra = listOfNotNull(
                     desk.message.takeIf { it.isNotBlank() },
                     desk.game.takeIf { it.isNotBlank() }?.let { "Juego: $it" },
@@ -102,7 +112,12 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
     val listing = article.listing
     var category by remember { mutableStateOf(desk.fixes.category ?: ai?.category?.takeIf { it in Vinted.categories }) }
     var search by remember { mutableStateOf("") }
-    var size by remember { mutableStateOf(desk.fixes.size ?: listing?.let(Draft::vintedSize).orEmpty()) }
+    var size by remember {
+        mutableStateOf(
+            desk.fixes.size ?: (desk.fixes.category ?: ai?.category)?.takeIf { it in Vinted.categories }
+                ?.let { c -> listing?.let { Sizes.resolve(c, it) } }.orEmpty(),
+        )
+    }
     var colors by remember { mutableStateOf(desk.fixes.colors ?: ai?.colors?.mapNotNull(Vinted::color).orEmpty()) }
     var materials by remember { mutableStateOf(desk.fixes.materials ?: ai?.materials.orEmpty()) }
     var brandOk by remember { mutableStateOf(desk.fixes.brandChecked) }
@@ -142,13 +157,15 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     }
                 }
                 if ("talla" in doubts) {
-                    OutlinedTextField(
-                        value = size,
-                        onValueChange = { size = it.take(20) },
-                        label = { Text("Talla (W32, M, 42…; vacía si no lleva)") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    val options = category?.let(Sizes::options).orEmpty()
+                    Muted("Talla" + listing?.size?.takeIf { it.isNotBlank() }?.let { " · en la etiqueta: $it" }.orEmpty())
+                    when {
+                        category == null -> Muted("Elige antes la categoría")
+                        options.isEmpty() -> Muted("Esta categoría no lleva talla")
+                        else -> FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (o in options) Choice(o, size == o) { size = o }
+                        }
+                    }
                 }
                 if ("colores" in doubts) {
                     Muted("Color (hasta ${Vinted.MAX_COLORS})")
@@ -190,7 +207,9 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
             }
         },
         confirmButton = {
+            val sizeOk = category?.let(Sizes::options)?.let { it.isEmpty() || size in it } ?: false
             val ok = ("categoria" !in doubts || category != null) &&
+                ("talla" !in doubts || sizeOk) &&
                 ("colores" !in doubts || colors.isNotEmpty()) &&
                 ("marca" !in doubts || brandOk)
             TextButton(
@@ -200,7 +219,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                         article.number,
                         desk.fixes.copy(
                             category = if ("categoria" in doubts) category else desk.fixes.category,
-                            size = if ("talla" in doubts) size.trim() else desk.fixes.size,
+                            size = if ("talla" in doubts) size else desk.fixes.size,
                             colors = if ("colores" in doubts) colors else desk.fixes.colors,
                             materials = if ("materiales" in doubts) materials else desk.fixes.materials,
                             brandChecked = desk.fixes.brandChecked || brandOk,

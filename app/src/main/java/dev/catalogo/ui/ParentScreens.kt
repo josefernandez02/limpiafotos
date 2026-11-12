@@ -212,24 +212,15 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // Only the accounts chosen for this article: usually one, so it reads the same with many accounts.
-                val targets = devices.filter { it.id in a.targets }
-                Muted(
-                    listOfNotNull(
-                        if (targets.isEmpty()) "Sin cuenta" else targets.joinToString(" · ") { d ->
-                            d.label + if (d.id in a.uploaded) " ✓" else ""
-                        },
-                        when {
-                            targets.isEmpty() -> null
-                            a.toUpload -> "Por subir"
-                            else -> "Subido"
-                        },
-                        if (favourites > 0) "♥ $favourites" else null,
-                        if (sending > 0) "$sending fotos por enviar" else null,
-                        a.desk?.let { dev.catalogo.core.Desk.label(it.status) },
-                    ).joinToString(" · "),
-                    maxLines = 1,
+                // Each chosen account with how far the article is there: usually one line.
+                val targets = devices.filter { it.id in a.targets }.ifEmpty { if (devices.size == 1) devices else emptyList() }
+                if (targets.isEmpty()) Muted("Sin cuenta elegida", maxLines = 1)
+                for (d in targets) AccountLine(d.label, accountStatus(p, a, d))
+                val extra = listOfNotNull(
+                    if (favourites > 0) "♥ $favourites" else null,
+                    if (sending > 0) "$sending fotos por enviar" else null,
                 )
+                if (extra.isNotEmpty()) Muted(extra.joinToString(" · "), maxLines = 1)
             }
             IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -249,7 +240,6 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val article = Catalog.article(p, number)
     var selling by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
-    var shown by remember { mutableStateOf(p.self.id) }
     var soldBy by remember(article?.vinted) {
         mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.self.id)
     }
@@ -305,6 +295,10 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 }
             }
 
+            Section("Vinted")
+            val appState by vm.state.collectAsStateWithLifecycle()
+            VintedCard(vm, p, article, appState, outbox.mapValues { it.value[number] ?: 0 })
+
             // Photos are always taken here; other accounts get a copy when chosen.
             val ownSku = Sku.format(p.self.prefix, number, p.digits)
             val ownCount = counts[ownSku] ?: 0
@@ -330,71 +324,8 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 }
             }
 
-            Section("Publicar en")
-            val devices = Catalog.devices(p)
-            val targets = article.targets
-            Tile {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (d in devices) {
-                        val on = d.id in targets
-                        Choice(d.label, on) { vm.setAccounts(number, if (on) targets - d.id else targets + d.id) }
-                    }
-                }
-                if (targets.isEmpty()) Muted("Elige en qué cuenta lo vas a subir", Modifier.padding(top = 6.dp))
-                for (d in devices.filter { it.id in targets }) {
-                    val isSelf = d.id == p.self.id
-                    val uploaded = d.id in article.uploaded
-                    val waiting = outbox[d.id]?.get(number) ?: 0
-                    val sent = article.delivered[d.id] ?: 0
-                    val v = article.vinted[d.id]
-                    Column(Modifier.fillMaxWidth().padding(top = 14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(d.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        val detail = listOfNotNull(
-                            when {
-                                isSelf -> null
-                                waiting > 0 -> "$waiting fotos se enviarán al ${d.name} al conectar"
-                                sent > 0 -> "Fotos en el ${d.name}"
-                                else -> "Sin fotos para el ${d.name}"
-                            },
-                            v?.price?.let(Money::format),
-                            v?.views?.let { "$it visitas" },
-                            v?.favourites?.let { "♥ $it" },
-                            when (v?.status) {
-                                "reserved" -> "reservado"
-                                "hidden" -> "oculto"
-                                "sold" -> "vendido"
-                                else -> null
-                            },
-                        )
-                        if (detail.isNotEmpty()) Muted(detail.joinToString(" · "))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Choice("Por subir", !uploaded) { vm.setUploaded(number, d.id, false) }
-                            Choice("Subido", uploaded) { vm.setUploaded(number, d.id, true) }
-                            if (isSelf && !uploaded) {
-                                Spacer(Modifier.weight(1f))
-                                TextButton(onClick = { vm.stage(number) }, enabled = ownCount > 0) { OneLine("Preparar fotos") }
-                            }
-                        }
-                    }
-                }
-            }
-
-            Section("IA")
-            AiTile(vm, p, article)
-
-            Section("Borrador en Vinted")
-            val appState by vm.state.collectAsStateWithLifecycle()
-            DeskTile(vm, p, article, appState)
-
             Section("Anuncio")
-            val listed = devices.filter { it.id in targets }.ifEmpty { devices }
-            if (listed.size > 1) {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listed, key = { it.id }) { d -> Choice(d.label, shown == d.id) { shown = d.id } }
-                }
-            }
-            val device = listed.firstOrNull { it.id == shown } ?: listed.first()
-            ListingCard(vm, Catalog.listingText(p, number, device), onComplete = { vm.go(Screen.Editor(number)) })
+            ListingPreview(p, article, onEdit = { vm.go(Screen.Editor(number)) })
             Spacer(Modifier.height(8.dp))
         }
     }
