@@ -97,6 +97,11 @@ class Drafts(private val repo: Repo) {
                 return set(number, DeskState.REVIEW, e.message ?: "Error con la IA")
             } catch (e: IOException) {
                 return set(number, DeskState.PREPARING, "Sin internet: se reintenta solo")
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // Nunca en bucle: cualquier otro fallo espera al usuario (no gasta cuota de Gemini).
+                return set(number, DeskState.REVIEW, "Error con la IA: ${e.message ?: e.javaClass.simpleName}")
             }
         }
         check(number)
@@ -132,6 +137,10 @@ class Drafts(private val repo: Repo) {
             val offline = e.message.orEmpty().startsWith("No llego")
             // Without connection it stays in «Enviando» and is retried; a refusal goes to «Revisar».
             set(number, if (offline) DeskState.SENDING else DeskState.REVIEW, e.message.orEmpty())
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            set(number, DeskState.REVIEW, "No se pudo enviar: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 
@@ -184,19 +193,12 @@ class Drafts(private val repo: Repo) {
         kick()
     }
 
-    /** After an error on the PC: try again there (or from scratch if it never got there). */
-    suspend fun retry(number: Int) {
-        val a = current(number) ?: return
-        val d = a.desk ?: return prepareNow(number)
-        val link = repo.state.pc
-        if (link != null && (d.status == "revisar" || d.status == "error")) {
-            val job = repo.desk.retry(link, d.ref)
-            repo.updateDesk(number) { it?.copy(status = job.status, message = job.message) }
-            kick()
-        } else {
-            prepareNow(number)
-        }
-    }
+    /**
+     * After a problem (here or on the PC): the article goes through the checks again
+     * with its current data and, if it is fine, is sent again. The PC replaces what it
+     * had while the draft was not created yet, so editing and retrying is enough.
+     */
+    suspend fun retry(number: Int) = prepareNow(number)
 
     suspend fun control(action: String): Desk.Status {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")

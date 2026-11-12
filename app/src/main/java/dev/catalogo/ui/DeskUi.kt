@@ -88,11 +88,6 @@ fun DeskTile(vm: MainViewModel, p: ParentState, article: Article, state: AppStat
                 shape = RoundedCornerShape(16.dp),
             ) { Text(if (desk == null) "Generar y preparar borrador" else "Volver a intentarlo") }
         }
-        if (desk != null && !desk.working && desk.status != Desk.REVIEW && desk.status !in setOf("revisar", "error")) {
-            TextButton(onClick = { vm.prepareDraft(article.number) }, modifier = Modifier.padding(top = 2.dp)) {
-                Text("Preparar de nuevo")
-            }
-        }
     }
     if (reviewing && desk != null) {
         ReviewDialog(vm, p, article, desk, onDismiss = { reviewing = false })
