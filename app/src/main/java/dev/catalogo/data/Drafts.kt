@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
@@ -209,12 +210,12 @@ class Drafts(private val repo: Repo) {
 
     suspend fun control(action: String): Desk.Status {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val status = repo.desk.control(link, action)
+        val status = withContext(Dispatchers.IO) { repo.desk.control(link, action) }   // never on the UI thread
         _pc.value = Pc(status, null, System.currentTimeMillis())
         return status
     }
 
-    suspend fun test(link: dev.catalogo.core.PcLink): Desk.Status = repo.desk.status(link)
+    suspend fun test(link: dev.catalogo.core.PcLink): Desk.Status = withContext(Dispatchers.IO) { repo.desk.status(link) }
 
     companion object {
         private const val BUSY_MS = 20_000L
