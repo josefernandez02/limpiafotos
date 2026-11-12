@@ -40,13 +40,6 @@ object Draft {
     fun ref(device: Device, article: Article, digits: Int): String =
         Sku.format(device.prefix, article.number, digits) + "-" + article.createdAt.toString(36)
 
-    /** Size as the form lists it: the W of a waist size ("W32 L34" → "W32"), else the label. */
-    fun vintedSize(listing: Listing): String {
-        val size = listing.size.trim()
-        val w = Regex("(?i)\\bW\\s?(\\d{2})\\b").find(size)?.groupValues?.get(1)
-        return if (w != null) "W$w" else size
-    }
-
     fun condition(c: Condition): String = when (c) {
         Condition.NEW_TAGS -> "nuevo_con_etiquetas"
         Condition.NEW -> "nuevo_sin_etiquetas"
@@ -73,9 +66,13 @@ object Draft {
 
         val category = (fixes.category ?: ai.category)?.takeIf { it in Vinted.categories }
         if (category == null) doubts += "categoria"
-        val size = fixes.size ?: vintedSize(listing)
-        // Blank on purpose ("" chosen in «Revisar») means the garment has no size (bags, caps…).
-        if (size.isBlank() && fixes.size == null) doubts += "talla"
+        // The size exactly as the form offers it for this category; without certainty, «Revisar».
+        val options = category?.let(Sizes::options).orEmpty()
+        val size = when {
+            category == null || options.isEmpty() -> ""          // no category yet, or it asks for no size
+            fixes.size != null && fixes.size in options -> fixes.size
+            else -> Sizes.resolve(category, listing) ?: "".also { doubts += "talla" }
+        }
         val colors = (fixes.colors ?: ai.colors.mapNotNull(Vinted::color)).filter { it in Vinted.colors }
             .distinct().take(Vinted.MAX_COLORS)
         if (colors.isEmpty()) doubts += "colores"
@@ -86,7 +83,7 @@ object Draft {
         for (d in ai.doubts) {
             val settled = when (d) {
                 "categoria" -> fixes.category != null
-                "talla" -> fixes.size != null
+                "talla" -> fixes.size != null && fixes.size in options
                 "colores" -> fixes.colors != null
                 "materiales" -> fixes.materials != null
                 else -> false
@@ -94,7 +91,7 @@ object Draft {
             if (!settled && d != "marca") doubts += d     // "marca" is handled below
         }
         // An estimated size (no label) is always checked by the user.
-        if (listing.noLabel && fixes.size == null) doubts += "talla"
+        if (listing.noLabel && options.isNotEmpty() && fixes.size !in options) doubts += "talla"
         if ("marca" in ai.doubts && !listing.noBrand && !fixes.brandChecked) doubts += "marca"
 
         if (problems.isNotEmpty()) return Built(ref, null, problems, doubts.toList())

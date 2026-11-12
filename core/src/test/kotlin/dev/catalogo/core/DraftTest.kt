@@ -84,12 +84,32 @@ class DraftTest {
     }
 
     @Test
-    fun `a garment without size is confirmed with an empty size`() {
+    fun `a size the form does not offer waits for the user, a bag needs none`() {
         val (s, a) = state(listing = levis.copy(size = ""))
         assertEquals(listOf("talla"), Draft.build(s, a, samsung).doubts)
-        val b = Draft.build(s, a, samsung, Draft.Fixes(size = ""))
+        assertEquals(listOf("talla"), Draft.build(s, a, samsung, Draft.Fixes(size = "")).doubts, "jeans always need a size")
+        val ok = Draft.build(s, a, samsung, Draft.Fixes(size = "W33"))
+        assertTrue(ok.ready, "${ok.doubts}")
+        assertEquals("W33", ok.payload!!["talla"]!!.jsonPrimitive.content)
+
+        val bag = Listing(type = "bag", brand = "Eastpak", size = "Única")
+        val (s2, a2) = state(listing = bag, ai = { l ->
+            AiResult(Ai.basis(l), "Mujer › Bolsos › Mochilas", listOf("Negro"), mapOf("p" to "T"))
+        })
+        val b = Draft.build(s2, a2, samsung)
         assertTrue(b.ready, "${b.doubts}")
-        assertEquals(JsonNull, b.payload!!["talla"])
+        assertEquals(JsonNull, b.payload!!["talla"], "the form asks no size for bags")
+    }
+
+    @Test
+    fun `women's jeans with a waist size go as the letter the form offers`() {
+        val l = Listing(type = "jeans", brand = "Levi's", model = "710", size = "W30 L30", gender = Gender.WOMEN)
+        val (s, a) = state(listing = l, ai = { x ->
+            AiResult(Ai.basis(x), "Mujer › Ropa › Vaqueros › Vaqueros pitillo", listOf("Azul claro"), mapOf("p" to "T"))
+        })
+        val b = Draft.build(s, a, samsung)
+        assertTrue(b.ready, "${b.problems} ${b.doubts}")
+        assertEquals("M", b.payload!!["talla"]!!.jsonPrimitive.content)
     }
 
     @Test
@@ -101,9 +121,7 @@ class DraftTest {
     }
 
     @Test
-    fun `size and colour helpers`() {
-        assertEquals("W30", Draft.vintedSize(Listing(size = "w30 l32")))
-        assertEquals("M", Draft.vintedSize(Listing(size = " M ")))
+    fun `colour helpers`() {
         assertEquals("Naranja pastel", Vinted.color("Albaricoque"))
         assertNull(Vinted.color("Inventado"))
     }
