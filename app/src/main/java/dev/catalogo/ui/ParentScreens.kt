@@ -91,12 +91,14 @@ private sealed interface Filter {
     data object ToUpload : Filter
     data class Account(val deviceId: String) : Filter
     data object SoldInVinted : Filter
+    data object Review : Filter
 }
 
 private fun Article.soldInVinted() = vinted.values.any { it.status == "sold" }
 
 @Composable
 fun ParentHome(vm: MainViewModel, p: ParentState) {
+    val appState by vm.state.collectAsStateWithLifecycle()
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf<Filter>(Filter.All) }
@@ -110,6 +112,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             Filter.ToUpload -> a.toUpload
             is Filter.Account -> f.deviceId in a.targets
             Filter.SoldInVinted -> a.soldInVinted()
+            Filter.Review -> a.desk?.needsUser == true
         }
     }
     Scaffold(
@@ -140,9 +143,12 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            if (appState.pc != null) item(key = "pc") { PcCard(vm) }
             item(key = "filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
+                    val review = active.count { it.desk?.needsUser == true }
+                    if (review > 0) item { Choice("Revisar · $review", filter == Filter.Review) { filter = Filter.Review } }
                     val todo = active.count { it.toUpload }
                     item { Choice("Por subir · $todo", filter == Filter.ToUpload) { filter = Filter.ToUpload } }
                     if (devices.size > 1) {
@@ -220,6 +226,7 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
                         },
                         if (favourites > 0) "♥ $favourites" else null,
                         if (sending > 0) "$sending fotos por enviar" else null,
+                        a.desk?.let { dev.catalogo.core.Desk.label(it.status) },
                     ).joinToString(" · "),
                     maxLines = 1,
                 )
@@ -374,6 +381,10 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
 
             Section("IA")
             AiTile(vm, p, article)
+
+            Section("Borrador en Vinted")
+            val appState by vm.state.collectAsStateWithLifecycle()
+            DeskTile(vm, p, article, appState)
 
             Section("Anuncio")
             val listed = devices.filter { it.id in targets }.ifEmpty { devices }

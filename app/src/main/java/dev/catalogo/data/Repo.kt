@@ -30,6 +30,7 @@ class Repo(context: Context) {
     val outbox = Outbox(context.filesDir)
     val gemini = Gemini(context.contentResolver)
     val previews = Previews(context.filesDir)
+    val desk = Desk(context.contentResolver)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
@@ -75,6 +76,23 @@ class Repo(context: Context) {
 
     suspend fun applyAi(number: Int, suggestion: AiSuggestion, model: String, seconds: Int) {
         store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model, seconds)) }
+    }
+
+    suspend fun setPrice(number: Int, price: Long?) {
+        store.update { s -> s.copy(parent = Catalog.setPrice(s.parent!!, number, price)) }
+    }
+
+    /** Updates [number]'s draft status with [block] (it receives the current one). */
+    suspend fun updateDesk(number: Int, block: (dev.catalogo.core.Desk?) -> dev.catalogo.core.Desk?) {
+        store.update { s ->
+            val p = s.parent ?: return@update s
+            val a = Catalog.article(p, number) ?: return@update s
+            s.copy(parent = Catalog.setDesk(p, number, block(a.desk)))
+        }
+    }
+
+    suspend fun setPc(link: dev.catalogo.core.PcLink?) {
+        store.update { it.copy(pc = link) }
     }
 
     suspend fun setGeminiKey(key: String) {

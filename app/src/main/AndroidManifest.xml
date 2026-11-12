@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
-    <!-- Gemini (titles with AI) -->
+    <!-- Gemini (titles with AI) and the PC that creates the drafts (LAN / Tailscale, plain HTTP with a key) -->
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Direct phone-to-phone link (Nearby Connections) -->
@@ -36,7 +36,8 @@
         android:label="Catálogo"
         android:largeHeap="true"
         android:supportsRtl="false"
-        android:theme="@style/Theme.Catalogo">
+        android:theme="@style/Theme.Catalogo"
+        android:usesCleartextTraffic="true">
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"

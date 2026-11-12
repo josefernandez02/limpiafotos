@@ -24,6 +24,19 @@ object Catalog {
         return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost, ai = ai))
     }
 
+    /** Price in cents [number] is listed at in Vinted. */
+    fun setPrice(s: ParentState, number: Int, price: Long?): ParentState {
+        val a = article(s, number) ?: return s
+        if (price != null && price <= 0) throw CatalogException("Precio no válido")
+        return replace(s, a.copy(price = price))
+    }
+
+    /** Where [number] stands on its way to the PC (null = never sent). */
+    fun setDesk(s: ParentState, number: Int, desk: Desk?): ParentState {
+        val a = article(s, number) ?: return s
+        return if (a.desk == desk) s else replace(s, a.copy(desk = desk))
+    }
+
     /** Applies an AI answer to [number]: listing data the user left empty and the titles. */
     fun applyAi(s: ParentState, number: Int, suggestion: AiSuggestion, model: String, seconds: Int = 0): ParentState {
         val a = article(s, number) ?: return s

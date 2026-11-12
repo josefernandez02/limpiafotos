@@ -82,6 +82,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var aiNotes by remember { mutableStateOf(start.aiNotes) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
+    var price by remember { mutableStateOf(Money.input(article?.price)) }
     var help by remember { mutableStateOf<Keyword?>(null) }
 
     val listing = Listing(
@@ -122,7 +123,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             BottomActions {
                 BigButton(
                     if (creating) "Guardar y hacer fotos" else "Guardar",
-                    onClick = { vm.saveArticle(number, listing, lotId, cost, article?.ai) },
+                    onClick = { vm.saveArticle(number, listing, lotId, cost, article?.ai, price) },
                 )
             }
         },
@@ -196,6 +197,9 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                 }
                 Keywords(KeywordKind.entries.filter { it != KeywordKind.EPOCH })
             }
+
+            Section("Precio en Vinted")
+            MoneyField(price, { price = it }, "Precio de venta", hint = "El que se pondrá en el borrador")
 
             Section("Coste")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

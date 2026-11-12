@@ -256,6 +256,8 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                 }
                 Section("IA (Gemini)")
                 GeminiKeyTile(vm, state.geminiKey)
+                Section("PC (crea los borradores)")
+                PcSettingsTile(vm, state.pc)
                 Section("SKU")
                 Tile {
                     Row2(

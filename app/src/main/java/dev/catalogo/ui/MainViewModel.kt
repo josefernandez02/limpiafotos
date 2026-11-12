@@ -232,17 +232,59 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- parent ----------
 
-    fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String, ai: AiResult?) = run {
+    fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String, ai: AiResult?, priceText: String = "") = run {
         val cost = if (lotId != null || costText.isBlank()) null
         else Money.parse(costText) ?: throw CatalogException("Coste no válido")
+        val price = if (priceText.isBlank()) null
+        else Money.parse(priceText)?.takeIf { it > 0 } ?: throw CatalogException("Precio no válido")
         if (number == null) {
             val created = repo.newArticle(listing, lotId, cost, ai)
+            repo.setPrice(created, price)
             replaceTop(Screen.Article(created))
         } else {
             repo.updateArticle(number, listing, lotId, cost, ai)
+            repo.setPrice(number, price)
             back()
         }
     }
+
+    // ---------- drafts on the PC ----------
+
+    /** The PC program as last seen (null status = not configured or not reached). */
+    val pc = app.drafts.pc
+
+    /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
+    fun prepareDraft(number: Int) = run {
+        if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
+        app.drafts.prepareNow(number)
+        _message.value = "Preparando el borrador: puedes seguir con otros artículos"
+    }
+
+    fun fixDraft(number: Int, fixes: dev.catalogo.core.Draft.Fixes) = run {
+        app.drafts.fix(number, fixes)
+        _message.value = "Revisado: sigue su camino al PC"
+    }
+
+    fun retryDraft(number: Int) = run { app.drafts.retry(number) }
+
+    /** «iniciar», «pausar» or «reanudar» the PC program. */
+    fun pcControl(action: String) = run {
+        val s = app.drafts.control(action)
+        _message.value = if (s.paused) "PC en pausa" else "PC: ${s.text}"
+    }
+
+    /** Checks the PC answers with this key before saving it. */
+    fun savePc(url: String, token: String, done: () -> Unit) = run {
+        val clean = url.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
+        val link = dev.catalogo.core.PcLink(clean, token.trim())
+        val s = app.drafts.test(link)
+        repo.setPc(link)
+        _message.value = "PC conectado: ${s.text}"
+        app.drafts.kick()
+        done()
+    }
+
+    fun forgetPc() = run { repo.setPc(null) }
 
     /** Photos the AI can look at: main phone's album first, then photos waiting for other phones. */
     suspend fun aiPhotos(number: Int): List<Uri> {
