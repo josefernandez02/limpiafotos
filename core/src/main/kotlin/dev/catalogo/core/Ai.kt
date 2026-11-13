@@ -171,6 +171,7 @@ object Ai {
             - Hasta 2 palabras de estilo SOLO si encajan de verdad: Workwear, Streetwear, Old Money, Retro, Preppy, Grunge, Washed, Faded, Denim…
             - Termina con el color en inglés y con el matiz real: Blue, Light Blue, Dark Blue, Black, Grey, White, Khaki, Beige, Brown, Navy, Burgundy, Cream, Olive…
             - Nunca talla, estado, precio, SKU, emojis, signos ni relleno (Amazing, Must Have, Rare…).
+            - Cada palabra una sola vez: si ya pusiste el corte (Skinny) no lo repitas más adelante.
             - Title Case, máximo $TITLE_MAX caracteres. Las cuentas no pueden tener el mismo título.
 
             5. HASHTAGS ("hashtags": de 10 a 12, sin #, minúsculas, sin tildes ni espacios)
@@ -350,8 +351,20 @@ object Ai {
 
     private fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().trim('"', '.').take(40)
 
+    /**
+     * Each word once: «Skinny Jeans … Classic Skinny Fit» wastes characters and reads
+     * like spam in Vinted's search. Later repeats are dropped (case and accents ignored).
+     */
+    fun distinctWords(title: String): String {
+        val seen = HashSet<String>()
+        return title.split(' ').filter { w ->
+            val k = java.text.Normalizer.normalize(w, java.text.Normalizer.Form.NFD).lowercase().filter { it.isLetterOrDigit() }
+            k.isEmpty() || seen.add(k)
+        }.joinToString(" ")
+    }
+
     private fun cleanTitle(raw: String): String {
-        var t = raw.replace(Regex("[\\r\\n\\t]+"), " ").replace(Regex("\\s+"), " ").trim().trim('"', '.', '-', ' ')
+        var t = distinctWords(raw.replace(Regex("[\\r\\n\\t]+"), " ").replace(Regex("\\s+"), " ").trim().trim('"', '.', '-', ' '))
         if (t.length > ListingWriter.TITLE_MAX) t = t.take(ListingWriter.TITLE_MAX).substringBeforeLast(' ')
         return t
     }

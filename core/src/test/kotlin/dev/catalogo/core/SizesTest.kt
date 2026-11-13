@@ -72,3 +72,15 @@ class SizesTest {
         assertNull(Sizes.resolve(menShoes, "47"))
     }
 }
+
+class TitleTest {
+    @Test
+    fun `no repeated words in titles`() {
+        assertEquals(
+            "Levi's 710 Skinny Jeans Vintage Y2K Classic Fit Light Blue",
+            Ai.distinctWords("Levi's 710 Skinny Jeans Vintage Y2K Classic Skinny Fit Light Blue"),
+        )
+        assertEquals("Nike Air Max 90 White", Ai.distinctWords("Nike Air Max 90 White"))
+        assertEquals("Carhartt Jacket Brown", Ai.distinctWords("Carhartt Jacket brown Brown"))
+    }
+}

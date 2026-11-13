@@ -108,7 +108,8 @@ object Catalog {
         val listing = article(s, number)?.listing ?: return null
         val ai = freshAi(s, number)
         val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits), ai?.hashtags)
-        val title = ai?.titles?.get(device.id)?.takeIf { it.isNotBlank() } ?: return text
+        // (also for titles generated before repeats were removed)
+        val title = ai?.titles?.get(device.id)?.let(Ai::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
         return text.copy(title = title)
     }
 
