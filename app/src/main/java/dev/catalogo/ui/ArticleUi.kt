@@ -59,7 +59,14 @@ data class AccountStatus(val text: String, val tone: Tone)
 fun accountStatus(p: ParentState, article: Article, device: Device): AccountStatus {
     val desk = article.desk.takeIf { device.id == p.self.id }
     return when {
-        device.id in article.uploaded -> AccountStatus(if (desk?.status == "jugado") "Subido · jugado" else "Subido", Tone.Done)
+        device.id in article.uploaded -> AccountStatus(
+            when (desk?.status) {
+                "jugado" -> "Subido · jugado"
+                "publicado" -> "Subido · por jugar"     // published by the PC, its game still to come
+                else -> "Subido"
+            },
+            Tone.Done,
+        )
         article.vinted[device.id]?.status == "sold" -> AccountStatus("Vendido", Tone.Done)
         desk == null -> AccountStatus("Por subir", Tone.Idle)
         desk.needsUser -> AccountStatus("Revisar", Tone.Warn)
