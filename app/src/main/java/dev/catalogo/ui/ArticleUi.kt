@@ -58,7 +58,7 @@ data class AccountStatus(val text: String, val tone: Tone)
 fun accountStatus(p: ParentState, article: Article, device: Device): AccountStatus {
     val desk = article.desk.takeIf { device.id == p.self.id }
     return when {
-        device.id in article.uploaded -> AccountStatus(if (desk?.status == "jugado") "En juego" else "Subido", Tone.Done)
+        device.id in article.uploaded -> AccountStatus(if (desk?.status == "jugado") "Subido · jugado" else "Subido", Tone.Done)
         article.vinted[device.id]?.status == "sold" -> AccountStatus("Vendido", Tone.Done)
         desk == null -> AccountStatus("Por subir", Tone.Idle)
         desk.needsUser -> AccountStatus("Revisar", Tone.Warn)
@@ -159,6 +159,9 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
             }
             val uploaded = d.id in article.uploaded
             if (d.id == p.self.id) {
+                article.desk?.takeIf { it.status == "jugado" && it.game.isNotBlank() }?.let {
+                    Muted("Usado como link en ${it.game}", Modifier.padding(top = 6.dp))
+                }
                 if (!uploaded) {
                     Spacer(Modifier.size(8.dp))
                     DeskBlock(vm, p, article, state)

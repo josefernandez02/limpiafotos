@@ -111,7 +111,7 @@ data class Desk(
             "en_curso" -> "Creando borrador"
             "borrador" -> "Borrador listo"
             "publicado" -> "Publicado"
-            "jugado" -> "En juego"
+            "jugado" -> "Subido · ya jugado"
             "error" -> "Error"
             else -> status
         }
