@@ -118,9 +118,6 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     Scaffold(
         topBar = {
             Header("Artículos", if (active.size == 1) "1 en catálogo" else "${active.size} en catálogo") {
-                if (devices.any { it.vintedId.isNotBlank() }) {
-                    TextButton(onClick = { vm.go(Screen.Vinted) }) { Text("Vinted") }
-                }
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             }
         },

@@ -57,6 +57,12 @@ class Desk(private val resolver: ContentResolver) {
 
     fun retry(link: PcLink, ref: String): Job = call(link, "POST", "/articulos/${enc(ref)}/reintentar", "{}").job()
 
+    /** The app's log, kept on the PC next to its own (datos/<perfil>/movil.log). */
+    fun log(link: PcLink, text: String) {
+        val body = kotlinx.serialization.json.buildJsonObject { put("texto", kotlinx.serialization.json.JsonPrimitive(text)) }
+        call(link, "PUT", "/registro", body.toString(), 30_000)
+    }
+
     fun delete(link: PcLink, ref: String) {
         call(link, "DELETE", "/articulos/${enc(ref)}", null)
     }
@@ -92,7 +98,9 @@ class Desk(private val resolver: ContentResolver) {
                 c.setRequestProperty("Content-Type", "application/json; charset=utf-8")
                 c.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
             }
+            val started = System.currentTimeMillis()
             val code = c.responseCode
+            if (path != "/registro") AppLog.i("pc", "$method $path -> $code (${System.currentTimeMillis() - started} ms)")
             val text = (if (code in 200..299) c.inputStream else c.errorStream)?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
             val o = runCatching { json.parseToJsonElement(text).jsonObject }.getOrNull() ?: JsonObject(emptyMap())
             return when (code) {
@@ -104,6 +112,7 @@ class Desk(private val resolver: ContentResolver) {
         } catch (e: CatalogException) {
             throw e
         } catch (e: IOException) {
+            AppLog.w("pc", "$method $path: ${e.javaClass.simpleName} ${e.message.orEmpty()}")
             throw CatalogException("No llego al PC (¿encendido, programa abierto, misma wifi o Tailscale?)")
         } finally {
             c.disconnect()

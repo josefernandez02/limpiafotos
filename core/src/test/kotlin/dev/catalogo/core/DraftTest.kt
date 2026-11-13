@@ -73,12 +73,12 @@ class DraftTest {
     }
 
     @Test
-    fun `estimated size, unknown category and no colour are doubts`() {
+    fun `an estimated size is not asked, unknown category and no colour are doubts`() {
         val (s, a) = state(listing = levis.copy(noLabel = true), ai = { l ->
             AiResult(Ai.basis(l), "Hombre › Inventada", listOf("Albaricoque"), mapOf("p" to "T"))
         })
         val b = Draft.build(s, a, samsung)
-        assertEquals(setOf("talla", "categoria"), b.doubts.toSet(), "legacy colour is mapped, not a doubt")
+        assertEquals(setOf("categoria"), b.doubts.toSet(), "legacy colour is mapped, not a doubt; no label: the AI sizes it")
         val (s2, a2) = state(ai = { l -> AiResult(Ai.basis(l), "Hombre › Ropa › Vaqueros › Vaqueros rectos", emptyList(), mapOf("p" to "T")) })
         assertEquals(listOf("colores"), Draft.build(s2, a2, samsung).doubts)
     }

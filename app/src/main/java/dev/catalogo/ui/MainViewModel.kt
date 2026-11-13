@@ -175,6 +175,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() = viewModelScope.launch {
+        app.drafts.refresh()
         val base = repo.base
         val s = state.value
         val p = s.parent
@@ -274,10 +275,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun retryDraft(number: Int) = run { app.drafts.retry(number) }
 
+    /** Out of the queue (and off the PC) until the user sends it again. */
+    fun removeDraft(number: Int) = run {
+        app.drafts.remove(number)
+        _message.value = "Fuera de la cola"
+    }
+
     /** «iniciar», «pausar» or «reanudar» the PC program. */
     fun pcControl(action: String) = run {
         val s = app.drafts.control(action)
-        _message.value = if (s.paused) "PC en pausa" else "PC: ${s.text}"
+        _message.value = if (s.paused) "PC en pausa" else "PC ${s.text}"
     }
 
     /** Checks the PC answers with this key before saving it. */

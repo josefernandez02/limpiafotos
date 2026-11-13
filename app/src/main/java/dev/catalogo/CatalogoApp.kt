@@ -15,6 +15,7 @@ class CatalogoApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        dev.catalogo.data.AppLog.init(this)
         repo = Repo(this)
         sync = SyncManager(this, repo)
         drafts = Drafts(repo, this).also { it.start() }

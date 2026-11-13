@@ -53,6 +53,21 @@ class ReadingTest {
     }
 }
 
+class NotesTest {
+    @Test
+    fun `the seller's notes settle material and a size without label is not asked`() {
+        val jumper = Listing(type = "jumper", brand = "Vintage Dressing", noLabel = true, aiNotes = "Es lana", noModel = true)
+        val answer = """{"hallazgos":[],"tipo_prenda":"jumper","palabras":[],"sexo":"hombre","categoria":null,
+            "colores":["Azul"],"materiales":["Acrílico"],"dudas":["materiales","talla"],"marca":null,"modelo":"Aran",
+            "talla":"L","titulos":{"SH":"Vintage Dressing Wool Jumper Blue"},"hashtags":["jumper"]}"""
+        val s = Ai.parse(answer, jumper, listOf(Ai.Account("a", "SH", 0)))
+        assertEquals(listOf("Lana"), s.materials)
+        assertEquals(emptyList(), s.doubts)
+        assertNull(s.model, "sin modelo: the AI does not add one")
+        assertEquals("L", s.applyTo(jumper).size)
+    }
+}
+
 class ChosenPhotosTest {
     @Test
     fun `chosen photos keep their order and fall back to the album`() {

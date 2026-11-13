@@ -65,6 +65,9 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
     val desk = article.desk
     var reviewing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
+    var removing by remember { mutableStateOf(false) }
+    // The PC already has photos and data: «Volver a intentarlo» asks it again, nothing is re-sent.
+    val onPc = desk != null && (desk.status == "revisar" || desk.status == "error")
     Column(Modifier.fillMaxWidth()) {
         when {
             state.pc == null -> Muted("Conecta el PC en Ajustes")
@@ -106,12 +109,30 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
                 shape = RoundedCornerShape(16.dp),
             ) { OneLine("Revisar ${desk.doubts.size} ${if (desk.doubts.size == 1) "dato" else "datos"}") }
             desk == null || desk.needsUser -> FilledTonalButton(
-                onClick = { choosing = true },
+                onClick = { if (onPc) vm.retryDraft(article.number) else choosing = true },
                 enabled = state.pc != null,
                 modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 8.dp),
                 shape = RoundedCornerShape(16.dp),
             ) { OneLine(if (desk == null) "Generar y preparar borrador" else "Volver a intentarlo") }
         }
+        // Stuck or not wanted now: out of the queue until it is sent again.
+        if (desk != null && desk.status !in setOf("borrador", "publicado", "jugado")) {
+            OutlinedButton(
+                onClick = { removing = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) { OneLine("Sacar de la cola") }
+        }
+    }
+    if (removing) {
+        Confirm(
+            title = "¿Sacar de la cola?",
+            text = "El PC no hará nada con este artículo hasta que lo vuelvas a mandar. No se borra nada.",
+            confirm = "Sacar",
+            onConfirm = { vm.removeDraft(article.number) },
+            onDismiss = { removing = false },
+            destructive = true,
+        )
     }
     if (reviewing && desk != null) {
         ReviewDialog(vm, p, article, desk, onDismiss = { reviewing = false })
@@ -333,9 +354,10 @@ fun PcCard(vm: MainViewModel, p: ParentState) {
                 Text(
                     when {
                         pc.error != null -> "PC sin conexión"
-                        status == null -> "PC: conectando…"
+                        status == null -> "Conectando con el PC"
                         status.paused -> "PC en pausa"
-                        else -> "PC: ${status.text}"
+                        status.text == "parado" -> "PC parado"
+                        else -> "PC " + status.text
                     },
                     style = MaterialTheme.typography.titleMedium,
                 )

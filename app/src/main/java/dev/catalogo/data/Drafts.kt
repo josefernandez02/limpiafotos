@@ -1,5 +1,7 @@
 package dev.catalogo.data
 
+import android.util.Log
+
 import dev.catalogo.core.AiException
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
@@ -40,15 +42,30 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private val _pc = MutableStateFlow(Pc())
     val pc: StateFlow<Pc> = _pc.asStateFlow()
 
-    /** Background loop: quick while something is moving, slow otherwise. */
+    /**
+     * Two loops: the work here (AI, upload) and, apart, asking the PC how it is
+     * doing. Apart so a long Gemini answer or a big upload never leaves the PC card
+     * stale or showing «sin conexión» while the PC is in fact working.
+     */
     fun start() {
         scope.launch {
             while (true) {
-                runCatching { tick() }
+                runCatching { tick() }.onFailure { Log.e("cola", "tick", it) }
                 DraftsService.sync(context, local())
-                delay(if (local().isNotEmpty()) LOCAL_MS else if (busy()) BUSY_MS else IDLE_MS)
+                delay(if (local().isNotEmpty()) LOCAL_MS else IDLE_MS)
             }
         }
+        scope.launch {
+            while (true) {
+                runCatching { poll() }.onFailure { Log.e("cola", "poll", it) }
+                delay(if (local().isNotEmpty() || busy()) POLL_BUSY_MS else POLL_IDLE_MS)
+            }
+        }
+    }
+
+    /** Ask the PC now (app back on screen). */
+    fun refresh() {
+        scope.launch { runCatching { poll() } }
     }
 
     /** Articles still being worked on this phone (AI or upload), in queue order. */
@@ -85,15 +102,23 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             if (a.desk!!.status == DeskState.PREPARING) prepare(a.number)
             if (current(a.number)?.desk?.status == DeskState.SENDING) send(a.number)
         }
-        poll()
     }
 
     private fun current(number: Int): Article? = repo.state.parent?.let { Catalog.article(it, number) }
 
     private suspend fun set(number: Int, status: String, message: String = "", doubts: List<String> = emptyList()) {
+        val before = current(number)?.desk?.status
         repo.updateDesk(number) { d ->
             d?.copy(status = status, message = message, doubts = doubts, at = System.currentTimeMillis())
         }
+        AppLog.i("cola", "${current(number)?.desk?.ref ?: number} $before -> $status ${message.take(160)}")
+        if (status == DeskState.REVIEW && before != DeskState.REVIEW) alert(number, message)
+    }
+
+    /** «0031 necesita que lo mires» when an article stops and waits for the user. */
+    private fun alert(number: Int, message: String) {
+        val p = repo.state.parent ?: return
+        DraftsService.alert(context, number, "${Sku.format(p.self.prefix, number, p.digits)} necesita que lo mires", message)
     }
 
     /** AI if needed, then the checks: to the PC, or to «Revisar» with the reason. */
@@ -172,6 +197,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         }
     }
 
+    private var failures = 0
+    private var logSent = 0L
+
     /** Asks the PC how it is doing and copies each article's progress. */
     private suspend fun poll() {
         val link = repo.state.pc ?: return run { _pc.value = Pc() }
@@ -188,13 +216,16 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                     // with that field to choose, instead of a retry that would fail the same way.
                     val fields = if (job.status == "revisar" || job.status == "error") fieldsIn(job.message) else emptyList()
                     if (fields.isNotEmpty()) {
-                        repo.updateDesk(a.number) { d ->
-                            d?.copy(status = DeskState.REVIEW, message = "PC: ${job.message}", doubts = fields, at = System.currentTimeMillis())
-                        }
+                        set(a.number, DeskState.REVIEW, "PC: ${job.message}", fields)
                         continue
                     }
+                    val before = a.desk!!.status
                     repo.updateDesk(a.number) { d ->
                         d?.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
+                    }
+                    if (before != job.status) {
+                        AppLog.i("cola", "${job.ref} PC: $before -> ${job.status} ${job.message.take(160)}")
+                        if (job.status == "revisar" || job.status == "error") alert(a.number, job.message)
                     }
                     if (job.status == "publicado" || job.status == "jugado") {
                         val p = repo.state.parent
@@ -204,9 +235,22 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                     }
                 }
             }
+            failures = 0
             _pc.value = Pc(status, null, System.currentTimeMillis())
-        } catch (e: CatalogException) {
-            _pc.value = Pc(_pc.value.status, e.message, System.currentTimeMillis())
+            if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
+                logSent = System.currentTimeMillis()
+                runCatching { repo.desk.log(link, AppLog.tail()) }
+            }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // One slow answer (phone waking up, Tailscale reconnecting) is not «sin conexión»:
+            // the last status stays until three tries in a row fail.
+            failures++
+            AppLog.w("pc", "estado: ${e.message ?: e.javaClass.simpleName} (fallo $failures)")
+            if (failures >= 3 || _pc.value.status == null) {
+                _pc.value = Pc(_pc.value.status, e.message ?: "No llego al PC", System.currentTimeMillis())
+            }
         }
     }
 
@@ -231,11 +275,36 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     }
 
     /**
-     * After a problem (here or on the PC): the article goes through the checks again
-     * with its current data and, if it is fine, is sent again. The PC replaces what it
-     * had while the draft was not created yet, so editing and retrying is enough.
+     * After a problem. If it was the PC (it already has the photos and data), the PC
+     * tries again: nothing is re-sent and the AI is not asked again. If it was here,
+     * the article goes through the checks again (the AI only if its data changed).
      */
-    suspend fun retry(number: Int) = prepareNow(number)
+    suspend fun retry(number: Int) {
+        val d = current(number)?.desk ?: return
+        val link = repo.state.pc
+        if (link != null && (d.status == "revisar" || d.status == "error") && d.ref.isNotBlank()) {
+            val job = withContext(Dispatchers.IO) { repo.desk.retry(link, d.ref) }
+            repo.updateDesk(number) { x -> x?.copy(status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis()) }
+            AppLog.i("cola", "${d.ref} reintento en el PC")
+            refresh()
+        } else {
+            prepareNow(number)
+        }
+    }
+
+    /**
+     * Out of the queue until the user decides: off the PC (if it was there and the
+     * draft is not created yet) and back to «Por subir». Nothing is deleted in Vinted.
+     */
+    suspend fun remove(number: Int) {
+        val d = current(number)?.desk ?: return
+        val link = repo.state.pc
+        if (link != null && d.ref.isNotBlank() && d.status !in LOCAL) {
+            withContext(Dispatchers.IO) { runCatching { repo.desk.delete(link, d.ref) } }
+        }
+        repo.updateDesk(number) { null }
+        AppLog.i("cola", "${d.ref} fuera de la cola")
+    }
 
     suspend fun control(action: String): Desk.Status {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
@@ -249,7 +318,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     companion object {
         /** AI or upload waiting on this phone (e.g. after a cut connection). */
         private const val LOCAL_MS = 10_000L
-        private const val BUSY_MS = 20_000L
+        private const val LOG_EVERY_MS = 5 * 60_000L
+        private const val POLL_BUSY_MS = 8_000L
+        private const val POLL_IDLE_MS = 30_000L
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
@@ -257,6 +328,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
         fun fieldsIn(message: String): List<String> {
             val m = message.lowercase()
+            // The PC not seeing or opening a field for a moment is not about its value: retry, do not ask.
+            if (Regex("no consigo ver|no se abre|no queda a la vista|no consigo cerrar|no hay sitio|no veo la página|no cargó")
+                    .containsMatchIn(m)) return emptyList()
             return listOfNotNull(
                 "talla".takeIf { "talla" in m },
                 // «…en esta categoría» only says where; it is not about the category itself

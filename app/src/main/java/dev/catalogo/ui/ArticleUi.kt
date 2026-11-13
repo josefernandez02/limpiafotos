@@ -53,19 +53,22 @@ enum class Tone(val color: Color) {
     Done(Color(0xFF6CC48A)),      // subido
 }
 
-data class AccountStatus(val text: String, val tone: Tone)
+/** [game]: for an uploaded article, whether its link was already used in a game (a second chip). */
+data class AccountStatus(val text: String, val tone: Tone, val game: AccountStatus? = null)
 
 /** Where [article] stands in [device]'s account: the PC's progress for this phone, else the manual mark. */
 fun accountStatus(p: ParentState, article: Article, device: Device): AccountStatus {
     val desk = article.desk.takeIf { device.id == p.self.id }
     return when {
+        // Uploaded and played are different things: «Subido» always, and the game apart.
         device.id in article.uploaded -> AccountStatus(
-            when (desk?.status) {
-                "jugado" -> "Jugado"
-                "publicado" -> "Por jugar"              // published by the PC, its game still to come
-                else -> "Subido"
-            },
+            "Subido",
             Tone.Done,
+            when (desk?.status) {
+                "jugado" -> AccountStatus(desk.game.takeIf { it.isNotBlank() }?.let { "Jugado en $it" } ?: "Jugado", Tone.Ready)
+                "publicado" -> AccountStatus("Sin jugar", Tone.Idle)
+                else -> null
+            },
         )
         article.vinted[device.id]?.status == "sold" -> AccountStatus("Vendido", Tone.Done)
         desk == null -> AccountStatus("Por subir", Tone.Idle)
@@ -99,6 +102,15 @@ fun AccountAvatar(label: String, size: Int = 22) {
 
 @Composable
 fun StatusChip(status: AccountStatus) {
+    if (status.game == null) return Chip(status)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Chip(status)
+        Chip(status.game)
+    }
+}
+
+@Composable
+private fun Chip(status: AccountStatus) {
     Row(
         Modifier.clip(RoundedCornerShape(50)).background(status.tone.color.copy(alpha = 0.16f))
             .padding(horizontal = 9.dp, vertical = 3.dp),
@@ -178,9 +190,6 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
             }
             val uploaded = d.id in article.uploaded
             if (d.id == p.self.id) {
-                article.desk?.takeIf { it.status == "jugado" && it.game.isNotBlank() }?.let {
-                    Muted("Usado como link en ${it.game}", Modifier.padding(top = 6.dp))
-                }
                 if (!uploaded) {
                     Spacer(Modifier.size(8.dp))
                     DeskBlock(vm, p, article, state)

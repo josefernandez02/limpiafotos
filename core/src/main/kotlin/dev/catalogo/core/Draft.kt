@@ -57,7 +57,7 @@ object Draft {
         if (listing == null) problems += "Faltan los datos del artículo"
         if (device.account.isBlank()) problems += "La cuenta de ${device.name} no tiene nombre de Vinted (Ajustes)"
         if (article.price == null || article.price <= 0) problems += "Falta el precio de Vinted"
-        if (listing != null && listing.brand.isBlank() && !listing.noBrand) problems += "Falta la marca (o marca «Sin marca»)"
+        if (listing != null && listing.brand.isBlank() && !listing.noBrand) problems += "Falta la marca"
         if (ai == null) problems += "Falta generar el anuncio con IA"
         if (listing == null || ai == null) return Built(ref, null, problems, emptyList())
 
@@ -83,16 +83,15 @@ object Draft {
         for (d in ai.doubts) {
             val settled = when (d) {
                 "categoria" -> fixes.category != null
-                "talla" -> fixes.size != null && fixes.size in options
+                "talla" -> (fixes.size != null && fixes.size in options) || listing.noLabel
                 "colores" -> fixes.colors != null
                 "materiales" -> fixes.materials != null
                 else -> false
             }
             if (!settled && d != "marca") doubts += d     // "marca" is handled below
         }
-        // An estimated size (no label) is always checked by the user.
-        // (with the category still unknown it is asked together with it, in the same «Revisar»)
-        if (listing.noLabel && (category == null || options.isNotEmpty()) && fixes.size !in options) doubts += "talla"
+        // Without a label the AI estimates the size from the measures and photos: the
+        // seller could not say better, so it is not asked (only if it cannot be used at all).
         if ("marca" in ai.doubts && !listing.noBrand && !fixes.brandChecked) doubts += "marca"
 
         if (problems.isNotEmpty()) return Built(ref, null, problems, doubts.toList())

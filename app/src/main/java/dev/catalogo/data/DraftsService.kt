@@ -87,6 +87,35 @@ class DraftsService : Service() {
             }
         }
 
+        /** A normal notification when an article stops and waits for the user (one per article). */
+        fun alert(context: Context, number: Int, title: String, text: String) {
+            val app = context.applicationContext
+            val nm = app.getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            if (nm.getNotificationChannel(ALERTS) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(ALERTS, "Artículos por revisar", NotificationManager.IMPORTANCE_DEFAULT).apply {
+                        description = "Cuando un artículo se para y necesita que lo mires"
+                    },
+                )
+            }
+            val open = PendingIntent.getActivity(
+                app, number,
+                Intent(app, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
+            )
+            val n = Notification.Builder(app, ALERTS)
+                .setSmallIcon(dev.catalogo.R.drawable.ic_launcher_monochrome)
+                .setContentTitle(title)
+                .setContentText(text.ifBlank { "Ábrelo en la app" })
+                .setStyle(Notification.BigTextStyle().bigText(text.ifBlank { "Ábrelo en la app" }))
+                .setContentIntent(open)
+                .setAutoCancel(true)
+                .build()
+            runCatching { nm.notify(1000 + number, n) }
+        }
+
+        private const val ALERTS = "avisos"
+
         private fun describe(queue: List<Article>): String {
             val ai = queue.count { it.desk?.status == Desk.PREPARING }
             val up = queue.size - ai

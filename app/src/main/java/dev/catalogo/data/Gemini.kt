@@ -48,12 +48,20 @@ class Gemini(private val resolver: ContentResolver) {
             val reading = runCatching {
                 val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
                 if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
-            }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException || e is IOException) throw e else null }
+            }.onSuccess { r ->
+                AppLog.i("ia", "lectura: composición=${r?.composition} hecho_en=${r?.origin} talla=${r?.sizeLabel} modelo=${r?.model}")
+            }.getOrElse { e ->
+                if (e is kotlinx.coroutines.CancellationException || e is IOException) throw e
+                AppLog.w("ia", "lectura sin resultado: ${e.message}")
+                null
+            }
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it, MAX_SIDE) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
             val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading) }
             val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
-            Answer(Ai.parse(text, listing, accounts, reading), model, seconds)
+            val s = Ai.parse(text, listing, accounts, reading)
+            AppLog.i("ia", "anuncio con $model en $seconds s: categoría=${s.category} materiales=${s.materials} talla=${s.sizeLabel} dudas=${s.doubts}")
+            Answer(s, model, seconds)
         }
 
     /**
@@ -78,6 +86,7 @@ class Gemini(private val resolver: ContentResolver) {
                 } catch (e: IOException) {
                     throw IOException("Se ha cortado la conexión con Gemini", e)
                 }
+                AppLog.i("ia", "$model -> $code")
                 when {
                     code == 200 -> return Ai.answerText(text) to model
                     code == 400 && "API_KEY" in text || code == 401 || code == 403 ->

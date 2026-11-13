@@ -67,8 +67,10 @@ data class Listing(
     val notes: String = "",
     /** Chosen by the AI or the user; gives the letter size of W sizes. */
     val gender: Gender? = null,
-    /** The garment has no brand: the AI must not look for one. */
+    /** Old articles only: the brand is now always written by hand («Vintage Dressing»). */
     val noBrand: Boolean = false,
+    /** No model to look for: the AI leaves it out of the title. */
+    val noModel: Boolean = false,
     /** No size label: [size], if any, is an estimate ("aprox.") made from [flat] and the photos. */
     val noLabel: Boolean = false,
     /** Flat measures in cm, shown under the size when filled in. */

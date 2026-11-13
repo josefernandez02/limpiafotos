@@ -69,7 +69,7 @@ data class AiSuggestion(
             gender = listing.gender ?: gender,
             size = listing.size.ifBlank { sizeLabel.orEmpty() },
             brand = if (canBrand) listing.brand.ifBlank { brand.orEmpty() } else listing.brand,
-            model = if (canBrand) listing.model.ifBlank { model.orEmpty() } else listing.model,
+            model = if (canBrand && !listing.noModel) listing.model.ifBlank { model.orEmpty() } else listing.model,
         )
     }
 
@@ -125,7 +125,7 @@ object Ai {
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
             put("marca", if (listing.noBrand) "SIN MARCA" else listing.brand.trim().ifEmpty { null })
-            put("modelo", listing.model.trim().ifEmpty { null })
+            put("modelo", if (listing.noModel) "SIN MODELO" else listing.model.trim().ifEmpty { null })
             put("talla", listing.size.trim().ifEmpty { null })
             put("sin_etiqueta_de_talla", listing.noLabel)
             putJsonObject("medidas_en_plano_cm") {
@@ -166,7 +166,7 @@ object Ai {
             - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
             - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda y el sexo.
             - materiales: de MATERIALES, hasta 3. Si hay composición (en LECTURA_DE_ETIQUETAS o en una foto), SOLO los de la composición (100% algodón → Algodón; 98% algodón 2% elastano → Algodón, Elastano), aunque la prenda sea vaquera. Sin composición, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
-            - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
+            - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Nunca pongas talla si sin_etiqueta_de_talla es true (el vendedor tampoco la sabe: decide tú con las medidas y las fotos) ni materiales si notas_del_vendedor dice el material. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
             - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
 
             4. TÍTULOS (en inglés, uno por cuenta dentro de "titulos")
@@ -349,7 +349,8 @@ object Ai {
             ?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
         val brand = (o["marca"]?.str() ?: reading?.brand)?.let(::cleanName)?.takeIf { listing.brand.isBlank() && !listing.noBrand }
             ?.takeUnless { it.equals("sin marca", ignoreCase = true) }
-        val model = (reading?.model ?: o["modelo"]?.str())?.let(::cleanName)?.takeIf { listing.model.isBlank() && !listing.noBrand }
+        val model = (reading?.model ?: o["modelo"]?.str())?.let(::cleanName)
+            ?.takeIf { listing.model.isBlank() && !listing.noBrand && !listing.noModel }
         val codes = accounts.map { Regex("^${Regex.escape(it.prefix.lowercase())}\\d+$") }
         val hashtags = ListingWriter.clean(o.strings("hashtags")).filterNot { t -> codes.any { it.matches(t) } }
         val titleObj = o["titulos"] as? JsonObject
@@ -359,10 +360,12 @@ object Ai {
         }.toMap()
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
         // A composition label decides the materials (a 100% cotton pair of jeans is «Algodón», not «Vaquero»).
-        val read = reading?.materials.orEmpty()
+        // Then what the seller wrote («es lana»): nothing to ask about it.
+        val read = reading?.materials.orEmpty().ifEmpty { Reader.materials(listOf(listing.aiNotes)) }
         val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
         val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
             .filterNot { it == "materiales" && read.isNotEmpty() }
+            .filterNot { it == "talla" && listing.noLabel }      // the seller has no label either: the AI decides
         return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
             materials, doubts, reading)
     }

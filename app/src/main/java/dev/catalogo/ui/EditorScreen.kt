@@ -74,7 +74,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var keywords by remember { mutableStateOf(start.keywords) }
     var notes by remember { mutableStateOf(start.notes) }
     val gender = start.gender
-    var noBrand by remember { mutableStateOf(start.noBrand) }
+    var noModel by remember { mutableStateOf(start.noModel) }
     var noLabel by remember { mutableStateOf(start.noLabel) }
     var waist by remember { mutableStateOf(start.flat.waist) }
     var chest by remember { mutableStateOf(start.flat.chest) }
@@ -87,14 +87,14 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
 
     val listing = Listing(
         type = type,
-        brand = if (noBrand) "" else brand.trim(),
-        model = if (noBrand) "" else model.trim(),
-        size = size.trim(),
+        brand = brand.trim(),
+        model = if (noModel) "" else model.trim(),
+        size = if (noLabel) "" else size.trim(),      // without a label the AI sizes it from the measures
         condition = condition,
         keywords = keywords,
         notes = notes.trim(),
         gender = gender,
-        noBrand = noBrand,
+        noModel = noModel,
         noLabel = noLabel,
         flat = Measures(waist.trim(), chest.trim(), length.trim()),
         aiNotes = aiNotes.trim(),
@@ -133,16 +133,18 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Section("Prenda")
+            // Always written by hand: also «Vintage Dressing», «Japan Style», «Vintage»…
+            Field(brand, { brand = it }, "Marca", capitalize = true)
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!noBrand) Field(brand, { brand = it }, "Marca", Modifier.weight(1f), capitalize = true)
-                else Muted("Sin marca", Modifier.weight(1f).padding(start = 4.dp))
-                Choice("Sin marca", noBrand) { noBrand = !noBrand }
+                if (!noModel) Field(model, { model = it }, "Modelo", Modifier.weight(1f), capitalize = true)
+                else Spacer(Modifier.weight(1f))
+                Choice("Sin modelo", noModel) { noModel = !noModel }
             }
-            if (!noBrand) Field(model, { model = it }, "Modelo", capitalize = true)
 
             Section("Talla")
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Field(size, { size = it }, if (noLabel) "Talla aproximada" else "Talla", Modifier.weight(1f), capitalize = true)
+                if (!noLabel) Field(size, { size = it }, "Talla", Modifier.weight(1f), capitalize = true)
+                else Spacer(Modifier.weight(1f))
                 Choice("Sin etiqueta", noLabel) { noLabel = !noLabel }
             }
             if (noLabel || waist.isNotBlank() || chest.isNotBlank() || length.isNotBlank()) {
