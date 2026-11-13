@@ -1,6 +1,5 @@
 package dev.catalogo.data
 
-import dev.catalogo.core.Ai
 import dev.catalogo.core.AiException
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
@@ -23,13 +22,16 @@ import kotlinx.coroutines.withContext
 import java.io.IOException
 
 /**
- * Articles on their way to the PC, worked in the background while the app is
- * alive: AI (if missing or stale) → checks → photos and data to the PC → the
- * PC's progress (draft, published, in a game). Everything is saved in the
- * article ([DeskState]), so closing the app loses nothing: it carries on the
+ * Articles on their way to the PC: AI (if missing or stale) → checks → photos
+ * and data to the PC → the PC's progress (draft, published, in a game).
+ *
+ * While something is on its way here (AI or upload), [DraftsService] keeps the
+ * app running in the background with a notification, so leaving the app or
+ * locking the phone does not cut Gemini or the upload. Everything is saved in
+ * the article ([DeskState]): if Android still stops the app, it carries on the
  * next time. Only this phone's own account goes to the PC.
  */
-class Drafts(private val repo: Repo) {
+class Drafts(private val repo: Repo, private val context: android.content.Context) {
 
     data class Pc(val status: Desk.Status? = null, val error: String? = null, val at: Long = 0)
 
@@ -43,14 +45,30 @@ class Drafts(private val repo: Repo) {
         scope.launch {
             while (true) {
                 runCatching { tick() }
-                delay(if (busy()) BUSY_MS else IDLE_MS)
+                DraftsService.sync(context, local())
+                delay(if (local().isNotEmpty()) LOCAL_MS else if (busy()) BUSY_MS else IDLE_MS)
             }
         }
     }
 
+    /** Articles still being worked on this phone (AI or upload), in queue order. */
+    fun local(): List<Article> = repo.state.parent?.articles.orEmpty()
+        .filter { !it.released && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
+        .sortedBy { it.desk!!.at }
+
+    private fun photos(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> {
+        val album = runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, a.number, p.digits)) }
+            .getOrDefault(emptyList())
+        return Catalog.chosenPhotos(album, a.photos) { it.toString() }
+    }
+
     /** Work now (after a change by the user). */
     fun kick() {
-        scope.launch { runCatching { tick() } }
+        DraftsService.sync(context, local())
+        scope.launch {
+            runCatching { tick() }
+            DraftsService.sync(context, local())
+        }
     }
 
     private fun busy(): Boolean = repo.state.parent?.articles.orEmpty().any { a ->
@@ -91,8 +109,7 @@ class Drafts(private val repo: Repo) {
         if (Catalog.freshAi(p, number) == null) {
             val key = repo.state.geminiKey
             if (key.isBlank()) return set(number, DeskState.REVIEW, "Falta la clave de Gemini (Ajustes)")
-            val photos = runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, number, p.digits)) }
-                .getOrDefault(emptyList()).take(Ai.PHOTOS)
+            val photos = photos(p, a)
             if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
             try {
                 val answer = repo.gemini.suggest(key, a.listing ?: Listing(), Catalog.aiAccounts(p), photos)
@@ -102,7 +119,7 @@ class Drafts(private val repo: Repo) {
             } catch (e: CatalogException) {
                 return set(number, DeskState.REVIEW, e.message ?: "Error con la IA")
             } catch (e: IOException) {
-                return set(number, DeskState.PREPARING, "Sin internet: se reintenta solo")
+                return set(number, DeskState.PREPARING, "Sin conexión: se reintenta solo")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -131,8 +148,7 @@ class Drafts(private val repo: Repo) {
         val a = current(number) ?: return
         val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
         if (!built.ready) return check(number)
-        val photos = runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, number, p.digits)) }
-            .getOrDefault(emptyList()).take(MAX_PHOTOS)
+        val photos = photos(p, a).take(MAX_PHOTOS)
         if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
         try {
             // A cheap question first: without the PC, the photos (MBs) are not uploaded every few seconds.
@@ -229,6 +245,8 @@ class Drafts(private val repo: Repo) {
     suspend fun test(link: dev.catalogo.core.PcLink): Desk.Status = withContext(Dispatchers.IO) { repo.desk.status(link) }
 
     companion object {
+        /** AI or upload waiting on this phone (e.g. after a cut connection). */
+        private const val LOCAL_MS = 10_000L
         private const val BUSY_MS = 20_000L
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20

@@ -9,6 +9,7 @@ import dev.catalogo.core.Ai
 import dev.catalogo.core.AiException
 import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.Listing
+import dev.catalogo.core.Reader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -34,50 +35,62 @@ class Gemini(private val resolver: ContentResolver) {
 
     private var models: List<String>? = null
 
+    /**
+     * Two calls, like a careful seller: first only reading ([Reader]: every chosen
+     * photo, larger, to catch the labels), then the listing with that reading as
+     * facts. If the reading fails (quota, timeout) the listing is still written
+     * without it rather than leaving the article stuck.
+     */
     suspend fun suggest(key: String, listing: Listing, accounts: List<Ai.Account>, photos: List<Uri>): Answer =
         withContext(Dispatchers.IO) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
-            val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it) }.getOrNull() }
-            if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
             val started = System.currentTimeMillis()
-            var last: AiException? = null
-            for (model in models(key)) {
-                var thinking = true
-                while (true) {
-                    val body = Ai.request(listing, accounts, images, model, thinking)
-                    val (code, text) = try {
-                        post("$BASE/models/$model:generateContent", key, body)
-                    } catch (e: SocketTimeoutException) {
-                        last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
-                        break // try the next, lighter model
-                    } catch (e: UnknownHostException) {
-                        throw AiException("Sin internet")
-                    } catch (e: IOException) {
-                        throw AiException("Se ha cortado la conexión con Gemini. Vuelve a intentarlo.")
-                    }
-                    when {
-                        code == 200 -> {
-                            val answer = Ai.answerText(text)
-                            val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
-                            return@withContext Answer(Ai.parse(answer, listing, accounts), model, seconds)
-                        }
-                        code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
-                            throw AiException("La clave de Gemini no es válida")
-                        // A model that does not accept the reasoning setting: same model without it.
-                        code == 400 && thinking && "thinking" in text.lowercase() -> {
-                            thinking = false
-                            continue
-                        }
-                        // Out of free quota, overloaded or gone: next model.
-                        code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
-                        code == 404 || code >= 500 -> last = AiException("Gemini no responde ahora, prueba en un rato")
-                        else -> throw AiException("Gemini ha dado un error ($code)")
-                    }
-                    break
-                }
-            }
-            throw last ?: AiException("No hay modelos de Gemini disponibles")
+            val reading = runCatching {
+                val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
+                if (big.isEmpty()) null else Reader.parse(generate(key) { m, t -> Reader.request(big, m, t) }.first)
+            }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException || e is IOException) throw e else null }
+            val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it, MAX_SIDE) }.getOrNull() }
+            if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
+            val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading) }
+            val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
+            Answer(Ai.parse(text, listing, accounts, reading), model, seconds)
         }
+
+    /** One generateContent with the best model that answers; returns (answer text, model). */
+    private fun generate(key: String, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
+        var last: AiException? = null
+        for (model in models(key)) {
+            var thinking = true
+            while (true) {
+                val (code, text) = try {
+                    post("$BASE/models/$model:generateContent", key, body(model, thinking))
+                } catch (e: SocketTimeoutException) {
+                    last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
+                    break // try the next, lighter model
+                } catch (e: UnknownHostException) {
+                    throw IOException("Sin internet", e)
+                } catch (e: IOException) {
+                    throw IOException("Se ha cortado la conexión con Gemini", e)
+                }
+                when {
+                    code == 200 -> return Ai.answerText(text) to model
+                    code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
+                        throw AiException("La clave de Gemini no es válida")
+                    // A model that does not accept the reasoning setting: same model without it.
+                    code == 400 && thinking && "thinking" in text.lowercase() -> {
+                        thinking = false
+                        continue
+                    }
+                    // Out of free quota, overloaded or gone: next model.
+                    code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
+                    code == 404 || code >= 500 -> last = AiException("Gemini no responde ahora, prueba en un rato")
+                    else -> throw AiException("Gemini ha dado un error ($code)")
+                }
+                break
+            }
+        }
+        throw last ?: AiException("No hay modelos de Gemini disponibles")
+    }
 
     /** Best Flash, then best Flash-Lite, then the rest; newest version first. */
     private fun models(key: String): List<String> {
@@ -101,23 +114,23 @@ class Gemini(private val resolver: ContentResolver) {
         return ordered.also { models = it }
     }
 
-    /** Photo scaled to [MAX_SIDE] px as base64 JPEG: enough to read labels, light on data. */
-    private fun jpeg(uri: Uri): String {
+    /** Photo scaled to [side] px as base64 JPEG. */
+    private fun jpeg(uri: Uri, side: Int): String {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         resolver.openInputStream(uri)!!.use { BitmapFactory.decodeStream(it, null, bounds) }
         var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= MAX_SIDE) sample *= 2
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= side) sample *= 2
         val decoded = resolver.openInputStream(uri)!!.use {
             BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
         } ?: throw IOException("Foto ilegible")
-        val scale = MAX_SIDE.toFloat() / maxOf(decoded.width, decoded.height)
+        val scale = side.toFloat() / maxOf(decoded.width, decoded.height)
         val bitmap = if (scale < 1f) {
             Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt(), (decoded.height * scale).toInt(), true)
         } else {
             decoded
         }
         val out = ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 80, out)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, if (side > MAX_SIDE) 85 else 80, out)
         return Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
     }
 
@@ -147,8 +160,10 @@ class Gemini(private val resolver: ContentResolver) {
 
     companion object {
         private const val BASE = "https://generativelanguage.googleapis.com/v1beta"
-        /** Enough to read labels; smaller photos make the answer faster. */
+        /** Listing call: enough to see colour and cut; smaller photos make the answer faster. */
         private const val MAX_SIDE = 1024
+        /** Reading call: labels and small print need more pixels. */
+        private const val READ_SIDE = 1600
         /** Past this the model is stuck: the next, lighter one is tried. */
         private const val ANSWER_TIMEOUT = 75_000
         /** "gemini-2.5-flash", "gemini-3-flash-lite"…; no previews, image, audio or dated variants. */

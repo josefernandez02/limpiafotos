@@ -78,6 +78,10 @@ class Repo(context: Context) {
         store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model, seconds)) }
     }
 
+    suspend fun setPhotos(number: Int, photos: List<String>) {
+        store.update { s -> s.copy(parent = Catalog.setPhotos(s.parent!!, number, photos)) }
+    }
+
     suspend fun setPrice(number: Int, price: Long?) {
         store.update { s -> s.copy(parent = Catalog.setPrice(s.parent!!, number, price)) }
     }

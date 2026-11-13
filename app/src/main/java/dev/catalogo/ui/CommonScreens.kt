@@ -506,14 +506,17 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                 modifier = Modifier.fillMaxWidth(),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (token in listOf("{talla}", "{medidas}", "{estado}", "{hashtags}", "{sku}")) Choice(token, false) { insert(token) }
+                for (token in listOf("{entradilla}", "{talla}", "{medidas}", "{composicion}", "{estado}", "{hashtags}", "{sku}")) Choice(token, false) { insert(token) }
             }
 
             Section("Vista previa")
             Tile {
                 Text(ListingWriter.title(sample, style), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    ListingWriter.description(sample, style, text.text, sku),
+                    ListingWriter.description(
+                        sample, style, text.text, sku,
+                        extras = ListingWriter.Extras("La IA escribe aquí una frase con lo que hace especial la prenda.", "100% algodón"),
+                    ),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

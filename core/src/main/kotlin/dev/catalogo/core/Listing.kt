@@ -257,28 +257,42 @@ object ListingWriter {
     const val DESCRIPTION_MAX = 2000
     const val HASHTAGS_MAX = 12
 
+    /**
+     * The opening sentence ({entradilla}) sells; the lines below answer the
+     * buyer's questions at a glance (size, measures, fabric, condition, shipping);
+     * the call to action is one short line, so it does not distract.
+     */
     private val TEMPLATES = listOf(
         """
+        {entradilla}
+
         🏷️ Talla: {talla}
         📏 Medidas en plano: {medidas}
+        🧵 Composición: {composicion}
         ✨ Estado: {estado}
         🚚 Envío: 24 horas
 
-        🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!
+        🛍️ Más prendas de este estilo en mi perfil
 
         {hashtags}
         """,
         """
+        {entradilla}
+
         🏷️ Talla {talla}
         📏 {medidas} (en plano)
+        🧵 {composicion}
         ✅ {estado}
         🚚 Lo envío en 24h
 
-        👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!
+        👀 Más prendas así en mi perfil
 
         {hashtags}
         """,
     ).map { it.trimIndent() }
+
+    /** What the AI adds to the description: the opening sentence and the label's composition. */
+    data class Extras(val intro: String = "", val composition: String = "")
 
     /** Lines of older templates: dropped (null) or replaced by the current wording. */
     private val LEGACY_LINES: Map<String, String?> = mapOf(
@@ -290,9 +304,13 @@ object ListingWriter {
         "👕 Talla: {talla}" to "🏷️ Talla: {talla}",
         "📦 Envío: En 24 horas" to "🚚 Envío: 24 horas",
         "🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar." to
-            "🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!",
+            "🛍️ Más prendas de este estilo en mi perfil",
         "👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!" to
-            "👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!",
+            "👀 Más prendas así en mi perfil",
+        "🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!" to
+            "🛍️ Más prendas de este estilo en mi perfil",
+        "👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!" to
+            "👀 Más prendas así en mi perfil",
     )
 
     fun defaultTemplate(style: Int): String = TEMPLATES[style.mod(TEMPLATES.size)]
@@ -315,6 +333,14 @@ object ListingWriter {
         if (lines.none { "{medidas}" in it }) {
             val at = lines.indexOfFirst { "{talla}" in it }
             if (at >= 0) lines.add(at + 1, defaultTemplate(style).lines().first { "{medidas}" in it })
+        }
+        if (lines.none { "{composicion}" in it }) {
+            val at = lines.indexOfFirst { "{medidas}" in it }.takeIf { it >= 0 } ?: lines.indexOfFirst { "{talla}" in it }
+            if (at >= 0) lines.add(at + 1, defaultTemplate(style).lines().first { "{composicion}" in it })
+        }
+        if (lines.none { "{entradilla}" in it }) {
+            lines.add(0, "{entradilla}")
+            lines.add(1, "")
         }
         return lines.joinToString("\n")
     }
@@ -354,7 +380,14 @@ object ListingWriter {
     }
 
     /** [hashtags] (without #) come from the AI; null uses the ones made from the listing. */
-    fun description(listing: Listing, style: Int, template: String, sku: String, hashtags: List<String>? = null): String {
+    fun description(
+        listing: Listing,
+        style: Int,
+        template: String,
+        sku: String,
+        hashtags: List<String>? = null,
+        extras: Extras = Extras(),
+    ): String {
         val s = style.mod(Garments.STYLES)
         val tags = (hashtags?.takeIf { it.isNotEmpty() } ?: hashtags(listing)).let { if (s == 1) reorder(it) else it }
         val values = mapOf(
@@ -363,6 +396,8 @@ object ListingWriter {
             "{estado}" to state(listing, s),
             "{hashtags}" to (tags.map { "#$it" } + "#$sku").joinToString(" "),
             "{sku}" to sku,
+            "{entradilla}" to extras.intro.trim(),
+            "{composicion}" to extras.composition.trim(),
         )
         val body = upgrade(template, s).lines().mapNotNull { line ->
             var out = line
@@ -380,16 +415,29 @@ object ListingWriter {
             .take(DESCRIPTION_MAX)
     }
 
-    fun text(listing: Listing, style: Int, template: String, sku: String, hashtags: List<String>? = null) =
-        ListingText(title(listing, style), description(listing, style, template, sku, hashtags))
+    fun text(
+        listing: Listing,
+        style: Int,
+        template: String,
+        sku: String,
+        hashtags: List<String>? = null,
+        extras: Extras = Extras(),
+    ) = ListingText(title(listing, style), description(listing, style, template, sku, hashtags, extras))
 
-    /** "W32 L34 (equivale a una M)"; an estimated size says "aprox.". */
+    /**
+     * "W32 L34 (aprox. una M)": the letter is only a guide (brands cut differently),
+     * so it always says «aprox.». A size without label says it too.
+     */
     fun size(listing: Listing, style: Int): String {
         val size = listing.size.trim()
         if (size.isEmpty()) return ""
-        val shown = if (listing.noLabel) "$size aprox." else size
-        val letter = Vinted.letterSize(size, listing.gender) ?: return shown
-        return if (style.mod(Garments.STYLES) == 0) "$shown (equivale a una $letter)" else "$shown · $letter"
+        val letter = Vinted.letterSize(size, listing.gender)
+        val s0 = style.mod(Garments.STYLES) == 0
+        return when {
+            letter == null -> if (listing.noLabel) "$size aprox." else size
+            listing.noLabel -> if (s0) "$size aprox. (una $letter)" else "$size aprox. · $letter"
+            else -> if (s0) "$size (aprox. una $letter)" else "$size · aprox. $letter"
+        }
     }
 
     /** Condition phrase plus the notes: "Muy buen estado. Tiene manchas". */

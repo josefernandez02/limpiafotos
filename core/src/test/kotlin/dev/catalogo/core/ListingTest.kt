@@ -69,7 +69,7 @@ class ListingTest {
             ✨ Estado: Muy buen estado
             🚚 Envío: 24 horas
 
-            🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!
+            🛍️ Más prendas de este estilo en mi perfil
 
             #levis #levis501 #jeans #vaqueros #SH0054
             """.trimIndent(),
@@ -94,7 +94,7 @@ class ListingTest {
     @Test
     fun `estimated sizes say aprox`() {
         val l = Listing(size = "W33", gender = Gender.MEN, noLabel = true)
-        assertEquals("W33 aprox. (equivale a una L)", ListingWriter.size(l, 0))
+        assertEquals("W33 aprox. (una L)", ListingWriter.size(l, 0))
         assertEquals("L aprox.", ListingWriter.size(Listing(size = "L", noLabel = true), 1))
     }
 
@@ -106,6 +106,20 @@ class ListingTest {
             assertEquals(emptySet(), a intersect b)
         }
         for (c in Condition.entries) assertNotEquals(ListingWriter.condition(c, 0), ListingWriter.condition(c, 1))
+    }
+
+    @Test
+    fun `the ai intro opens the description and the label composition has its line`() {
+        val l = jeans.copy(gender = Gender.MEN)
+        val x = ListingWriter.Extras("Vaqueros Levi's 505 de corte recto, fabricados en Argentina.", "100% algodón")
+        val d0 = ListingWriter.description(l, 0, "", "SH0026", listOf("levis"), x)
+        assertTrue(d0.startsWith("Vaqueros Levi's 505 de corte recto, fabricados en Argentina.\n\n🏷️ Talla: W31 L32 (aprox. una S)\n"), d0)
+        assertTrue("🧵 Composición: 100% algodón\n✨ Estado" in d0, d0)
+        val d1 = ListingWriter.description(l, 1, "", "SA0026", listOf("levis"), x)
+        assertTrue("🧵 100% algodón" in d1 && "· aprox. S" in d1, d1)
+        // A template saved before the intro existed gets it on top.
+        val custom = "🏷️ Talla: {talla}\n✨ Estado: {estado}\n\n{hashtags}"
+        assertTrue(ListingWriter.description(l, 0, custom, "SH1", listOf("levis"), x).startsWith("Vaqueros Levi's 505"))
     }
 
     @Test

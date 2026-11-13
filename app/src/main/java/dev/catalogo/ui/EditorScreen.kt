@@ -56,9 +56,9 @@ import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
 
 /**
- * New article ([number] null): only what the AI cannot know (brand, model,
- * size, era, condition, notes, cost). Editing also shows gender, type and
- * keywords, which the AI fills in, to correct them by hand.
+ * New article ([number] null) and editing use the same form: only what the AI
+ * cannot know (brand, model, size, era, condition, notes, price, cost). Gender,
+ * type and keywords are the AI's; a wrong category is fixed in «Revisar».
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -66,14 +66,14 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     val article = number?.let { Catalog.article(p, it) }
     val creating = number == null
     val start = article?.listing ?: Listing()
-    var type by remember { mutableStateOf(start.type) }
+    val type = start.type
     var brand by remember { mutableStateOf(start.brand) }
     var model by remember { mutableStateOf(start.model) }
     var size by remember { mutableStateOf(start.size) }
     var condition by remember { mutableStateOf(start.condition) }
     var keywords by remember { mutableStateOf(start.keywords) }
     var notes by remember { mutableStateOf(start.notes) }
-    var gender by remember { mutableStateOf(start.gender) }
+    val gender = start.gender
     var noBrand by remember { mutableStateOf(start.noBrand) }
     var noLabel by remember { mutableStateOf(start.noLabel) }
     var waist by remember { mutableStateOf(start.flat.waist) }
@@ -152,13 +152,6 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                     Cm(length, { length = it }, "Largo", Modifier.weight(1f))
                 }
             }
-            if (!creating) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Muted("Sexo", Modifier.padding(start = 4.dp, end = 4.dp))
-                    for (g in Gender.entries) Choice(g.label, gender == g) { gender = if (gender == g) null else g }
-                }
-                Vinted.letterSize(size, gender)?.let { Muted("Equivale a una $it", Modifier.padding(start = 4.dp)) }
-            }
 
             Section("Época")
             Keywords(listOf(KeywordKind.EPOCH))
@@ -187,19 +180,9 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (!creating) {
-                Section("Tipo y palabras clave")
-                key(type) {
-                    TypePicker(type) { picked ->
-                        type = picked
-                        keywords = keywords.filter { Garments.keyword(it)?.appliesTo(Garments.type(picked)?.group) == true }
-                    }
-                }
-                Keywords(KeywordKind.entries.filter { it != KeywordKind.EPOCH })
-            }
 
             Section("Precio en Vinted")
-            MoneyField(price, { price = it }, "Precio de venta", hint = "El que se pondrá en el borrador")
+            MoneyField(price, { price = it }, "Precio de venta")
 
             Section("Coste")
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -227,86 +210,6 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     }
 }
 
-/**
- * Garment type: a discreet search box plus collapsible groups. Once a type is
- * chosen everything folds into a single line.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun TypePicker(selected: String, onPick: (String) -> Unit) {
-    val current = Garments.type(selected)
-    var open by remember { mutableStateOf(current == null) }
-    var query by remember { mutableStateOf("") }
-    var expanded by remember { mutableStateOf<Group?>(current?.group) }
-
-    if (current != null && !open) {
-        Tile(onClick = { open = true }) {
-            Row2(
-                left = {
-                    Column {
-                        Text(current.label, style = MaterialTheme.typography.titleMedium)
-                        Muted(current.group.label)
-                    }
-                },
-                right = { Text("Cambiar", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) },
-            )
-        }
-        return
-    }
-
-    fun pick(id: String) {
-        onPick(id)
-        query = ""
-        open = false
-    }
-
-    OutlinedTextField(
-        value = query,
-        onValueChange = { query = it.take(30) },
-        placeholder = { Text("Buscar tipo… (chándal, capucha, puffer)") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        singleLine = true,
-        shape = RoundedCornerShape(16.dp),
-        textStyle = MaterialTheme.typography.bodyMedium,
-        modifier = Modifier.fillMaxWidth(),
-    )
-    if (query.isNotBlank()) {
-        val found = Garments.search(query)
-        if (found.isEmpty()) Muted("Nada con «$query»", Modifier.padding(start = 4.dp, top = 4.dp))
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (t in found) Choice(t.label, t.id == selected) { pick(t.id) }
-        }
-        return
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        for (g in Group.entries) {
-            val isOpen = expanded == g
-            Tile(onClick = { expanded = if (isOpen) null else g }) {
-                Row2(
-                    left = { Text(g.label, style = MaterialTheme.typography.titleSmall) },
-                    right = {
-                        Icon(
-                            if (isOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    },
-                )
-                if (isOpen) {
-                    FlowRow(
-                        Modifier.padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for (t in Garments.types.filter { it.group == g }) Choice(t.label, t.id == selected) { pick(t.id) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/** Selectable keyword; a long press explains it. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun Tag(text: String, selected: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {

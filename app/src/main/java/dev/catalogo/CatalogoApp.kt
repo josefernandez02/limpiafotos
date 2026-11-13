@@ -17,6 +17,6 @@ class CatalogoApp : Application() {
         super.onCreate()
         repo = Repo(this)
         sync = SyncManager(this, repo)
-        drafts = Drafts(repo).also { it.start() }
+        drafts = Drafts(repo, this).also { it.start() }
     }
 }

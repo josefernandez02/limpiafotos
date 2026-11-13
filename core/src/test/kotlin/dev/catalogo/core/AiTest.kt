@@ -117,8 +117,8 @@ class AiTest {
         assertNull(Vinted.letterSize("W32 L34", null))
         assertNull(Vinted.letterSize("M", Gender.MEN))
         val l = Listing(size = "W32 L34", gender = Gender.MEN)
-        assertTrue(ListingWriter.description(l, 0, "", "SH1").startsWith("🏷️ Talla: W32 L34 (equivale a una M)\n"))
-        assertTrue(ListingWriter.description(l, 1, "", "SA1").startsWith("🏷️ Talla W32 L34 · M\n"))
+        assertTrue(ListingWriter.description(l, 0, "", "SH1").startsWith("🏷️ Talla: W32 L34 (aprox. una M)\n"))
+        assertTrue(ListingWriter.description(l, 1, "", "SA1").startsWith("🏷️ Talla W32 L34 · aprox. M\n"))
         assertTrue(ListingWriter.description(l.copy(gender = null), 0, "", "SH1").startsWith("🏷️ Talla: W32 L34\n"))
     }
 

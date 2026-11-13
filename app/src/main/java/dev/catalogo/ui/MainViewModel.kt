@@ -7,8 +7,6 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.catalogo.CatalogoApp
-import dev.catalogo.core.Ai
-import dev.catalogo.core.AiException
 import dev.catalogo.core.AiResult
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
@@ -23,8 +21,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
@@ -254,10 +250,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pc = app.drafts.pc
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
-    fun prepareDraft(number: Int) = run {
+    /** «Generar y preparar borrador» with the photos chosen for Vinted (in order; the first is the cover). */
+    fun prepareDraft(number: Int, photos: List<Uri>) = run {
         if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
+        if (photos.isEmpty()) throw CatalogException("Elige al menos una foto")
+        repo.setPhotos(number, photos.map { it.toString() })
         app.drafts.prepareNow(number)
-        _message.value = "Preparando el borrador: puedes seguir con otros artículos"
+        _message.value = "En cola: puedes salir de la app y seguir con otros artículos"
+    }
+
+    /** Photos of [number]'s album in the order they go to Vinted, and which are chosen. */
+    suspend fun vintedPhotos(number: Int): Pair<List<Uri>, List<Uri>> {
+        val p = repo.state.parent ?: return emptyList<Uri>() to emptyList()
+        val album = albumPhotos(Sku.format(p.self.prefix, number, p.digits))
+        val chosen = Catalog.chosenPhotos(album, Catalog.article(p, number)?.photos.orEmpty()) { it.toString() }
+        return album to chosen
     }
 
     fun fixDraft(number: Int, fixes: dev.catalogo.core.Draft.Fixes) = run {
@@ -292,49 +299,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return Catalog.devices(p).flatMap { d ->
             if (d.id == p.self.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else outboxPhotos(d.id, number)
         }.distinct()
-    }
-
-    /** AI runs per article; they live here so leaving the screen does not lose them. */
-    sealed interface AiRun {
-        data class Running(val since: Long) : AiRun
-        data class Failed(val message: String) : AiRun
-    }
-
-    private val _ai = MutableStateFlow<Map<Int, AiRun>>(emptyMap())
-    val ai: StateFlow<Map<Int, AiRun>> = _ai.asStateFlow()
-    private val aiJobs = HashMap<Int, Job>()
-
-    /** One Gemini call with [photos]; the answer is saved straight into the article. */
-    fun startAi(number: Int, photos: List<Uri>) {
-        if (_ai.value[number] is AiRun.Running) return
-        _ai.update { it + (number to AiRun.Running(System.currentTimeMillis())) }
-        aiJobs[number] = viewModelScope.launch {
-            val failure = try {
-                val p = repo.state.parent ?: throw CatalogException("Solo desde el móvil principal")
-                if (photos.isEmpty() || photos.size > Ai.PHOTOS) throw CatalogException("Elige de 1 a ${Ai.PHOTOS} fotos")
-                val listing = Catalog.article(p, number)?.listing ?: Listing()
-                val answer = repo.gemini.suggest(repo.state.geminiKey, listing, Catalog.aiAccounts(p), photos)
-                ensureActive()
-                repo.applyAi(number, answer.suggestion, answer.model, answer.seconds)
-                _message.value = "Anuncio preparado"
-                null
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: AiException) {
-                e.message
-            } catch (e: CatalogException) {
-                e.message
-            } catch (e: Exception) {
-                "Error con la IA: ${e.message ?: e.javaClass.simpleName}"
-            }
-            _ai.update { if (failure == null) it - number else it + (number to AiRun.Failed(failure)) }
-            aiJobs.remove(number)
-        }
-    }
-
-    fun cancelAi(number: Int) {
-        aiJobs.remove(number)?.cancel()
-        _ai.update { it - number }
     }
 
     fun setGeminiKey(key: String) = run {

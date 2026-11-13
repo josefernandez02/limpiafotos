@@ -64,6 +64,8 @@ data class Article(
     val price: Long? = null,
     /** Its draft on the PC that uploads it (null = never sent). */
     val desk: Desk? = null,
+    /** Photos chosen for Vinted, in order (the first is the cover); empty = all of the album. */
+    val photos: List<String> = emptyList(),
 ) {
     /** Chosen accounts; articles from before the choice existed use where they went. */
     val targets: Set<String> get() = accounts.ifEmpty { uploaded + delivered.filterValues { it > 0 }.keys }

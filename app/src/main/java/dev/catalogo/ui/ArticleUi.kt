@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -98,16 +99,27 @@ fun StatusChip(status: AccountStatus) {
     ) {
         Box(Modifier.size(7.dp).clip(CircleShape).background(status.tone.color))
         Spacer(Modifier.width(6.dp))
-        Text(status.text, style = MaterialTheme.typography.labelMedium, color = status.tone.color, maxLines = 1)
+        // Never cut: a chip that does not fit goes whole to the next line (see [AccountLine]).
+        Text(status.text, style = MaterialTheme.typography.labelMedium, color = status.tone.color, maxLines = 1, softWrap = false)
     }
 }
 
-/** «(S) shiorawear  ● Subido», as one compact line for the list. */
+/**
+ * «(S) shiorawear  ● Subido». On a narrow screen the chip moves below the
+ * name instead of cutting either of them.
+ */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AccountLine(label: String, status: AccountStatus) {
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-        AccountAvatar(label, 20)
-        Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        itemVerticalAlignment = Alignment.CenterVertically,
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            AccountAvatar(label, 20)
+            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
+        }
         StatusChip(status)
     }
 }
@@ -142,20 +154,21 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
         shown.forEachIndexed { i, d ->
             if (i > 0 || devices.size > 1) HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
             val status = accountStatus(p, article, d)
+            // Name and status stacked: neither is cut on a narrow phone.
             Row(verticalAlignment = Alignment.CenterVertically) {
-                AccountAvatar(d.label, 30)
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(d.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                AccountAvatar(d.label, 34)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(d.label, style = MaterialTheme.typography.titleMedium)
+                    StatusChip(status)
                     val v = article.vinted[d.id]
                     val facts = listOfNotNull(
                         v?.price?.let(Money::format),
                         v?.views?.let { "$it visitas" },
                         v?.favourites?.let { "♥ $it" },
                     )
-                    if (facts.isNotEmpty()) Muted(facts.joinToString(" · "), maxLines = 1)
+                    if (facts.isNotEmpty()) Muted(facts.joinToString(" · "))
                 }
-                StatusChip(status)
             }
             val uploaded = d.id in article.uploaded
             if (d.id == p.self.id) {
@@ -174,11 +187,25 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
                 )
             }
             // For articles uploaded by hand (before the PC did it), or a mark set by mistake.
-            TextButton(onClick = { vm.setUploaded(number, d.id, !uploaded) }, modifier = Modifier.padding(top = 2.dp)) {
-                Text(
-                    if (uploaded) "Marcar como no subido" else "Ya lo subí a mano",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+            // It changes what the PC does, so it is a real button and asks first.
+            var asking by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = { asking = true },
+                modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                shape = RoundedCornerShape(14.dp),
+            ) { OneLine(if (uploaded) "Marcar como no subido" else "Ya está subido a mano") }
+            if (asking) {
+                Confirm(
+                    title = if (uploaded) "¿Marcar como no subido?" else "¿Ya está subido en ${d.label}?",
+                    text = if (uploaded) {
+                        "Dejará de contar como subido en ${d.label}. No borra nada en Vinted."
+                    } else {
+                        "Contará como subido en ${d.label} y el PC no creará su borrador."
+                    },
+                    confirm = if (uploaded) "Marcar no subido" else "Sí, ya está subido",
+                    onConfirm = { vm.setUploaded(number, d.id, !uploaded) },
+                    onDismiss = { asking = false },
+                    destructive = uploaded,
                 )
             }
         }

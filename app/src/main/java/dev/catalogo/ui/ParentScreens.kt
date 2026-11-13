@@ -143,7 +143,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (appState.pc != null) item(key = "pc") { PcCard(vm) }
+            if (appState.pc != null) item(key = "pc") { PcCard(vm, p) }
             item(key = "filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }

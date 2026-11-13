@@ -241,6 +241,10 @@ object Perms {
         )
         else -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
+
+    /** The quiet «Preparando borradores» notification while the queue works in the background. */
+    val notifications: Array<String> =
+        if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
 }
 
 /** Returns a function that runs [onGranted] once [permissions] are granted. */

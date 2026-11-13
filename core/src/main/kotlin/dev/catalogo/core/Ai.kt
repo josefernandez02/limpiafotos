@@ -33,6 +33,10 @@ data class AiResult(
     val materials: List<String> = emptyList(),
     /** Fields the AI is not sure about ([Ai.DOUBT_FIELDS]): the user checks them before the draft. */
     val doubts: List<String> = emptyList(),
+    /** One plain sentence in Spanish that opens the description (what it is and why it is worth it). */
+    val intro: String = "",
+    /** Composition as read on the label ("100% algodón"); empty when there was no label. */
+    val composition: String = "",
 )
 
 /** One answer of the AI, already checked against the closed lists. */
@@ -52,6 +56,9 @@ data class AiSuggestion(
     val model: String? = null,
     val materials: List<String> = emptyList(),
     val doubts: List<String> = emptyList(),
+    val intro: String = "",
+    /** What the first call read in the labels (null when it was not made or failed). */
+    val reading: Reading? = null,
 ) {
     /** The listing with the suggestions applied; what the user typed always wins. */
     fun applyTo(listing: Listing): Listing {
@@ -70,15 +77,16 @@ data class AiSuggestion(
     }
 
     fun result(applied: Listing, model: String, seconds: Int = 0) =
-        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts)
+        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts, intro,
+            Reader.compositionText(reading))
 }
 
 class AiException(message: String) : Exception(message)
 
 /**
- * Prompt, request and answer checking for one Gemini call per article. The
- * call observes the photos first (findings) and then writes, in the same
- * answer, so each article costs a single request.
+ * Prompt, request and answer checking for the listing call. A first call
+ * ([Reader]) reads the labels; this one gets that reading as facts, observes the
+ * photos (findings) and writes the listing in the same answer.
  */
 object Ai {
     const val TITLE_MAX = 90
@@ -115,7 +123,7 @@ object Ai {
            Sin marca: Vintage Y2K Low Rise Flared Jeans Dark Blue · Vintage 90s Biker Leather Jacket Black""",
     )
 
-    fun prompt(listing: Listing, accounts: List<Account>): String {
+    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null): String {
         val type = Garments.type(listing.type)
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
@@ -141,7 +149,8 @@ object Ai {
 
             1. REGLAS
             - DATOS_DEL_USUARIO son correctos y mandan: no cambies lo que viene relleno.
-            - notas_del_vendedor son hechos que da el vendedor aunque no se vean (p. ej. "Made in Argentina"). Úsalos donde más ventas den: en el título, en los hashtags o en ambos. No copies frases enteras.
+            - notas_del_vendedor son hechos que da el vendedor aunque no se vean (p. ej. "Made in Argentina"). Van en la entradilla y, si alguien lo buscaría, en los hashtags. En el título solo si es algo que los compradores buscan de verdad (Made in USA, Made in Italy, Selvedge, Big E); un país cualquiera no aporta en el título.
+            - LECTURA_DE_ETIQUETAS (si viene) es lo que se ha leído con detalle en todas las fotos: créetelo antes que a tu impresión. La composición manda sobre los materiales y la talla de la etiqueta sobre cualquier estimación.
             - Describe solo lo que se ve en las fotos o dice el vendedor. Si algo no se ve con seguridad, déjalo vacío (null o lista vacía).
             - Devuelve solo el JSON pedido.
 
@@ -159,7 +168,7 @@ object Ai {
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
             - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
             - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda y el sexo.
-            - materiales: de MATERIALES, hasta 3, los de la etiqueta de composición si se lee (p. ej. 98% algodón 2% elastano → Algodón, Elastano). Sin etiqueta, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
+            - materiales: de MATERIALES, hasta 3. Si hay composición (en LECTURA_DE_ETIQUETAS o en una foto), SOLO los de la composición (100% algodón → Algodón; 98% algodón 2% elastano → Algodón, Elastano), aunque la prenda sea vaquera. Sin composición, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
             - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
             - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
 
@@ -175,14 +184,17 @@ object Ai {
             - Title Case, máximo $TITLE_MAX caracteres. Las cuentas no pueden tener el mismo título.
 
             5. HASHTAGS ("hashtags": de 10 a 12, sin #, minúsculas, sin tildes ni espacios)
-            Son palabras que los compradores escriben al buscar en Vinted; tienen que atraer ventas, no quedar bonitos.
-            - En este orden: marca y marca+modelo (levis, levis501) · prenda en inglés y en español (jeans, vaqueros, vaquerosvintage) · corte (straightjeans, bootcut) · época (90s, 90sfashion; con Y2K pon y2k y 2000s) · estilo (streetwear, workwear, oldmoney) · lo útil de notas_del_vendedor (madeinusa).
-            - Mezcla inglés y español. Nada que no sea cierto ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, vinted, vintedfrance, instafashion).
+            Son palabras que los compradores de Vinted España escriben al buscar; tienen que atraer ventas, no quedar bonitos.
+            - En este orden: marca, marca+modelo y marca+vintage si es vintage (levis, levis505, levisvintage) · prenda en español con el sexo y en inglés (vaqueroshombre, vaquerosvintage, jeans) · corte en español y en inglés (vaquerosrectos, straightjeans) · época (90s; con Y2K pon y2k y 2000s) · como mucho un estilo si encaja de verdad (streetwear, workwear, oldmoney) · lo útil de notas_del_vendedor (madeinusa, madeinargentina).
+            - Nada que no sea cierto, ni repeticiones con otra forma (90s y 90sfashion: solo 90s), ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, denim suelto, vinted, vintedfrance, instafashion).
             - Sin SKU ni códigos: la app los añade al final.
+
+            6. ENTRADILLA ("entradilla": una frase en español, máximo 150 caracteres)
+            Abre la descripción. Di qué es y lo que la hace apetecible con hechos concretos: modelo, corte, tejido de la etiqueta, dónde se fabricó (notas_del_vendedor o LECTURA), lavado o detalle llamativo. Tono cercano y natural de segunda mano, sin exagerar ni inventar, sin emojis, sin repetir la talla ni el estado (van debajo) y sin signos de exclamación. Ejemplo: "Vaqueros Levi's 505 de corte recto, fabricados en Argentina en 100% algodón y con un azul clásico que combina con todo."
 
             DATOS_DEL_USUARIO
             $user
-
+            ${Reader.facts(reading)?.let { "\nLECTURA_DE_ETIQUETAS\n$it\n" }.orEmpty()}
             CUENTAS (orden del título y ejemplos)
             ${accounts.joinToString("\n") { "${it.prefix}: ${VOICES[it.style.mod(VOICES.size)].trimIndent()}" }}
 
@@ -234,12 +246,19 @@ object Ai {
      * answer schema. [thinking] keeps the model's reasoning short (not off):
      * enough to read labels and choose the category, much faster than the default.
      */
-    fun request(listing: Listing, accounts: List<Account>, photos: List<String>, model: String = "", thinking: Boolean = true): String = buildJsonObject {
+    fun request(
+        listing: Listing,
+        accounts: List<Account>,
+        photos: List<String>,
+        model: String = "",
+        thinking: Boolean = true,
+        reading: Reading? = null,
+    ): String = buildJsonObject {
         putJsonArray("contents") {
             addJsonObject {
                 put("role", "user")
                 putJsonArray("parts") {
-                    addJsonObject { put("text", prompt(listing, accounts)) }
+                    addJsonObject { put("text", prompt(listing, accounts, reading)) }
                     for (p in photos.take(PHOTOS)) {
                         addJsonObject { putJsonObject("inlineData") { put("mimeType", "image/jpeg"); put("data", p) } }
                     }
@@ -294,6 +313,7 @@ object Ai {
             "talla" to str(nullable = true),
             "titulos" to obj(accounts.associate { it.prefix to str() }),
             "hashtags" to arr(str(), max = 14),
+            "entradilla" to str(),
         )
         return obj(props)
     }
@@ -312,7 +332,7 @@ object Ai {
     }
 
     /** Checks every value against the closed lists; anything unknown is dropped. */
-    fun parse(answer: String, listing: Listing, accounts: List<Account>): AiSuggestion {
+    fun parse(answer: String, listing: Listing, accounts: List<Account>, reading: Reading? = null): AiSuggestion {
         val o = runCatching { json.parseToJsonElement(answer.trim().removePrefix("```json").removeSuffix("```")).jsonObject }
             .getOrNull() ?: throw AiException("Respuesta de la IA ilegible")
         val type = o["tipo_prenda"]?.str()?.takeIf { Garments.type(it) != null }
@@ -331,10 +351,12 @@ object Ai {
         val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2).let { c ->
             if (c.size == 2 && SHADES.any { c[0] in it && c[1] in it }) c.take(1) else c
         }
-        val sizeLabel = (o["talla"] ?: o["talla_etiqueta"])?.str()?.trim()?.take(20)?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
-        val brand = o["marca"]?.str()?.let(::cleanName)?.takeIf { listing.brand.isBlank() && !listing.noBrand }
+        // What was read on a label wins over what the listing call estimated.
+        val sizeLabel = (reading?.sizeLabel ?: (o["talla"] ?: o["talla_etiqueta"])?.str())?.trim()?.take(20)
+            ?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
+        val brand = (o["marca"]?.str() ?: reading?.brand)?.let(::cleanName)?.takeIf { listing.brand.isBlank() && !listing.noBrand }
             ?.takeUnless { it.equals("sin marca", ignoreCase = true) }
-        val model = o["modelo"]?.str()?.let(::cleanName)?.takeIf { listing.model.isBlank() && !listing.noBrand }
+        val model = (reading?.model ?: o["modelo"]?.str())?.let(::cleanName)?.takeIf { listing.model.isBlank() && !listing.noBrand }
         val codes = accounts.map { Regex("^${Regex.escape(it.prefix.lowercase())}\\d+$") }
         val hashtags = ListingWriter.clean(o.strings("hashtags")).filterNot { t -> codes.any { it.matches(t) } }
         val titleObj = o["titulos"] as? JsonObject
@@ -343,11 +365,28 @@ object Ai {
             titleObj?.get(a.prefix)?.str()?.let(::cleanTitle)?.takeIf { it.isNotEmpty() && seen.add(it.lowercase()) }?.let { a.id to it }
         }.toMap()
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
-        val materials = o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS)
+        // A composition label decides the materials (a 100% cotton pair of jeans is «Algodón», not «Vaquero»).
+        val read = reading?.materials.orEmpty()
+        val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
         val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
+            .filterNot { it == "materiales" && read.isNotEmpty() }
+        val intro = o["entradilla"]?.str()?.let(::cleanIntro).orEmpty()
         return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
-            materials, doubts)
+            materials, doubts, intro, reading)
     }
+
+    /** One sentence, no emojis or exclamations, ends with a full stop; at most [INTRO_MAX] characters. */
+    fun cleanIntro(raw: String): String {
+        var t = raw.replace(Regex("[\\r\\n\\t]+"), " ")
+            .replace(Regex("[\\p{So}\\p{Cn}\\x{FE0F}\\x{200D}]"), "")
+            .replace(Regex("[¡!]+"), "")
+            .replace(Regex("\\s+"), " ").trim().trim('"', '«', '»', ' ')
+        if (t.length > INTRO_MAX) t = t.take(INTRO_MAX).substringBeforeLast(' ').trimEnd(',', ';', ' ')
+        if (t.isNotEmpty() && !t.endsWith('.')) t += "."
+        return t.replaceFirstChar(Char::uppercase)
+    }
+
+    const val INTRO_MAX = 170
 
     private fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().trim('"', '.').take(40)
 
