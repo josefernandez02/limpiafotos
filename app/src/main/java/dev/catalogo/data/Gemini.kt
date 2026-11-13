@@ -47,7 +47,7 @@ class Gemini(private val resolver: ContentResolver) {
             val started = System.currentTimeMillis()
             val reading = runCatching {
                 val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
-                if (big.isEmpty()) null else Reader.parse(generate(key) { m, t -> Reader.request(big, m, t) }.first)
+                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
             }.getOrElse { e -> if (e is kotlinx.coroutines.CancellationException || e is IOException) throw e else null }
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it, MAX_SIDE) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
@@ -56,10 +56,16 @@ class Gemini(private val resolver: ContentResolver) {
             Answer(Ai.parse(text, listing, accounts, reading), model, seconds)
         }
 
-    /** One generateContent with the best model that answers; returns (answer text, model). */
-    private fun generate(key: String, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
+    /**
+     * One generateContent with the best model that answers; returns (answer text, model).
+     * [lite]: Flash-Lite first. The reading goes there and the listing to Flash, so each
+     * call spends the free quota of a different model.
+     */
+    private fun generate(key: String, lite: Boolean = false, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
         var last: AiException? = null
-        for (model in models(key)) {
+        val all = models(key)
+        val order = if (lite) all.filter { it.contains("lite") } + all.filterNot { it.contains("lite") } else all
+        for (model in order) {
             var thinking = true
             while (true) {
                 val (code, text) = try {

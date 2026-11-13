@@ -61,8 +61,8 @@ fun accountStatus(p: ParentState, article: Article, device: Device): AccountStat
     return when {
         device.id in article.uploaded -> AccountStatus(
             when (desk?.status) {
-                "jugado" -> "Subido · jugado"
-                "publicado" -> "Subido · por jugar"     // published by the PC, its game still to come
+                "jugado" -> "Jugado"
+                "publicado" -> "Por jugar"              // published by the PC, its game still to come
                 else -> "Subido"
             },
             Tone.Done,
@@ -173,7 +173,7 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
                         v?.views?.let { "$it visitas" },
                         v?.favourites?.let { "♥ $it" },
                     )
-                    if (facts.isNotEmpty()) Muted(facts.joinToString(" · "))
+                    if (facts.isNotEmpty()) Muted(facts.joinToString(GAP))
                 }
             }
             val uploaded = d.id in article.uploaded
@@ -256,8 +256,8 @@ fun ListingPreview(p: ParentState, article: Article, onEdit: () -> Unit) {
             category == null -> listing.size.ifBlank { null }
             !Sizes.asksForSize(category) -> "No lleva"
             else -> (fixes?.size?.takeIf { it in Sizes.options(category) } ?: Sizes.resolve(category, listing))
-                ?.let { s -> if (listing.size.isNotBlank() && s != listing.size.trim()) "$s · etiqueta ${listing.size.trim()}" else s }
-                ?: "Por elegir · etiqueta ${listing.size.ifBlank { "sin talla" }}"
+                ?.let { s -> if (listing.size.isNotBlank() && s != listing.size.trim()) "$s (etiqueta ${listing.size.trim()})" else s }
+                ?: "Por elegir (etiqueta ${listing.size.ifBlank { "sin talla" }})"
         }
         val colors = (fixes?.colors ?: ai?.colors?.mapNotNull(Vinted::color)).orEmpty()
         val materials = (fixes?.materials ?: ai?.materials).orEmpty()

@@ -148,17 +148,17 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
                     val review = active.count { it.desk?.needsUser == true }
-                    if (review > 0) item { Choice("Revisar · $review", filter == Filter.Review) { filter = Filter.Review } }
+                    if (review > 0) item { Choice("Revisar ($review)", filter == Filter.Review) { filter = Filter.Review } }
                     val todo = active.count { it.toUpload }
-                    item { Choice("Por subir · $todo", filter == Filter.ToUpload) { filter = Filter.ToUpload } }
+                    item { Choice("Por subir ($todo)", filter == Filter.ToUpload) { filter = Filter.ToUpload } }
                     if (devices.size > 1) {
                         items(devices, key = { it.id }) { d ->
                             val n = active.count { d.id in it.targets }
-                            Choice("${d.label} · $n", filter == Filter.Account(d.id)) { filter = Filter.Account(d.id) }
+                            Choice("${d.label} ($n)", filter == Filter.Account(d.id)) { filter = Filter.Account(d.id) }
                         }
                     }
                     val sold = active.count { it.soldInVinted() }
-                    if (sold > 0) item { Choice("Vendido en Vinted · $sold", filter == Filter.SoldInVinted) { filter = Filter.SoldInVinted } }
+                    if (sold > 0) item { Choice("Vendido en Vinted ($sold)", filter == Filter.SoldInVinted) { filter = Filter.SoldInVinted } }
                 }
             }
             val toSend = outbox.values.sumOf { it.values.sum() }
@@ -171,7 +171,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
                                     listOfNotNull(
                                         if (toSend > 0) "$toSend fotos por enviar" else null,
                                         if (pending > 0) "$pending por quitar en otros móviles" else null,
-                                    ).joinToString(" · "),
+                                    ).joinToString(", "),
                                 )
                             },
                             right = { Text("Conectar", style = MaterialTheme.typography.labelLarge) },
@@ -192,7 +192,7 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
     // Until the AI writes the title, the row shows what was typed instead of a provisional title.
     val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
         ?: a.listing?.let { l ->
-            listOf(if (l.noBrand) "Sin marca" else l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null }
+            listOf(if (l.noBrand) "Sin marca" else l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" ").ifBlank { null }
         }
     val devices = Catalog.devices(p)
     val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
@@ -220,7 +220,7 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
                     if (favourites > 0) "♥ $favourites" else null,
                     if (sending > 0) "$sending fotos por enviar" else null,
                 )
-                if (extra.isNotEmpty()) Muted(extra.joinToString(" · "), maxLines = 1)
+                if (extra.isNotEmpty()) Muted(extra.joinToString(GAP), maxLines = 1)
             }
             IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
                 Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -286,7 +286,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             article.vinted.entries.firstOrNull { it.value.status == "sold" }?.let { (deviceId, item) ->
                 Tile {
                     Text("Vendido en Vinted", style = MaterialTheme.typography.titleMedium)
-                    Muted(listOfNotNull(Catalog.device(p, deviceId)?.label, item.price?.let(Money::format)).joinToString(" · "))
+                    Muted(listOfNotNull(Catalog.device(p, deviceId)?.label, item.price?.let(Money::format)).joinToString(GAP))
                     FilledTonalButton(
                         onClick = { selling = true },
                         modifier = Modifier.fillMaxWidth().padding(top = 6.dp),

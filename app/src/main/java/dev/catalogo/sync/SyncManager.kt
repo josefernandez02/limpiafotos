@@ -368,7 +368,7 @@ class SyncManager(context: Context, private val repo: Repo) {
 
         for ((number, files) in repo.outbox.pending(current.id)) {
             val sku = Sku.format(current.prefix, number, repo.state.parent!!.digits)
-            log("Enviando $sku · ${files.size}")
+            log("Enviando $sku: ${files.size}")
             val streams = files.map { it.inputStream() }
             try {
                 val payloads = streams.map { Payload.fromStream(it) }
@@ -437,7 +437,7 @@ class SyncManager(context: Context, private val repo: Repo) {
     private suspend fun receiveAlbum(link: Link, album: Album) {
         val c = repo.state.child!!
         val sku = Sku.format(c.self.prefix, album.number, c.digits)
-        log("Recibiendo $sku · ${album.files.size}")
+        log("Recibiendo $sku: ${album.files.size}")
         val received = ArrayList<Pair<FileInfo, Incoming>>()
         var ok = false
         try {

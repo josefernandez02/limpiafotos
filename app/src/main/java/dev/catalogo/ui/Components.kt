@@ -107,9 +107,12 @@ fun Cover(uri: Uri?, size: Dp = 56.dp) {
         Box(
             Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceContainerHighest),
             contentAlignment = Alignment.Center,
-        ) { Text("·", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        ) {}
     }
 }
+
+/** Space between short facts on one line («12 €   34 visitas   ♥ 5»): no dots or bars, just air. */
+const val GAP = "\u2003"
 
 /** Rounded surface block used for every list item. */
 @Composable

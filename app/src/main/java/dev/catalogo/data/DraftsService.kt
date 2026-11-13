@@ -93,7 +93,7 @@ class DraftsService : Service() {
             return listOfNotNull(
                 ai.takeIf { it > 0 }?.let { if (it == 1) "1 con la IA" else "$it con la IA" },
                 up.takeIf { it > 0 }?.let { if (it == 1) "1 enviándose al PC" else "$it enviándose al PC" },
-            ).joinToString(" · ")
+            ).joinToString(", ")
         }
 
         private fun notification(context: Context, text: String): Notification {

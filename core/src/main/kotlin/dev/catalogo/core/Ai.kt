@@ -33,8 +33,6 @@ data class AiResult(
     val materials: List<String> = emptyList(),
     /** Fields the AI is not sure about ([Ai.DOUBT_FIELDS]): the user checks them before the draft. */
     val doubts: List<String> = emptyList(),
-    /** One plain sentence in Spanish that opens the description (what it is and why it is worth it). */
-    val intro: String = "",
     /** Composition as read on the label ("100% algodón"); empty when there was no label. */
     val composition: String = "",
 )
@@ -56,7 +54,6 @@ data class AiSuggestion(
     val model: String? = null,
     val materials: List<String> = emptyList(),
     val doubts: List<String> = emptyList(),
-    val intro: String = "",
     /** What the first call read in the labels (null when it was not made or failed). */
     val reading: Reading? = null,
 ) {
@@ -77,7 +74,7 @@ data class AiSuggestion(
     }
 
     fun result(applied: Listing, model: String, seconds: Int = 0) =
-        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts, intro,
+        AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts,
             Reader.compositionText(reading))
 }
 
@@ -149,7 +146,7 @@ object Ai {
 
             1. REGLAS
             - DATOS_DEL_USUARIO son correctos y mandan: no cambies lo que viene relleno.
-            - notas_del_vendedor son hechos que da el vendedor aunque no se vean (p. ej. "Made in Argentina"). Van en la entradilla y, si alguien lo buscaría, en los hashtags. En el título solo si es algo que los compradores buscan de verdad (Made in USA, Made in Italy, Selvedge, Big E); un país cualquiera no aporta en el título.
+            - notas_del_vendedor son hechos que da el vendedor aunque no se vean (p. ej. "Made in Argentina"). Van en los hashtags si alguien lo buscaría. En el título solo si es algo que los compradores buscan de verdad (Made in USA, Made in Italy, Selvedge, Big E); un país cualquiera no aporta en el título.
             - LECTURA_DE_ETIQUETAS (si viene) es lo que se ha leído con detalle en todas las fotos: créetelo antes que a tu impresión. La composición manda sobre los materiales y la talla de la etiqueta sobre cualquier estimación.
             - Describe solo lo que se ve en las fotos o dice el vendedor. Si algo no se ve con seguridad, déjalo vacío (null o lista vacía).
             - Devuelve solo el JSON pedido.
@@ -184,13 +181,10 @@ object Ai {
             - Title Case, máximo $TITLE_MAX caracteres. Las cuentas no pueden tener el mismo título.
 
             5. HASHTAGS ("hashtags": de 10 a 12, sin #, minúsculas, sin tildes ni espacios)
-            Son palabras que los compradores de Vinted España escriben al buscar; tienen que atraer ventas, no quedar bonitos.
-            - En este orden: marca, marca+modelo y marca+vintage si es vintage (levis, levis505, levisvintage) · prenda en español con el sexo y en inglés (vaqueroshombre, vaquerosvintage, jeans) · corte en español y en inglés (vaquerosrectos, straightjeans) · época (90s; con Y2K pon y2k y 2000s) · como mucho un estilo si encaja de verdad (streetwear, workwear, oldmoney) · lo útil de notas_del_vendedor (madeinusa, madeinargentina).
-            - Nada que no sea cierto, ni repeticiones con otra forma (90s y 90sfashion: solo 90s), ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, denim suelto, vinted, vintedfrance, instafashion).
+            Son palabras que los compradores escriben al buscar; tienen que atraer ventas, no quedar bonitos. Vinted España comparte catálogo con otros países: mezcla inglés y español.
+            - En este orden: marca, marca+modelo y marca+vintage si es vintage (levis, levis505, levisvintage); prenda en inglés y en español (jeans, vaqueros, vaquerosvintage); corte en inglés y en español (straightjeans, vaquerosrectos); época (90s, 90sfashion; con Y2K pon y2k y 2000s); estilo si encaja (streetwear, workwear, oldmoney); lo útil de notas_del_vendedor (madeinusa, madeinargentina).
+            - Nada que no sea cierto ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, vinted, vintedfrance, instafashion).
             - Sin SKU ni códigos: la app los añade al final.
-
-            6. ENTRADILLA ("entradilla": una frase en español, máximo 150 caracteres)
-            Abre la descripción. Di qué es y lo que la hace apetecible con hechos concretos: modelo, corte, tejido de la etiqueta, dónde se fabricó (notas_del_vendedor o LECTURA), lavado o detalle llamativo. Tono cercano y natural de segunda mano, sin exagerar ni inventar, sin emojis, sin repetir la talla ni el estado (van debajo) y sin signos de exclamación. Ejemplo: "Vaqueros Levi's 505 de corte recto, fabricados en Argentina en 100% algodón y con un azul clásico que combina con todo."
 
             DATOS_DEL_USUARIO
             $user
@@ -313,7 +307,6 @@ object Ai {
             "talla" to str(nullable = true),
             "titulos" to obj(accounts.associate { it.prefix to str() }),
             "hashtags" to arr(str(), max = 14),
-            "entradilla" to str(),
         )
         return obj(props)
     }
@@ -370,23 +363,9 @@ object Ai {
         val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
         val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
             .filterNot { it == "materiales" && read.isNotEmpty() }
-        val intro = o["entradilla"]?.str()?.let(::cleanIntro).orEmpty()
         return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
-            materials, doubts, intro, reading)
+            materials, doubts, reading)
     }
-
-    /** One sentence, no emojis or exclamations, ends with a full stop; at most [INTRO_MAX] characters. */
-    fun cleanIntro(raw: String): String {
-        var t = raw.replace(Regex("[\\r\\n\\t]+"), " ")
-            .replace(Regex("[\\p{So}\\p{Cn}\\x{FE0F}\\x{200D}]"), "")
-            .replace(Regex("[¡!]+"), "")
-            .replace(Regex("\\s+"), " ").trim().trim('"', '«', '»', ' ')
-        if (t.length > INTRO_MAX) t = t.take(INTRO_MAX).substringBeforeLast(' ').trimEnd(',', ';', ' ')
-        if (t.isNotEmpty() && !t.endsWith('.')) t += "."
-        return t.replaceFirstChar(Char::uppercase)
-    }
-
-    const val INTRO_MAX = 170
 
     private fun cleanName(raw: String): String = raw.replace(Regex("\\s+"), " ").trim().trim('"', '.').take(40)
 

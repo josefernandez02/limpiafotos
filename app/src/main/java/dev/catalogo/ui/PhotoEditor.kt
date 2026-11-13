@@ -127,7 +127,7 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     }
 
     Scaffold(
-        topBar = { Bar("Fotos · ${device?.label ?: ""}", onBack = if (saving) null else leave) },
+        topBar = { Bar(device?.label?.let { "Fotos de $it" } ?: "Fotos", onBack = if (saving) null else leave) },
         bottomBar = {
             BottomActions {
                 val sel = selected

@@ -170,7 +170,7 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
                                                     else -> listOfNotNull(
                                                         if (photos > 0) "$photos fotos por enviar" else null,
                                                         if (releases > 0) "$releases por quitar" else null,
-                                                    ).joinToString(" · ")
+                                                    ).joinToString(", ")
                                                 },
                                             )
                                         }
@@ -198,7 +198,7 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
     if (request != null) {
         if (isParent) {
             DeviceDialog(
-                title = "Vincular · ${request.code}",
+                title = "Vincular ${request.code}",
                 subtitle = "Comprueba que el código coincide en el otro móvil.",
                 initialName = "",
                 initialPrefix = "",
@@ -245,7 +245,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                                                 if (d.id == p.self.id) "Principal" else "Secundario",
                                                 "estilo ${d.style + 1}",
                                                 if (d.vintedId.isBlank()) "sin perfil de Vinted" else null,
-                                            ).joinToString(" · "),
+                                            ).joinToString(GAP),
                                         )
                                     }
                                 },
@@ -412,7 +412,7 @@ private fun AccountDialog(vm: MainViewModel, device: Device, onDismiss: () -> Un
     var profile by remember { mutableStateOf(if (device.vintedId.isBlank()) "" else "https://www.vinted.es/member/${device.vintedId}") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Cuenta de Vinted · ${device.name}") },
+        title = { Text("Cuenta de Vinted de ${device.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -462,7 +462,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
     }
 
     Scaffold(
-        topBar = { Bar("Anuncio · ${device.label}", onBack = { vm.back() }) },
+        topBar = { Bar("Anuncio de ${device.label}", onBack = { vm.back() }) },
         bottomBar = {
             BottomActions {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -506,17 +506,14 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                 modifier = Modifier.fillMaxWidth(),
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                for (token in listOf("{entradilla}", "{talla}", "{medidas}", "{composicion}", "{estado}", "{hashtags}", "{sku}")) Choice(token, false) { insert(token) }
+                for (token in listOf("{talla}", "{medidas}", "{estado}", "{hashtags}", "{sku}")) Choice(token, false) { insert(token) }
             }
 
             Section("Vista previa")
             Tile {
                 Text(ListingWriter.title(sample, style), style = MaterialTheme.typography.titleMedium)
                 Text(
-                    ListingWriter.description(
-                        sample, style, text.text, sku,
-                        extras = ListingWriter.Extras("La IA escribe aquí una frase con lo que hace especial la prenda.", "100% algodón"),
-                    ),
+                    ListingWriter.description(sample, style, text.text, sku),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 6.dp),

@@ -122,9 +122,8 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
 }
 
 /**
- * Which photos go to Vinted and in what order, right before the draft: all are
- * marked; a tap takes one out or puts it back at the end. Number 1 is the cover.
- * The AI reads the labels in all of them.
+ * Which photos the AI looks at, right before the draft: all are marked; a tap
+ * takes out one that adds nothing (or puts it back). Vinted gets all of them anyway.
  */
 @Composable
 fun PhotoChoiceDialog(vm: MainViewModel, number: Int, onDismiss: () -> Unit) {
@@ -135,7 +134,7 @@ fun PhotoChoiceDialog(vm: MainViewModel, number: Int, onDismiss: () -> Unit) {
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Fotos para Vinted") },
+        title = { Text("Fotos para la IA") },
         text = {
             val album = loaded?.first
             when {
@@ -144,7 +143,7 @@ fun PhotoChoiceDialog(vm: MainViewModel, number: Int, onDismiss: () -> Unit) {
                 }
                 album.isEmpty() -> Muted("Este artículo no tiene fotos")
                 else -> Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Muted("Toca para quitar o volver a poner. La 1 es la portada.")
+                    Muted("Quita las que no aportan. Al PC van todas.")
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(3),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -239,7 +238,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                 }
                 if ("talla" in doubts) {
                     val options = category?.let(Sizes::options).orEmpty()
-                    Muted("Talla" + listing?.size?.takeIf { it.isNotBlank() }?.let { " · en la etiqueta: $it" }.orEmpty())
+                    Muted("Talla" + listing?.size?.takeIf { it.isNotBlank() }?.let { " (etiqueta $it)" }.orEmpty())
                     when {
                         category == null -> Muted("Elige antes la categoría")
                         options.isEmpty() -> Muted("Esta categoría no lleva talla")
@@ -366,7 +365,7 @@ fun PcCard(vm: MainViewModel, p: ParentState) {
             ) {
                 Text("En cola", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
                 val review = queue.count { it.desk!!.needsUser }
-                Muted(listOfNotNull("${queue.size}", review.takeIf { it > 0 }?.let { "$it por revisar" }).joinToString(" · "))
+                Muted(listOfNotNull("${queue.size}", review.takeIf { it > 0 }?.let { "$it por revisar" }).joinToString(GAP))
                 Text(if (open) "  ▲" else "  ▼", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (open) {

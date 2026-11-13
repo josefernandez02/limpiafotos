@@ -250,7 +250,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pc = app.drafts.pc
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
-    /** «Generar y preparar borrador» with the photos chosen for Vinted (in order; the first is the cover). */
+    /** «Generar y preparar borrador» with the photos the AI should look at (the PC gets all of them). */
     fun prepareDraft(number: Int, photos: List<Uri>) = run {
         if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
         if (photos.isEmpty()) throw CatalogException("Elige al menos una foto")
@@ -259,7 +259,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = "En cola: puedes salir de la app y seguir con otros artículos"
     }
 
-    /** Photos of [number]'s album in the order they go to Vinted, and which are chosen. */
+    /** Photos of [number]'s album, and which ones the AI looks at. */
     suspend fun vintedPhotos(number: Int): Pair<List<Uri>, List<Uri>> {
         val p = repo.state.parent ?: return emptyList<Uri>() to emptyList()
         val album = albumPhotos(Sku.format(p.self.prefix, number, p.digits))

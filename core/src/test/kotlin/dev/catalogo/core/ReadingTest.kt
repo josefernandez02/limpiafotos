@@ -36,12 +36,10 @@ class ReadingTest {
         val reading = Reading(composition = listOf("100% algodón"), origin = "Argentina")
         val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","categoria":null,
             "colores":["Azul"],"materiales":["Vaquero"],"dudas":["materiales"],"marca":null,"modelo":null,"talla":null,
-            "titulos":{"SH":"Levi's 505 Jeans Vintage 90s Classic Straight Fit Blue"},"hashtags":["levis"],
-            "entradilla":"¡Vaqueros Levi's 505 fabricados en Argentina en 100% algodón! 👖"}"""
+            "titulos":{"SH":"Levi's 505 Jeans Vintage 90s Classic Straight Fit Blue"},"hashtags":["levis"]}"""
         val s = Ai.parse(answer, jeans, accounts, reading)
         assertEquals(listOf("Algodón"), s.materials)
         assertTrue("materiales" !in s.doubts)
-        assertEquals("Vaqueros Levi's 505 fabricados en Argentina en 100% algodón.", s.intro)
         val result = s.result(s.applyTo(jeans), "m")
         assertEquals("100% algodón", result.composition)
     }

@@ -257,18 +257,11 @@ object ListingWriter {
     const val DESCRIPTION_MAX = 2000
     const val HASHTAGS_MAX = 12
 
-    /**
-     * The opening sentence ({entradilla}) sells; the lines below answer the
-     * buyer's questions at a glance (size, measures, fabric, condition, shipping);
-     * the call to action is one short line, so it does not distract.
-     */
+    /** Short and scannable (few people read it); the call to action is one short line. */
     private val TEMPLATES = listOf(
         """
-        {entradilla}
-
         🏷️ Talla: {talla}
         📏 Medidas en plano: {medidas}
-        🧵 Composición: {composicion}
         ✨ Estado: {estado}
         🚚 Envío: 24 horas
 
@@ -277,11 +270,8 @@ object ListingWriter {
         {hashtags}
         """,
         """
-        {entradilla}
-
         🏷️ Talla {talla}
         📏 {medidas} (en plano)
-        🧵 {composicion}
         ✅ {estado}
         🚚 Lo envío en 24h
 
@@ -291,8 +281,6 @@ object ListingWriter {
         """,
     ).map { it.trimIndent() }
 
-    /** What the AI adds to the description: the opening sentence and the label's composition. */
-    data class Extras(val intro: String = "", val composition: String = "")
 
     /** Lines of older templates: dropped (null) or replaced by the current wording. */
     private val LEGACY_LINES: Map<String, String?> = mapOf(
@@ -333,14 +321,6 @@ object ListingWriter {
         if (lines.none { "{medidas}" in it }) {
             val at = lines.indexOfFirst { "{talla}" in it }
             if (at >= 0) lines.add(at + 1, defaultTemplate(style).lines().first { "{medidas}" in it })
-        }
-        if (lines.none { "{composicion}" in it }) {
-            val at = lines.indexOfFirst { "{medidas}" in it }.takeIf { it >= 0 } ?: lines.indexOfFirst { "{talla}" in it }
-            if (at >= 0) lines.add(at + 1, defaultTemplate(style).lines().first { "{composicion}" in it })
-        }
-        if (lines.none { "{entradilla}" in it }) {
-            lines.add(0, "{entradilla}")
-            lines.add(1, "")
         }
         return lines.joinToString("\n")
     }
@@ -386,7 +366,6 @@ object ListingWriter {
         template: String,
         sku: String,
         hashtags: List<String>? = null,
-        extras: Extras = Extras(),
     ): String {
         val s = style.mod(Garments.STYLES)
         val tags = (hashtags?.takeIf { it.isNotEmpty() } ?: hashtags(listing)).let { if (s == 1) reorder(it) else it }
@@ -396,8 +375,6 @@ object ListingWriter {
             "{estado}" to state(listing, s),
             "{hashtags}" to (tags.map { "#$it" } + "#$sku").joinToString(" "),
             "{sku}" to sku,
-            "{entradilla}" to extras.intro.trim(),
-            "{composicion}" to extras.composition.trim(),
         )
         val body = upgrade(template, s).lines().mapNotNull { line ->
             var out = line
@@ -421,8 +398,7 @@ object ListingWriter {
         template: String,
         sku: String,
         hashtags: List<String>? = null,
-        extras: Extras = Extras(),
-    ) = ListingText(title(listing, style), description(listing, style, template, sku, hashtags, extras))
+    ) = ListingText(title(listing, style), description(listing, style, template, sku, hashtags))
 
     /**
      * "W32 L34 (aprox. una M)": the letter is only a guide (brands cut differently),

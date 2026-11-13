@@ -64,7 +64,7 @@ data class Article(
     val price: Long? = null,
     /** Its draft on the PC that uploads it (null = never sent). */
     val desk: Desk? = null,
-    /** Photos chosen for Vinted, in order (the first is the cover); empty = all of the album. */
+    /** Photos the AI looks at, in order (the PC always gets the whole album); empty = all of them. */
     val photos: List<String> = emptyList(),
 ) {
     /** Chosen accounts; articles from before the choice existed use where they went. */
@@ -113,7 +113,7 @@ data class Desk(
             "en_curso" -> "Creando borrador"
             "borrador" -> "Borrador listo"
             "publicado" -> "Publicado"
-            "jugado" -> "Subido · ya jugado"
+            "jugado" -> "Jugado"
             "error" -> "Error"
             else -> status
         }

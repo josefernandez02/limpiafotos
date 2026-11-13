@@ -114,7 +114,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                         Text("Por cuenta", style = MaterialTheme.typography.titleMedium)
                         val max = k.accounts.maxOf { it.revenue }.coerceAtLeast(1)
                         for (a in k.accounts) {
-                            BarRow(a.label, "${a.sold} vendidos · ${Money.format(a.revenue)} · ${a.listed} subidos", a.revenue.toFloat() / max)
+                            BarRow(a.label, "${a.sold} vendidos$GAP${Money.format(a.revenue)}$GAP${a.listed} subidos", a.revenue.toFloat() / max)
                         }
                     }
                 }
@@ -167,7 +167,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                         left = { Text(lot.name, style = MaterialTheme.typography.titleMedium) },
                         right = { Pill(if (st.profit >= 0) "+${Money.format(st.profit)}" else Money.format(st.profit), strong = st.profit >= 0) },
                     )
-                    Muted("${st.sold}/${lot.quantity} vendidas · ${st.inStock} en stock · ${Money.format(Ledger.unitCost(lot))} por prenda")
+                    Muted("${st.sold}/${lot.quantity} vendidas$GAP${st.inStock} en stock$GAP${Money.format(Ledger.unitCost(lot))} por prenda")
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -218,7 +218,7 @@ private fun MonthBars(months: List<Stats.Month>) {
     val max = months.maxOfOrNull { it.revenue }?.coerceAtLeast(1) ?: 1
     val names = listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
     months.getOrNull(picked)?.let { m ->
-        Muted("${names[m.month.monthValue - 1]} ${m.month.year}: ${m.sold} ventas · ${Money.format(m.revenue)} · beneficio ${Money.format(m.profit)}")
+        Muted("${names[m.month.monthValue - 1]} ${m.month.year}: ${m.sold} ventas$GAP${Money.format(m.revenue)}${GAP}beneficio ${Money.format(m.profit)}")
     }
     Row(
         Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp),

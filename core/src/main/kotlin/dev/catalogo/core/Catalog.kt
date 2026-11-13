@@ -31,7 +31,7 @@ object Catalog {
         return replace(s, a.copy(price = price))
     }
 
-    /** Photos of [number] chosen for Vinted, in order; empty = every photo of the album. */
+    /** Photos of [number] the AI looks at, in order; empty = every photo of the album. */
     fun setPhotos(s: ParentState, number: Int, photos: List<String>): ParentState {
         val a = article(s, number) ?: return s
         val clean = photos.distinct()
@@ -39,7 +39,7 @@ object Catalog {
     }
 
     /**
-     * The album's photos that go to Vinted: the chosen ones in their order (those
+     * The album's photos the AI looks at: the chosen ones in their order (those
      * deleted since are skipped), or all of them when nothing was chosen or none is left.
      */
     fun <T> chosenPhotos(album: List<T>, chosen: List<String>, id: (T) -> String): List<T> {
@@ -124,8 +124,7 @@ object Catalog {
     fun listingText(s: ParentState, number: Int, device: Device): ListingText? {
         val listing = article(s, number)?.listing ?: return null
         val ai = freshAi(s, number)
-        val extras = ListingWriter.Extras(ai?.intro.orEmpty(), ai?.composition.orEmpty())
-        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits), ai?.hashtags, extras)
+        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits), ai?.hashtags)
         // (also for titles generated before repeats were removed)
         val title = ai?.titles?.get(device.id)?.let(Ai::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
         return text.copy(title = title)

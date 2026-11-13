@@ -56,11 +56,13 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         .filter { !it.released && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
         .sortedBy { it.desk!!.at }
 
-    private fun photos(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> {
-        val album = runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, a.number, p.digits)) }
+    private fun album(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> =
+        runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, a.number, p.digits)) }
             .getOrDefault(emptyList())
-        return Catalog.chosenPhotos(album, a.photos) { it.toString() }
-    }
+
+    /** The AI only looks at the photos chosen for it; the PC always gets the whole album. */
+    private fun aiPhotos(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> =
+        Catalog.chosenPhotos(album(p, a), a.photos) { it.toString() }
 
     /** Work now (after a change by the user). */
     fun kick() {
@@ -109,7 +111,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         if (Catalog.freshAi(p, number) == null) {
             val key = repo.state.geminiKey
             if (key.isBlank()) return set(number, DeskState.REVIEW, "Falta la clave de Gemini (Ajustes)")
-            val photos = photos(p, a)
+            val photos = aiPhotos(p, a)
             if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
             try {
                 val answer = repo.gemini.suggest(key, a.listing ?: Listing(), Catalog.aiAccounts(p), photos)
@@ -136,7 +138,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val a = current(number) ?: return
         val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
         when {
-            built.problems.isNotEmpty() -> set(number, DeskState.REVIEW, built.problems.joinToString(" · "))
+            built.problems.isNotEmpty() -> set(number, DeskState.REVIEW, built.problems.joinToString(". "))
             built.doubts.isNotEmpty() -> set(number, DeskState.REVIEW, "Revisa: " + built.doubts.joinToString(", ") { label(it) }, built.doubts)
             else -> set(number, DeskState.SENDING)
         }
@@ -148,7 +150,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val a = current(number) ?: return
         val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
         if (!built.ready) return check(number)
-        val photos = photos(p, a).take(MAX_PHOTOS)
+        val photos = album(p, a).take(MAX_PHOTOS)
         if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
         try {
             // A cheap question first: without the PC, the photos (MBs) are not uploaded every few seconds.
