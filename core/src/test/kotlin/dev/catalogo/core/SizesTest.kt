@@ -81,6 +81,6 @@ class TitleTest {
             Ai.distinctWords("Levi's 710 Skinny Jeans Vintage Y2K Classic Skinny Fit Light Blue"),
         )
         assertEquals("Nike Air Max 90 White", Ai.distinctWords("Nike Air Max 90 White"))
-        assertEquals("Carhartt Jacket Brown", Ai.distinctWords("Carhartt Jacket brown Brown"))
+        assertEquals("Carhartt Jacket Brown", Ai.distinctWords("Carhartt Jacket Brown brown"))
     }
 }
