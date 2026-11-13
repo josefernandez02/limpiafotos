@@ -113,10 +113,10 @@ class ListingTest {
         val l = jeans.copy(gender = Gender.MEN)
         val x = ListingWriter.Extras("Vaqueros Levi's 505 de corte recto, fabricados en Argentina.", "100% algodón")
         val d0 = ListingWriter.description(l, 0, "", "SH0026", listOf("levis"), x)
-        assertTrue(d0.startsWith("Vaqueros Levi's 505 de corte recto, fabricados en Argentina.\n\n🏷️ Talla: W31 L32 (aprox. una S)\n"), d0)
+        assertTrue(d0.startsWith("Vaqueros Levi's 505 de corte recto, fabricados en Argentina.\n\n🏷️ Talla: W31 L32 (aprox. una M)\n"), d0)
         assertTrue("🧵 Composición: 100% algodón\n✨ Estado" in d0, d0)
         val d1 = ListingWriter.description(l, 1, "", "SA0026", listOf("levis"), x)
-        assertTrue("🧵 100% algodón" in d1 && "· aprox. S" in d1, d1)
+        assertTrue("🧵 100% algodón" in d1 && "· aprox. M" in d1, d1)
         // A template saved before the intro existed gets it on top.
         val custom = "🏷️ Talla: {talla}\n✨ Estado: {estado}\n\n{hashtags}"
         assertTrue(ListingWriter.description(l, 0, custom, "SH1", listOf("levis"), x).startsWith("Vaqueros Levi's 505"))

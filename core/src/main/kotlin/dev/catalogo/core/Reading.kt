@@ -145,7 +145,7 @@ object Reader {
         "pana|corduroy" to "Pana",
         "plum[oó]n|down\\b" to "Plumón",
         "bamb[uú]|bamboo" to "Bambú",
-    ).map { (re, m) -> Regex("(?i)\\b($re)") to m }
+    ).map { (re, m) -> Regex("\\b($re)") to m }
 
     /** Composition lines to up to [Vinted.MAX_MATERIALS] materials, largest share first. */
     fun materials(composition: List<String>): List<String> {
@@ -156,7 +156,7 @@ object Reader {
                 .ifEmpty { listOf(null) }
             for (part in parts) {
                 val pct = part?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                val name = part?.groupValues?.get(2) ?: line
+                val name = (part?.groupValues?.get(2) ?: line).lowercase()
                 val m = WORDS.firstOrNull { (re, _) -> re.containsMatchIn(name) }?.second ?: continue
                 found += m to pct
             }
