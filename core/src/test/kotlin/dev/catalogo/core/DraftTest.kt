@@ -113,11 +113,11 @@ class DraftTest {
     }
 
     @Test
-    fun `no brand is sent as null`() {
+    fun `the brand is always written, also for old articles without brand`() {
         val (s, a) = state(listing = levis.copy(brand = "", noBrand = true))
-        val b = Draft.build(s, a, samsung)
-        assertTrue(b.ready, "${b.problems}")
-        assertEquals(JsonNull, b.payload!!["marca"])
+        assertTrue(Draft.build(s, a, samsung).problems.any { "marca" in it })
+        val (s2, a2) = state(listing = levis.copy(brand = "Vintage Dressing", noBrand = false))
+        assertEquals("Vintage Dressing", Draft.build(s2, a2, samsung).payload!!["marca"]!!.jsonPrimitive.content)
     }
 
     @Test

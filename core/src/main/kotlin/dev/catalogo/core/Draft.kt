@@ -57,7 +57,8 @@ object Draft {
         if (listing == null) problems += "Faltan los datos del artículo"
         if (device.account.isBlank()) problems += "La cuenta de ${device.name} no tiene nombre de Vinted (Ajustes)"
         if (article.price == null || article.price <= 0) problems += "Falta el precio de Vinted"
-        if (listing != null && listing.brand.isBlank() && !listing.noBrand) problems += "Falta la marca"
+        // Always written by hand now (also old «Sin marca» articles: «Vintage Dressing», «Vintage»…).
+        if (listing != null && listing.brand.isBlank()) problems += "Falta la marca (escríbela en Editar)"
         if (ai == null) problems += "Falta generar el anuncio con IA"
         if (listing == null || ai == null) return Built(ref, null, problems, emptyList())
 
@@ -101,7 +102,7 @@ object Draft {
             put("titulo", text!!.title.take(ListingWriter.TITLE_MAX))
             put("descripcion", text.description.take(ListingWriter.DESCRIPTION_MAX))
             put("categoria", category)
-            put("marca", if (listing.noBrand) null else listing.brand.trim())
+            put("marca", listing.brand.trim())
             put("talla", size.ifBlank { null })
             put("estado", condition(listing.condition))
             putJsonArray("colores") { colors.forEach { add(JsonPrimitive(it)) } }
