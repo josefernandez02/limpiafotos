@@ -77,3 +77,20 @@ class ChosenPhotosTest {
         assertEquals(album, Catalog.chosenPhotos(album, listOf("x")) { it })
     }
 }
+
+class StageTest {
+    @Test
+    fun `stages are one word and uploaded is not played`() {
+        val self = Device("me", "Móvil", "SH", account = "shiorawear")
+        val s = ParentState(self = self)
+        fun st(desk: Desk?, uploaded: Set<String> = emptySet()) =
+            Catalog.stage(s, Article(number = 1, createdAt = 1, desk = desk, uploaded = uploaded), self)
+        assertEquals(Stage.TO_UPLOAD, st(null))
+        assertEquals(Stage.WORKING, st(Desk("r", Desk.PREPARING)))
+        assertEquals(Stage.REVIEW, st(Desk("r", "revisar")))
+        assertEquals(Stage.DRAFT, st(Desk("r", "borrador")))
+        assertEquals(Stage.UPLOADED, st(Desk("r", "publicado"), setOf("me")))
+        assertEquals(Stage.PLAYED, st(Desk("r", "jugado"), setOf("me")))
+        assertEquals(Stage.UPLOADED, st(null, setOf("me")))
+    }
+}

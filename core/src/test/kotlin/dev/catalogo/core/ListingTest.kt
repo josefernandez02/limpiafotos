@@ -65,18 +65,18 @@ class ListingTest {
         assertEquals(
             """
             🏷️ Talla: W31 L32
-            📏 Medidas en plano: Cintura 42 cm · Largo 104 cm
-            ✨ Estado: Muy buen estado
+            📏 Medidas: Cintura 42 cm · Largo 104 cm
+            ✅ Estado: Muy buen estado
             🚚 Envío: 24 horas
 
-            🛍️ Más prendas de este estilo en mi perfil
+            👀 Más prendas de este estilo en mi perfil
 
             #levis #levis501 #jeans #vaqueros #SH0054
             """.trimIndent(),
             d0,
         )
         val d1 = ListingWriter.description(l, 1, "", "SA0054")
-        assertTrue(d1.startsWith("🏷️ Talla W31 L32\n📏 Cintura 42 cm · Largo 104 cm (en plano)\n✅ En muy buen estado\n🚚 Lo envío en 24h"), d1)
+        assertTrue(d1.startsWith("🏷️ Talla W31 L32\n📏 Cintura 42 cm · Largo 104 cm (en plano)\n✨ En muy buen estado\n🚚 Lo envío en 24h"), d1)
         assertTrue(d1.endsWith("#SA0054"))
     }
 
@@ -142,8 +142,8 @@ class ListingTest {
     fun `notes follow the condition as a sentence`() {
         for (note in listOf("Tiene manchas", "tiene manchas.", "  Tiene\n manchas ")) {
             val l = jeans.copy(notes = note)
-            assertTrue(ListingWriter.description(l, 0, "", "SH1").contains("✨ Estado: Muy buen estado. Tiene manchas\n"), note)
-            assertTrue(ListingWriter.description(l, 1, "", "SA1").contains("✅ En muy buen estado. Tiene manchas\n"), note)
+            assertTrue(ListingWriter.description(l, 0, "", "SH1").contains("✅ Estado: Muy buen estado. Tiene manchas\n"), note)
+            assertTrue(ListingWriter.description(l, 1, "", "SA1").contains("✨ En muy buen estado. Tiene manchas\n"), note)
         }
         assertEquals("Buen estado, con ligeros signos de uso", ListingWriter.state(jeans.copy(condition = Condition.GOOD, notes = " . "), 0))
     }
@@ -184,5 +184,13 @@ class ListingTest {
         assertTrue("puffer" in ids("plumifero"))
         assertEquals(listOf("denimshorts"), ids("shorts vaqueros"))
         assertEquals(emptyList(), ids("   "))
+    }
+}
+
+class HashtagCleanTest {
+    @Test
+    fun `variants of the same search are dropped, translations stay`() {
+        val t = ListingWriter.clean(listOf("levis", "jeans", "vaqueros", "90s", "90sfashion", "vintage", "vintagestyle", "ootd", "denim"))
+        kotlin.test.assertEquals(listOf("levis", "jeans", "vaqueros", "90s", "vintage", "denim"), t)
     }
 }

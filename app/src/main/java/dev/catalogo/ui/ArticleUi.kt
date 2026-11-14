@@ -42,41 +42,27 @@ import dev.catalogo.core.Device
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sizes
+import dev.catalogo.core.Stage
 import dev.catalogo.core.Vinted
 
 /** How far an article is in one account, as a colour the eye finds at once. */
 enum class Tone(val color: Color) {
     Idle(Color(0xFF8D9095)),      // por subir
     Busy(Color(0xFF7FA7E8)),      // la IA o el PC trabajando
-    Ready(Color(0xFFB9A6F2)),     // borrador listo en Vinted
+    Ready(Color(0xFFB9A6F2)),     // borrador en Vinted
     Warn(Color(0xFFE8B45C)),      // necesita al usuario
     Done(Color(0xFF6CC48A)),      // subido
+    Played(Color(0xFF5EC4C4)),    // subido y jugado
 }
 
-/** [game]: for an uploaded article, whether its link was already used in a game (a second chip). */
-data class AccountStatus(val text: String, val tone: Tone, val game: AccountStatus? = null)
-
-/** Where [article] stands in [device]'s account: the PC's progress for this phone, else the manual mark. */
-fun accountStatus(p: ParentState, article: Article, device: Device): AccountStatus {
-    val desk = article.desk.takeIf { device.id == p.self.id }
-    return when {
-        // Uploaded and played are different things: «Subido» always, and the game apart.
-        device.id in article.uploaded -> AccountStatus(
-            "Subido",
-            Tone.Done,
-            when (desk?.status) {
-                "jugado" -> AccountStatus(desk.game.takeIf { it.isNotBlank() }?.let { "Jugado en $it" } ?: "Jugado", Tone.Ready)
-                "publicado" -> AccountStatus("Sin jugar", Tone.Idle)
-                else -> null
-            },
-        )
-        article.vinted[device.id]?.status == "sold" -> AccountStatus("Vendido", Tone.Done)
-        desk == null -> AccountStatus("Por subir", Tone.Idle)
-        desk.needsUser -> AccountStatus("Revisar", Tone.Warn)
-        desk.status == "borrador" -> AccountStatus("Borrador listo", Tone.Ready)
-        desk.status == "publicado" || desk.status == "jugado" -> AccountStatus(Desk.label(desk.status), Tone.Done)
-        else -> AccountStatus(Desk.label(desk.status), Tone.Busy)
-    }
+fun Stage.tone(): Tone = when (this) {
+    Stage.TO_UPLOAD -> Tone.Idle
+    Stage.REVIEW -> Tone.Warn
+    Stage.WORKING -> Tone.Busy
+    Stage.DRAFT -> Tone.Ready
+    Stage.UPLOADED -> Tone.Done
+    Stage.PLAYED -> Tone.Played
+    Stage.SOLD -> Tone.Done
 }
 
 /** A steady colour per account, so each one is recognised at a glance in long lists. */
@@ -100,45 +86,36 @@ fun AccountAvatar(label: String, size: Int = 22) {
     }
 }
 
+/** One word in a pill, always the same size and place: «● Subido». */
 @Composable
-fun StatusChip(status: AccountStatus) {
-    if (status.game == null) return Chip(status)
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Chip(status)
-        Chip(status.game)
-    }
-}
-
-@Composable
-private fun Chip(status: AccountStatus) {
+fun StatusChip(stage: Stage) {
+    val c = stage.tone().color
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(status.tone.color.copy(alpha = 0.16f))
-            .padding(horizontal = 9.dp, vertical = 3.dp),
+        Modifier.clip(RoundedCornerShape(50)).background(c.copy(alpha = 0.16f)).padding(horizontal = 10.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(Modifier.size(7.dp).clip(CircleShape).background(status.tone.color))
+        Box(Modifier.size(7.dp).clip(CircleShape).background(c))
         Spacer(Modifier.width(6.dp))
-        // Never cut: a chip that does not fit goes whole to the next line (see [AccountLine]).
-        Text(status.text, style = MaterialTheme.typography.labelMedium, color = status.tone.color, maxLines = 1, softWrap = false)
+        Text(stage.label, style = MaterialTheme.typography.labelMedium, color = c, maxLines = 1, softWrap = false)
     }
 }
 
-/**
- * «(S) shiorawear  ● Subido». On a narrow screen the chip moves below the
- * name instead of cutting either of them.
- */
-@OptIn(ExperimentalLayoutApi::class)
+/** «(S) shiorawear ·········· ● Subido»: one line per account, the status always on the right. */
 @Composable
-fun AccountLine(label: String, status: AccountStatus) {
-    FlowRow(
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            AccountAvatar(label, 20)
-            Text(label, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
-        }
-        StatusChip(status)
+fun AccountLine(label: String, stage: Stage) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        AccountAvatar(label, 20)
+        Spacer(Modifier.width(8.dp))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(8.dp))
+        StatusChip(stage)
     }
 }
 
@@ -171,14 +148,13 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
         val shown = devices.filter { it.id in targets }.ifEmpty { if (devices.size == 1) devices else emptyList() }
         shown.forEachIndexed { i, d ->
             if (i > 0 || devices.size > 1) HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
-            val status = accountStatus(p, article, d)
-            // Name and status stacked: neither is cut on a narrow phone.
+            val stage = Catalog.stage(p, article, d)
+            // Same header in every state: account on the left, its status on the right.
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AccountAvatar(d.label, 34)
                 Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(d.label, style = MaterialTheme.typography.titleMedium)
-                    StatusChip(status)
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(d.label, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     val v = article.vinted[d.id]
                     val facts = listOfNotNull(
                         v?.price?.let(Money::format),
@@ -187,13 +163,14 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
                     )
                     if (facts.isNotEmpty()) Muted(facts.joinToString(GAP))
                 }
+                Spacer(Modifier.width(8.dp))
+                StatusChip(stage)
             }
             val uploaded = d.id in article.uploaded
+            Spacer(Modifier.size(12.dp))
             if (d.id == p.self.id) {
-                if (!uploaded) {
-                    Spacer(Modifier.size(8.dp))
-                    DeskBlock(vm, p, article, state)
-                }
+                DeskBlock(vm, p, article, state)
+                return@forEachIndexed
             } else {
                 val n = waiting[d.id] ?: 0
                 Muted(
@@ -201,8 +178,7 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
                     Modifier.padding(top = 6.dp),
                 )
             }
-            // For articles uploaded by hand (before the PC did it), or a mark set by mistake.
-            // It changes what the PC does, so it is a real button and asks first.
+            // Other phones' accounts are uploaded from those phones: here only the mark.
             var asking by remember { mutableStateOf(false) }
             OutlinedButton(
                 onClick = { asking = true },

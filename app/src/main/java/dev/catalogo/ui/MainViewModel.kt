@@ -30,6 +30,7 @@ sealed interface Screen {
     /** Main tabs on the parent: articles, lots, connect. */
     data object Home : Screen
     data object Lots : Screen
+    data object Status : Screen
     data object Connect : Screen
 
     data class Article(val number: Int) : Screen
@@ -252,11 +253,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
     /** «Generar y preparar borrador» with the photos the AI should look at (the PC gets all of them). */
-    fun prepareDraft(number: Int, photos: List<Uri>) = run {
+    fun prepareDraft(number: Int, photos: List<Uri>, mode: String = dev.catalogo.core.Mode.UPLOAD_PLAY) = run {
         if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
         if (photos.isEmpty()) throw CatalogException("Elige al menos una foto")
         repo.setPhotos(number, photos.map { it.toString() })
-        app.drafts.prepareNow(number)
+        app.drafts.prepareNow(number, mode)
         _message.value = "En cola: puedes salir de la app y seguir con otros artículos"
     }
 
@@ -274,6 +275,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun retryDraft(number: Int) = run { app.drafts.retry(number) }
+
+    /** Where it stands, set by hand (also tells the PC). */
+    fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "") = run {
+        app.drafts.setStage(number, stage, url)
+        _message.value = "Estado: ${stage.label}"
+    }
+
+    fun setMode(number: Int, mode: String) = run {
+        app.drafts.setMode(number, mode)
+        _message.value = dev.catalogo.core.Mode.label(mode)
+    }
+
+    /** «Solo jugar»: an article already on Vinted goes to the next game with its link. */
+    fun playOnly(number: Int, url: String) = run {
+        if (!Regex("^https://(www\\.)?vinted\\.[a-z.]{2,8}/items/\\d+").containsMatchIn(url.trim())) {
+            throw CatalogException("Pega el link del artículo en Vinted")
+        }
+        app.drafts.playOnly(number, url)
+        _message.value = "Irá al siguiente juego"
+    }
+
+    /** Ask the PC now («Actualizar» in Estado). */
+    fun refreshPc() {
+        app.drafts.refresh()
+    }
 
     /** Out of the queue (and off the PC) until the user sends it again. */
     fun removeDraft(number: Int) = run {

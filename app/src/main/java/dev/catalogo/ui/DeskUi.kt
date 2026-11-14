@@ -31,6 +31,11 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -53,93 +58,210 @@ import dev.catalogo.core.AppState
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Desk
+import dev.catalogo.core.Mode
+import dev.catalogo.core.Stage
 import dev.catalogo.core.Draft
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.PcLink
 import dev.catalogo.core.Sizes
 import dev.catalogo.core.Vinted
 
-/** The article's way to Vinted through the PC: one button, then its progress. */
+/**
+ * This phone's account in the article: what to do with it, how far it is, and the
+ * one button that moves it on. Same shape in every state: a short line on top
+ * (what is happening), the main button, and «Cambiar estado» at the bottom.
+ */
 @Composable
 fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppState) {
     val desk = article.desk
+    val stage = Catalog.stage(p, article, p.self)
     var reviewing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
+    var changing by remember { mutableStateOf(false) }
+    var mode by remember(desk?.mode) { mutableStateOf(desk?.mode ?: Mode.UPLOAD_PLAY) }
+    var link by remember(desk?.url) { mutableStateOf(desk?.url.orEmpty()) }
     // The PC already has photos and data: «Volver a intentarlo» asks it again, nothing is re-sent.
     val onPc = desk != null && (desk.status == "revisar" || desk.status == "error")
-    Column(Modifier.fillMaxWidth()) {
-        when {
-            state.pc == null -> Muted("Conecta el PC en Ajustes")
-            desk != null -> {
-                // The status itself is the chip next to the account; here only the work in progress.
-                if (desk.working) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Spacer(Modifier.width(10.dp))
-                        Muted(
-                            when (desk.status) {
-                                Desk.PREPARING -> "La IA está leyendo las fotos"
-                                Desk.SENDING -> "Enviando fotos y datos al PC"
-                                "pendiente" -> "En cola en el PC"
-                                else -> "El PC está rellenando el formulario"
-                            },
-                        )
-                    }
-                }
-                val extra = listOfNotNull(
-                    desk.message.takeIf { it.isNotBlank() },
-                    desk.game.takeIf { it.isNotBlank() && desk.status != "jugado" }?.let { "Juego: $it" },
-                )
-                for (line in extra) {
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (desk.needsUser) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
+
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (state.pc == null) {
+            Muted("Conecta el PC en Ajustes")
+            return@Column
+        }
+        when (stage) {
+            Stage.TO_UPLOAD -> {
+                ModePicker(mode) { mode = it }
+                if (mode == Mode.PLAY) {
+                    OutlinedTextField(
+                        value = link,
+                        onValueChange = { link = it.trim() },
+                        label = { Text("Link del artículo en Vinted") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
+                    MainButton("Añadir a los juegos", enabled = link.isNotBlank()) { vm.playOnly(article.number, link) }
+                } else {
+                    if (article.price == null) Muted("Falta el precio de Vinted (Editar)")
+                    MainButton("Preparar borrador") { choosing = true }
                 }
             }
+            Stage.WORKING -> {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(10.dp))
+                    Muted(
+                        when (desk?.status) {
+                            Desk.PREPARING -> "La IA está leyendo las fotos"
+                            Desk.SENDING -> "Enviando fotos y datos al PC"
+                            "pendiente" -> "En cola en el PC"
+                            else -> "El PC está rellenando el formulario"
+                        } + "  (${Mode.label(desk?.mode ?: Mode.UPLOAD_PLAY)})",
+                    )
+                }
+                desk?.message?.takeIf { it.isNotBlank() }?.let { Muted(it) }
+                SecondButton("Sacar de la cola") { removing = true }
+            }
+            Stage.REVIEW -> {
+                desk?.message?.takeIf { it.isNotBlank() }?.let {
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                }
+                if (desk != null && desk.status == Desk.REVIEW && desk.doubts.isNotEmpty()) {
+                    MainButton("Revisar ${desk.doubts.size} ${if (desk.doubts.size == 1) "dato" else "datos"}") { reviewing = true }
+                } else {
+                    MainButton("Volver a intentarlo") { if (onPc) vm.retryDraft(article.number) else choosing = true }
+                }
+                SecondButton("Sacar de la cola") { removing = true }
+            }
+            Stage.DRAFT -> {
+                val onlyDraft = desk?.mode == Mode.DRAFT
+                Muted(if (onlyDraft) "Se queda como borrador: el PC no lo publica." else "Se publicará cuando un juego necesite un link.")
+                if (onlyDraft) MainButton("Subir y jugar") { vm.setMode(article.number, Mode.UPLOAD_PLAY) }
+                else SecondButton("Dejar solo como borrador") { vm.setMode(article.number, Mode.DRAFT) }
+            }
+            Stage.UPLOADED -> {
+                val waiting = desk?.mode == Mode.PLAY || desk?.status == "publicado" && desk.mode == Mode.UPLOAD_PLAY && desk.url.isNotBlank()
+                Muted(if (waiting) "Sin jugar: irá al siguiente juego." else "Subido. No está en los juegos.")
+                if (!waiting) {
+                    OutlinedTextField(
+                        value = link,
+                        onValueChange = { link = it.trim() },
+                        label = { Text("Link del artículo en Vinted") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    MainButton("Meter en los juegos", enabled = link.isNotBlank()) { vm.playOnly(article.number, link) }
+                }
+            }
+            Stage.PLAYED -> Muted(desk?.game?.takeIf { it.isNotBlank() }?.let { "Jugado en $it." } ?: "Jugado.")
+            Stage.SOLD -> Muted("Vendido en Vinted.")
         }
-        if (article.price == null && state.pc != null) Muted("Falta el precio de Vinted (Editar)", Modifier.padding(top = 4.dp))
-        when {
-            desk?.status == Desk.REVIEW && desk.doubts.isNotEmpty() -> FilledTonalButton(
-                onClick = { reviewing = true },
-                modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) { OneLine("Revisar ${desk.doubts.size} ${if (desk.doubts.size == 1) "dato" else "datos"}") }
-            desk == null || desk.needsUser -> FilledTonalButton(
-                onClick = { if (onPc) vm.retryDraft(article.number) else choosing = true },
-                enabled = state.pc != null,
-                modifier = Modifier.fillMaxWidth().height(52.dp).padding(top = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) { OneLine(if (desk == null) "Generar y preparar borrador" else "Volver a intentarlo") }
-        }
-        // Stuck or not wanted now: out of the queue until it is sent again.
-        if (desk != null && desk.status !in setOf("borrador", "publicado", "jugado")) {
-            OutlinedButton(
-                onClick = { removing = true },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) { OneLine("Sacar de la cola") }
-        }
+        SecondButton("Cambiar estado") { changing = true }
     }
+    if (reviewing && desk != null) ReviewDialog(vm, p, article, desk, onDismiss = { reviewing = false })
+    if (choosing) PhotoChoiceDialog(vm, article.number, mode, onDismiss = { choosing = false })
     if (removing) {
         Confirm(
             title = "¿Sacar de la cola?",
-            text = "El PC no hará nada con este artículo hasta que lo vuelvas a mandar. No se borra nada.",
+            text = "El PC no hará nada con este artículo hasta que lo vuelvas a mandar. No se borra nada en Vinted.",
             confirm = "Sacar",
             onConfirm = { vm.removeDraft(article.number) },
             onDismiss = { removing = false },
             destructive = true,
         )
     }
-    if (reviewing && desk != null) {
-        ReviewDialog(vm, p, article, desk, onDismiss = { reviewing = false })
+    if (changing) StageDialog(vm, article, stage, onDismiss = { changing = false })
+}
+
+/** What to do with the article: three equal options, one line each. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ModePicker(mode: String, onPick: (String) -> Unit) {
+    val modes = listOf(Mode.DRAFT, Mode.UPLOAD_PLAY, Mode.PLAY)
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        modes.forEachIndexed { i, m ->
+            SegmentedButton(
+                selected = mode == m,
+                onClick = { onPick(m) },
+                shape = SegmentedButtonDefaults.itemShape(i, modes.size),
+                icon = {},
+                label = { OneLine(Mode.label(m)) },
+            )
+        }
     }
-    if (choosing) {
-        PhotoChoiceDialog(vm, article.number, onDismiss = { choosing = false })
-    }
+}
+
+@Composable
+private fun MainButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.fillMaxWidth().height(50.dp),
+        shape = RoundedCornerShape(16.dp),
+    ) { OneLine(text) }
+}
+
+@Composable
+private fun SecondButton(text: String, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().height(46.dp),
+        shape = RoundedCornerShape(16.dp),
+    ) { OneLine(text) }
+}
+
+/**
+ * Where the article stands, set by hand (done by hand, or the system got it wrong).
+ * The PC is told, so it does not like a link twice or publish a draft that must stay one.
+ */
+@Composable
+private fun StageDialog(vm: MainViewModel, article: Article, current: Stage, onDismiss: () -> Unit) {
+    val options = listOf(Stage.TO_UPLOAD, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED)
+    var picked by remember { mutableStateOf(current.takeIf { it in options } ?: Stage.TO_UPLOAD) }
+    var link by remember { mutableStateOf(article.desk?.url.orEmpty()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Cambiar estado") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (o in options) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { picked = o }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = picked == o, onClick = { picked = o })
+                        Column {
+                            Text(o.label, style = MaterialTheme.typography.bodyLarge)
+                            Muted(
+                                when (o) {
+                                    Stage.TO_UPLOAD -> "Fuera de la cola y sin subir"
+                                    Stage.DRAFT -> "Está como borrador en Vinted"
+                                    Stage.UPLOADED -> "Publicado, aún sin likes de juegos"
+                                    else -> "Ya le di los likes del juego"
+                                },
+                            )
+                        }
+                    }
+                }
+                if (picked != Stage.TO_UPLOAD) {
+                    OutlinedTextField(
+                        value = link,
+                        onValueChange = { link = it.trim() },
+                        label = { Text("Link en Vinted (opcional)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onDismiss(); vm.setStage(article.number, picked, link) }, enabled = picked != current || link != article.desk?.url.orEmpty()) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
 }
 
 /**
@@ -147,11 +269,11 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
  * takes out one that adds nothing (or puts it back). Vinted gets all of them anyway.
  */
 @Composable
-fun PhotoChoiceDialog(vm: MainViewModel, number: Int, onDismiss: () -> Unit) {
+fun PhotoChoiceDialog(vm: MainViewModel, number: Int, mode: String = Mode.UPLOAD_PLAY, onDismiss: () -> Unit) {
     val loaded by produceState<Pair<List<Uri>, List<Uri>>?>(null, number) { value = vm.vintedPhotos(number) }
     var chosen by remember(loaded) { mutableStateOf(loaded?.second.orEmpty()) }
-    val go = rememberWithPermissions(Perms.notifications, onDenied = { vm.prepareDraft(number, chosen) }) {
-        vm.prepareDraft(number, chosen)
+    val go = rememberWithPermissions(Perms.notifications, onDenied = { vm.prepareDraft(number, chosen, mode) }) {
+        vm.prepareDraft(number, chosen, mode)
     }
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -333,102 +455,6 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
         dismissButton = { TextButton(onClick = onDismiss) { Text("Luego") } },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
-}
-
-/**
- * Home: what the PC is doing, with start and pause, and the queue of articles
- * on their way (AI here, then the PC) so the work is visible without opening each one.
- */
-@Composable
-fun PcCard(vm: MainViewModel, p: ParentState) {
-    val pc by vm.pc.collectAsStateWithLifecycle()
-    val status = pc.status
-    var starting by remember { mutableStateOf(false) }
-    var open by remember { mutableStateOf(false) }
-    val queue = p.articles.filter { a ->
-        !a.released && a.desk != null && p.self.id !in a.uploaded && a.desk!!.status !in setOf("publicado", "jugado")
-    }.sortedWith(compareBy({ stage(it.desk!!) }, { it.desk!!.at }))
-    Tile {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    when {
-                        pc.error != null -> "PC sin conexión"
-                        status == null -> "Conectando con el PC"
-                        status.paused -> "PC en pausa"
-                        status.text == "parado" -> "PC parado"
-                        else -> "PC " + status.text
-                    },
-                    style = MaterialTheme.typography.titleMedium,
-                )
-                val sub = pc.error ?: status?.next?.takeIf { it.isNotBlank() }
-                if (sub != null) Muted(sub)
-            }
-            if (status != null && pc.error == null) {
-                val running = status.text != "parado"
-                Spacer(Modifier.width(10.dp))
-                FilledTonalButton(
-                    onClick = {
-                        when {
-                            !running -> starting = true          // publishes and plays: asks first
-                            status.paused -> vm.pcControl("reanudar")
-                            else -> vm.pcControl("pausar")
-                        }
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                ) { OneLine(if (!running) "Empezar" else if (status.paused) "Seguir" else "Pausar") }
-            }
-        }
-        if (queue.isNotEmpty()) {
-            HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
-            Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { open = !open }.padding(vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("En cola", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-                val review = queue.count { it.desk!!.needsUser }
-                Muted(listOfNotNull("${queue.size}", review.takeIf { it > 0 }?.let { "$it por revisar" }).joinToString(GAP))
-                Text(if (open) "  ▲" else "  ▼", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            if (open) {
-                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (a in queue) {
-                        Row(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp))
-                                .clickable { vm.go(Screen.Article(a.number)) }.padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        ) {
-                            Text(Sku.number(a.number, p.digits), style = Mono)
-                            Column(Modifier.weight(1f)) {
-                                StatusChip(accountStatus(p, a, p.self))
-                                a.desk!!.message.takeIf { it.isNotBlank() }?.let { Muted(it, maxLines = 2) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if (starting) {
-        Confirm(
-            title = "¿Empezar en el PC?",
-            text = "Publicará los borradores listos y jugará con ellos cuando toque, con pausas entre acciones.",
-            confirm = "Empezar",
-            onConfirm = { vm.pcControl("iniciar") },
-            onDismiss = { starting = false },
-        )
-    }
-}
-
-/** Queue order: what needs you, then the AI here, the upload, and the PC. */
-private fun stage(d: Desk): Int = when {
-    d.needsUser -> 0
-    d.status == Desk.PREPARING -> 1
-    d.status == Desk.SENDING -> 2
-    d.status == "en_curso" -> 3
-    d.status == "pendiente" -> 4
-    else -> 5
 }
 
 /** Settings: address and key of the PC (stay on this phone). */

@@ -182,7 +182,8 @@ object Ai {
 
             5. HASHTAGS ("hashtags": de 10 a 12, sin #, minúsculas, sin tildes ni espacios)
             Son palabras que los compradores escriben al buscar; tienen que atraer ventas, no quedar bonitos. Vinted España comparte catálogo con otros países: mezcla inglés y español.
-            - En este orden: marca, marca+modelo y marca+vintage si es vintage (levis, levis505, levisvintage); prenda en inglés y en español (jeans, vaqueros, vaquerosvintage); corte en inglés y en español (straightjeans, vaquerosrectos); época (90s, 90sfashion; con Y2K pon y2k y 2000s); estilo si encaja (streetwear, workwear, oldmoney); lo útil de notas_del_vendedor (madeinusa, madeinargentina).
+            - En este orden: marca, marca+modelo y marca+vintage si es vintage (levis, levis505, levisvintage); prenda en inglés y en español (jeans, vaqueros, vaquerosvintage); corte en inglés y en español (straightjeans, vaquerosrectos); época (90s; con Y2K pon y2k y 2000s); estilo si encaja de verdad (streetwear, workwear, oldmoney, grunge, skater); vintage; lo útil de notas_del_vendedor (madeinusa, madeinargentina).
+            - Cada hashtag es una búsqueda distinta que puede traer visitas. Una traducción (jeans / vaqueros) sí suma; una variante de lo mismo no (90s y 90sfashion, vintage y vintagestyle, denim y denimjeans): pon solo una.
             - Nada que no sea cierto ni genéricos que no venden (ootd, aesthetic, outfit, fashion, style, vinted, vintedfrance, instafashion).
             - Sin SKU ni códigos: la app los añade al final.
 

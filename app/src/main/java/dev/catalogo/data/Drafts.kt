@@ -205,8 +205,10 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val link = repo.state.pc ?: return run { _pc.value = Pc() }
         try {
             val status = repo.desk.status(link)
+            // States set by hand first: the PC must know them before it plays anything.
+            for (a in repo.state.parent?.articles.orEmpty().filter { it.desk?.pending?.isNotBlank() == true }) push(a.number)
             val onPc = repo.state.parent?.articles.orEmpty().filter { a ->
-                a.desk != null && a.desk!!.status !in LOCAL
+                a.desk != null && a.desk!!.status !in LOCAL && a.desk!!.pending.isBlank()
             }
             if (onPc.isNotEmpty()) {
                 val jobs = repo.desk.jobs(link).associateBy { it.ref }
@@ -256,14 +258,92 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     // ---------- actions from the screens ----------
 
+    // ---------- by hand: what to do and where it stands ----------
+
+    /**
+     * Sets where the article stands in this phone's account, as the user knows it
+     * (done by hand, or the system got it wrong). The PC hears about it so it never
+     * likes a link twice or publishes a draft that must stay a draft. If the PC
+     * cannot be reached, the change stays here and is sent on the next check.
+     */
+    suspend fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "") {
+        val p = repo.state.parent ?: return
+        val a = current(number) ?: return
+        val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
+        val link = repo.state.pc
+        val cleanUrl = url.trim().ifBlank { a.desk?.url.orEmpty() }
+        if (stage == dev.catalogo.core.Stage.TO_UPLOAD) {
+            // Off the PC first: if it cannot hear it, nothing changes here (it could still play it).
+            val d = a.desk
+            if (link != null && d != null && d.status !in LOCAL) {
+                withContext(Dispatchers.IO) {
+                    if (d.status in setOf("pendiente", "revisar", "error")) repo.desk.delete(link, d.ref)
+                    else repo.desk.setState(link, d.ref, "fuera", d.mode, d.url, p.self.account)
+                }
+            }
+            repo.updateDesk(number) { null }
+            repo.setUploaded(number, p.self.id, false)
+            AppLog.i("cola", "$ref a mano: por subir")
+            return
+        }
+        val status = when (stage) {
+            dev.catalogo.core.Stage.DRAFT -> "borrador"
+            dev.catalogo.core.Stage.PLAYED -> "jugado"
+            else -> "publicado"
+        }
+        repo.updateDesk(number) { d ->
+            val base = d ?: DeskState(ref, status, at = System.currentTimeMillis())
+            base.copy(ref = ref, status = status, message = "", doubts = emptyList(), url = cleanUrl,
+                pending = status, at = System.currentTimeMillis())
+        }
+        repo.setUploaded(number, p.self.id, stage != dev.catalogo.core.Stage.DRAFT)
+        AppLog.i("cola", "$ref a mano: $status")
+        push(number)
+    }
+
+    /** What to do with it (only before the PC acts, or for a draft / an uploaded article). */
+    suspend fun setMode(number: Int, mode: String) {
+        val d = current(number)?.desk ?: return
+        repo.updateDesk(number) { x -> x?.copy(mode = mode, pending = if (x.status in setOf("borrador", "publicado")) x.status else x.pending) }
+        AppLog.i("cola", "${d.ref} modo: $mode")
+        push(number)
+    }
+
+    /** «Solo jugar»: the article is already on Vinted; its link goes to the next game. */
+    suspend fun playOnly(number: Int, url: String) {
+        val p = repo.state.parent ?: return
+        val a = current(number) ?: return
+        val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
+        repo.updateDesk(number) { d ->
+            (d ?: DeskState(ref, "publicado")).copy(ref = ref, status = "publicado", mode = dev.catalogo.core.Mode.PLAY,
+                url = url.trim(), message = "", doubts = emptyList(), pending = "publicado", at = System.currentTimeMillis())
+        }
+        repo.setUploaded(number, p.self.id, true)
+        push(number)
+    }
+
+    /** Sends a state set by hand to the PC; on failure it stays pending for the next check. */
+    private suspend fun push(number: Int) {
+        val p = repo.state.parent ?: return
+        val d = current(number)?.desk?.takeIf { it.pending.isNotBlank() } ?: return
+        val link = repo.state.pc ?: return
+        runCatching {
+            withContext(Dispatchers.IO) { repo.desk.setState(link, d.ref, d.pending, d.mode, d.url, p.self.account) }
+        }.onSuccess {
+            repo.updateDesk(number) { x -> x?.copy(pending = "") }
+            AppLog.i("cola", "${d.ref} PC enterado: ${d.pending} (${d.mode})")
+        }.onFailure { AppLog.w("cola", "${d.ref} pendiente de avisar al PC: ${it.message}") }
+    }
+
     /** «Generar y preparar borrador». */
-    suspend fun prepareNow(number: Int) {
+    suspend fun prepareNow(number: Int, mode: String? = null) {
         val p = repo.state.parent ?: return
         val a = current(number) ?: return
         val ref = Draft.ref(p.self, a, p.digits)
         repo.updateDesk(number) { d ->
             val keep = d?.takeIf { it.ref == ref }
-            DeskState(ref, DeskState.PREPARING, fixes = keep?.fixes ?: Draft.Fixes(), at = System.currentTimeMillis())
+            DeskState(ref, DeskState.PREPARING, fixes = keep?.fixes ?: Draft.Fixes(), at = System.currentTimeMillis(),
+                mode = mode ?: keep?.mode ?: dev.catalogo.core.Mode.UPLOAD_PLAY)
         }
         kick()
     }

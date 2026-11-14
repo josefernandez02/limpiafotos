@@ -72,6 +72,7 @@ import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
+import dev.catalogo.core.Stage
 
 private fun openCamera(context: Context, vm: MainViewModel) {
     try {
@@ -88,10 +89,8 @@ private fun photos(n: Int) = if (n == 1) "1 foto" else "$n fotos"
 /** List filter: everything, still to upload, one account's articles, or sold in Vinted. */
 private sealed interface Filter {
     data object All : Filter
-    data object ToUpload : Filter
+    data class InStage(val stage: Stage) : Filter
     data class Account(val deviceId: String) : Filter
-    data object SoldInVinted : Filter
-    data object Review : Filter
 }
 
 private fun Article.soldInVinted() = vinted.values.any { it.status == "sold" }
@@ -109,10 +108,8 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     val shown = active.filter { a ->
         when (val f = filter) {
             Filter.All -> true
-            Filter.ToUpload -> a.toUpload
+            is Filter.InStage -> Catalog.stage(p, a, p.self) == f.stage
             is Filter.Account -> f.deviceId in a.targets
-            Filter.SoldInVinted -> a.soldInVinted()
-            Filter.Review -> a.desk?.needsUser == true
         }
     }
     Scaffold(
@@ -140,22 +137,21 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            if (appState.pc != null) item(key = "pc") { PcCard(vm, p) }
             item(key = "filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
-                    val review = active.count { it.desk?.needsUser == true }
-                    if (review > 0) item { Choice("Revisar ($review)", filter == Filter.Review) { filter = Filter.Review } }
-                    val todo = active.count { it.toUpload }
-                    item { Choice("Por subir ($todo)", filter == Filter.ToUpload) { filter = Filter.ToUpload } }
+                    // One filter per status that has articles, in the order they move.
+                    val byStage = active.groupingBy { Catalog.stage(p, it, p.self) }.eachCount()
+                    for (st in Stage.entries) {
+                        val n = byStage[st] ?: 0
+                        if (n > 0) item(key = st.name) { Choice("${st.label} ($n)", filter == Filter.InStage(st)) { filter = Filter.InStage(st) } }
+                    }
                     if (devices.size > 1) {
                         items(devices, key = { it.id }) { d ->
                             val n = active.count { d.id in it.targets }
                             Choice("${d.label} ($n)", filter == Filter.Account(d.id)) { filter = Filter.Account(d.id) }
                         }
                     }
-                    val sold = active.count { it.soldInVinted() }
-                    if (sold > 0) item { Choice("Vendido en Vinted ($sold)", filter == Filter.SoldInVinted) { filter = Filter.SoldInVinted } }
                 }
             }
             val toSend = outbox.values.sumOf { it.values.sum() }
@@ -212,15 +208,12 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
                 // Each chosen account with how far the article is there: usually one line.
                 val targets = devices.filter { it.id in a.targets }.ifEmpty { if (devices.size == 1) devices else emptyList() }
                 if (targets.isEmpty()) Muted("Sin cuenta elegida", maxLines = 1)
-                for (d in targets) AccountLine(d.label, accountStatus(p, a, d))
+                for (d in targets) AccountLine(d.label, Catalog.stage(p, a, d))
                 val extra = listOfNotNull(
                     if (favourites > 0) "♥ $favourites" else null,
                     if (sending > 0) "$sending fotos por enviar" else null,
                 )
                 if (extra.isNotEmpty()) Muted(extra.joinToString(GAP), maxLines = 1)
-            }
-            IconButton(onClick = { vm.go(Screen.Editor(a.number)) }) {
-                Icon(Icons.Default.Edit, contentDescription = "Editar", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

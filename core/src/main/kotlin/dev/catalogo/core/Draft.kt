@@ -99,6 +99,7 @@ object Draft {
         val payload = buildJsonObject {
             put("ref", ref)
             put("cuenta", device.account)
+            put("modo", article.desk?.mode ?: Mode.UPLOAD_PLAY)
             put("titulo", text!!.title.take(ListingWriter.TITLE_MAX))
             put("descripcion", text.description.take(ListingWriter.DESCRIPTION_MAX))
             put("categoria", category)

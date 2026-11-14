@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
@@ -56,6 +57,13 @@ fun MainTabs(vm: MainViewModel, current: Screen) {
             onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Home) },
             icon = { Icon(Icons.Default.Home, contentDescription = null) },
             label = { Text("Artículos") },
+            colors = colors,
+        )
+        NavigationBarItem(
+            selected = current == Screen.Status,
+            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Status) },
+            icon = { Icon(Icons.Default.Info, contentDescription = null) },
+            label = { Text("Estado") },
             colors = colors,
         )
         NavigationBarItem(

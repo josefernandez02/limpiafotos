@@ -95,6 +95,10 @@ data class Desk(
     val at: Long = 0,
     /** What the user settled in «Revisar». */
     val fixes: Draft.Fixes = Draft.Fixes(),
+    /** What to do with it: [Mode]. */
+    val mode: String = Mode.UPLOAD_PLAY,
+    /** A state set by hand that the PC still has to hear about ("" = nothing pending). */
+    val pending: String = "",
 ) {
     val needsUser: Boolean get() = status == REVIEW || status == "revisar" || status == "error"
     val working: Boolean get() = status == PREPARING || status == SENDING || status == "pendiente" || status == "en_curso"
@@ -118,6 +122,36 @@ data class Desk(
             else -> status
         }
     }
+}
+
+/** What the user wants done with an article in Vinted. */
+object Mode {
+    /** Only the draft: the PC never publishes it. */
+    const val DRAFT = "borrador"
+    /** Draft, published when a game needs a link, and played (the usual). */
+    const val UPLOAD_PLAY = "subir_jugar"
+    /** Already on Vinted (uploaded by hand): only its link goes to a game. */
+    const val PLAY = "jugar"
+
+    fun label(mode: String): String = when (mode) {
+        DRAFT -> "Solo borrador"
+        PLAY -> "Solo jugar"
+        else -> "Subir y jugar"
+    }
+}
+
+/**
+ * Where an article stands in an account, in one word: what the list and the
+ * status tab show. Uploaded and played are different steps.
+ */
+enum class Stage(val label: String) {
+    TO_UPLOAD("Por subir"),
+    REVIEW("Revisar"),
+    WORKING("En curso"),
+    DRAFT("Borrador"),
+    UPLOADED("Subido"),
+    PLAYED("Jugado"),
+    SOLD("Vendido"),
 }
 
 /** The PC that turns articles into Vinted drafts (whatsapp-likes), reached on the LAN or Tailscale. */

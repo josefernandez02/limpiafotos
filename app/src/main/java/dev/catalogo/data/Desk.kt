@@ -55,6 +55,17 @@ class Desk(private val resolver: ContentResolver) {
         return call(link, "PUT", "/articulos/${enc(ref)}", body.toString(), SEND_TIMEOUT).job()
     }
 
+    /** A state set by hand («borrador», «publicado», «jugado», «fuera»), with what to do ([mode]) and the link. */
+    fun setState(link: PcLink, ref: String, state: String, mode: String, url: String, account: String): Job {
+        val body = buildJsonObject {
+            put("estado", state)
+            put("modo", mode)
+            put("url", url)
+            put("cuenta", account)
+        }
+        return call(link, "POST", "/articulos/${enc(ref)}/estado", body.toString()).job()
+    }
+
     fun retry(link: PcLink, ref: String): Job = call(link, "POST", "/articulos/${enc(ref)}/reintentar", "{}").job()
 
     /** The app's log, kept on the PC next to its own (datos/<perfil>/movil.log). */

@@ -147,12 +147,13 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
                 else Spacer(Modifier.weight(1f))
                 Choice("Sin etiqueta", noLabel) { noLabel = !noLabel }
             }
-            if (noLabel || waist.isNotBlank() || chest.isNotBlank() || length.isNotBlank()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Cm(waist, { waist = it }, "Cintura", Modifier.weight(1f))
-                    Cm(chest, { chest = it }, "Pecho", Modifier.weight(1f))
-                    Cm(length, { length = it }, "Largo", Modifier.weight(1f))
-                }
+
+            // Optional: the two that fit the garment (pecho y largo arriba, cintura y largo abajo).
+            Section("Medidas en plano")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Cm(chest, { chest = it }, "Pecho", Modifier.weight(1f))
+                Cm(waist, { waist = it }, "Cintura", Modifier.weight(1f))
+                Cm(length, { length = it }, "Largo total", Modifier.weight(1f))
             }
 
             Section("Época")

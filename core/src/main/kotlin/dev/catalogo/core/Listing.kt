@@ -84,8 +84,8 @@ data class Listing(
 data class Measures(val waist: String = "", val chest: String = "", val length: String = "") {
     fun isEmpty() = waist.isBlank() && chest.isBlank() && length.isBlank()
 
-    /** "Cintura 42 cm · Largo 104 cm" */
-    fun text(): String = listOf("Cintura" to waist, "Pecho" to chest, "Largo" to length)
+    /** "Pecho 55 cm · Largo 70 cm" or "Cintura 42 cm · Largo 104 cm": only the ones written. */
+    fun text(): String = listOf("Pecho" to chest, "Cintura" to waist, "Largo" to length)
         .filter { it.second.isNotBlank() }
         .joinToString(" · ") { "${it.first} ${it.second.trim()} cm" }
 }
@@ -263,21 +263,21 @@ object ListingWriter {
     private val TEMPLATES = listOf(
         """
         🏷️ Talla: {talla}
-        📏 Medidas en plano: {medidas}
-        ✨ Estado: {estado}
+        📏 Medidas: {medidas}
+        ✅ Estado: {estado}
         🚚 Envío: 24 horas
 
-        🛍️ Más prendas de este estilo en mi perfil
+        👀 Más prendas de este estilo en mi perfil
 
         {hashtags}
         """,
         """
         🏷️ Talla {talla}
         📏 {medidas} (en plano)
-        ✅ {estado}
+        ✨ {estado}
         🚚 Lo envío en 24h
 
-        👀 Más prendas así en mi perfil
+        🛍️ Más prendas así en mi perfil
 
         {hashtags}
         """,
@@ -286,6 +286,11 @@ object ListingWriter {
 
     /** Lines of older templates: dropped (null) or replaced by the current wording. */
     private val LEGACY_LINES: Map<String, String?> = mapOf(
+        "📏 Medidas en plano: {medidas}" to "📏 Medidas: {medidas}",
+        "✨ Estado: {estado}" to "✅ Estado: {estado}",
+        "🛍️ Más prendas de este estilo en mi perfil" to "👀 Más prendas de este estilo en mi perfil",
+        "✅ {estado}" to "✨ {estado}",
+        "👀 Más prendas así en mi perfil" to "🛍️ Más prendas así en mi perfil",
         "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla." to null,
         "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla" to null,
         "ℹ️ Nota: medidas aproximadas en plano, úsalas como guía junto con la talla." to null,
@@ -294,13 +299,13 @@ object ListingWriter {
         "👕 Talla: {talla}" to "🏷️ Talla: {talla}",
         "📦 Envío: En 24 horas" to "🚚 Envío: 24 horas",
         "🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar." to
-            "🛍️ Más prendas de este estilo en mi perfil",
+            "👀 Más prendas de este estilo en mi perfil",
         "👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!" to
-            "👀 Más prendas así en mi perfil",
+            "🛍️ Más prendas así en mi perfil",
         "🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!" to
-            "🛍️ Más prendas de este estilo en mi perfil",
+            "👀 Más prendas de este estilo en mi perfil",
         "👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!" to
-            "👀 Más prendas así en mi perfil",
+            "🛍️ Más prendas así en mi perfil",
     )
 
     fun defaultTemplate(style: Int): String = TEMPLATES[style.mod(TEMPLATES.size)]
@@ -474,8 +479,18 @@ object ListingWriter {
     }
 
     /** Lowercase, no accents, spaces or symbols; no duplicates; at most [HASHTAGS_MAX]. */
-    fun clean(tags: List<String>): List<String> =
-        tags.map(::tag).filter { it.length in 2..30 }.distinct().take(HASHTAGS_MAX)
+    fun clean(tags: List<String>): List<String> {
+        val t = tags.map(::tag).filter { it.length in 2..30 }.distinct()
+        // A variant of another tag adds no search of its own: «90sfashion» next to «90s».
+        return t.filterNot { x -> t.any { y -> y != x && x.startsWith(y) && x.removePrefix(y) in FILLER_SUFFIXES } }
+            .filterNot { it in GENERIC }
+            .take(HASHTAGS_MAX)
+    }
+
+    private val FILLER_SUFFIXES = setOf("fashion", "style", "styles", "look", "looks", "vibes", "vibe", "aesthetic",
+        "outfit", "outfits", "era", "clothing", "clothes", "moda", "estilo", "ropa")
+    private val GENERIC = setOf("ootd", "aesthetic", "outfit", "fashion", "style", "moda", "instafashion", "vinted",
+        "vintedfrance", "vintedespana", "vintedes", "ropa", "clothes")
 
     private fun tag(text: String): String = java.text.Normalizer.normalize(text.lowercase(), java.text.Normalizer.Form.NFD)
         .replace(Regex("\\p{M}+"), "")

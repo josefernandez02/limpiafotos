@@ -48,6 +48,25 @@ object Catalog {
         return chosen.mapNotNull { byId[it] }.ifEmpty { album }
     }
 
+    /**
+     * One word for where [article] is in [device]'s account. This phone's account
+     * follows the PC (or what was set by hand); other accounts only have the mark
+     * «subido» from their own phones.
+     */
+    fun stage(s: ParentState, article: Article, device: Device): Stage {
+        if (article.vinted[device.id]?.status == "sold") return Stage.SOLD
+        val desk = article.desk.takeIf { device.id == s.self.id }
+        return when {
+            desk?.status == "jugado" -> Stage.PLAYED
+            desk?.status == "publicado" -> Stage.UPLOADED
+            device.id in article.uploaded -> Stage.UPLOADED
+            desk == null -> Stage.TO_UPLOAD
+            desk.status == "borrador" -> Stage.DRAFT
+            desk.needsUser -> Stage.REVIEW
+            else -> Stage.WORKING
+        }
+    }
+
     /** Where [number] stands on its way to the PC (null = never sent). */
     fun setDesk(s: ParentState, number: Int, desk: Desk?): ParentState {
         val a = article(s, number) ?: return s
