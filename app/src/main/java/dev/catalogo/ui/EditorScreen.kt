@@ -79,6 +79,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
     var waist by remember { mutableStateOf(start.flat.waist) }
     var chest by remember { mutableStateOf(start.flat.chest) }
     var length by remember { mutableStateOf(start.flat.length) }
+    var rise by remember { mutableStateOf(start.flat.rise) }
     var aiNotes by remember { mutableStateOf(start.aiNotes) }
     var lotId by remember { mutableStateOf(article?.lotId) }
     var cost by remember { mutableStateOf(Money.input(article?.cost)) }
@@ -96,7 +97,7 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
         gender = gender,
         noModel = noModel,
         noLabel = noLabel,
-        flat = Measures(waist.trim(), chest.trim(), length.trim()),
+        flat = Measures(waist.trim(), chest.trim(), length.trim(), rise.trim()),
         aiNotes = aiNotes.trim(),
     )
     val group = Garments.type(type)?.group
@@ -150,10 +151,14 @@ fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
 
             // Optional: the two that fit the garment (pecho y largo arriba, cintura y largo abajo).
             Section("Medidas en plano")
+            // Two by two so every label fits on one line: arriba pecho y largo, abajo cintura, tiro y largo.
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Cm(chest, { chest = it }, "Pecho", Modifier.weight(1f))
                 Cm(waist, { waist = it }, "Cintura", Modifier.weight(1f))
-                Cm(length, { length = it }, "Largo total", Modifier.weight(1f))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Cm(rise, { rise = it }, "Tiro", Modifier.weight(1f))
+                Cm(length, { length = it }, "Largo", Modifier.weight(1f))
             }
 
             Section("Época")

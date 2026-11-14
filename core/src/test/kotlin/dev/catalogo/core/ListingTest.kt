@@ -69,7 +69,7 @@ class ListingTest {
             ✅ Estado: Muy buen estado
             🚚 Envío: 24 horas
 
-            👀 Más prendas de este estilo en mi perfil
+            👀 Descubre más prendas similares en mi perfil
 
             #levis #levis501 #jeans #vaqueros #SH0054
             """.trimIndent(),
@@ -192,5 +192,13 @@ class HashtagCleanTest {
     fun `variants of the same search are dropped, translations stay`() {
         val t = ListingWriter.clean(listOf("levis", "jeans", "vaqueros", "90s", "90sfashion", "vintage", "vintagestyle", "ootd", "denim"))
         kotlin.test.assertEquals(listOf("levis", "jeans", "vaqueros", "90s", "vintage", "denim"), t)
+    }
+}
+
+class MeasuresTest {
+    @Test
+    fun `measures in order with rise`() {
+        kotlin.test.assertEquals("Cintura 48 cm · Tiro 29 cm · Largo 105 cm", Measures(waist = "48", length = "105", rise = "29").text())
+        kotlin.test.assertEquals("Pecho 48 cm · Largo 105 cm", Measures(chest = "48", length = "105").text())
     }
 }

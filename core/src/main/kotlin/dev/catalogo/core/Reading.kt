@@ -38,10 +38,16 @@ data class Reading(
     val flaws: List<String> = emptyList(),
     /** Other legible text and details worth knowing (lot number, patch, wash). */
     val details: List<String> = emptyList(),
+    /** "hombre" | "mujer" when the photos make it clear (label, cut, buttons…), else null. */
+    val gender: String? = null,
+    /** Cut of trousers/jeans as one of [Fits.ALL], else null. */
+    val fit: String? = null,
+    /** What the gender and the cut were decided from (shown in the log). */
+    val cues: List<String> = emptyList(),
 ) {
     val isEmpty: Boolean
         get() = composition.isEmpty() && origin == null && sizeLabel == null && brand == null && model == null &&
-            flaws.isEmpty() && details.isEmpty()
+            flaws.isEmpty() && details.isEmpty() && gender == null && fit == null
 
     /** Vinted materials from the composition, largest share first (empty when it was not read). */
     val materials: List<String> get() = Reader.materials(composition)
@@ -60,6 +66,9 @@ object Reader {
         - marca y modelo: solo si se leen en etiquetas, parches o botones (p. ej. parche "505"). Si no, null.
         - defectos: manchas, rotos, desgaste o decoloración que se vean, con dónde. Si no se ve ninguno, lista vacía.
         - detalles: otros textos legibles o detalles útiles para venderla (lote, número de patrón, pestaña roja, lavado, botones). Máximo 6, cortos.
+        - sexo: "hombre" o "mujer". Mira por este orden: lo que diga una etiqueta (Men, Women, Hombre, Mujer, Homme, Femme, Ladies); el modelo (Levi's 5xx de hombre, 3xx y 7xx de mujer); el formato de talla (W/L suele ser de hombre; 24-31 de cintura o 34-44 europea, de mujer); el patrón (tiro alto, cadera marcada, pinzas en el pecho → mujer; recto y sin entallar → hombre); en camisas y chaquetas, el lado de los botones (a la derecha del que la lleva → hombre). Si las pistas no coinciden, null.
+        - corte: solo en pantalones y vaqueros, uno de: skinny, slim, tapered, straight, relaxed, baggy, bootcut, flare, wide, mom, boyfriend. Primero lo que diga una etiqueta o parche ("Slim Fit", "Loose", "Bootcut", número de modelo). Si no, por la silueta en la foto de la prenda entera y estirada: compara el ancho del bajo con el de la rodilla y el muslo (más estrecho abajo → slim/tapered/skinny; igual → straight; más ancho abajo → bootcut/flare; todo amplio → relaxed/baggy/wide). Si la foto no lo deja claro, null.
+        - pistas: frases cortas con lo que te ha hecho decidir el sexo y el corte (p. ej. "etiqueta W32 L32", "pernera recta del muslo al bajo"). Máximo 4.
         Si dudas entre dos lecturas, no pongas ninguna. Es mejor dejar un campo vacío que inventar.
     """.trimIndent()
 
@@ -94,6 +103,9 @@ object Reader {
             "modelo" to str(true),
             "defectos" to arr(5),
             "detalles" to arr(6),
+            "sexo" to buildJsonObject { put("type", "STRING"); put("nullable", true); putJsonArray("enum") { add("hombre"); add("mujer") } },
+            "corte" to buildJsonObject { put("type", "STRING"); put("nullable", true); putJsonArray("enum") { Fits.ALL.forEach { add(it) } } },
+            "pistas" to arr(4),
         )
         return buildJsonObject {
             put("type", "OBJECT")
@@ -121,6 +133,9 @@ object Reader {
             model = s("modelo")?.take(40),
             flaws = l("defectos", 5, 80),
             details = l("detalles", 6, 80),
+            gender = s("sexo")?.lowercase()?.takeIf { it == "hombre" || it == "mujer" },
+            fit = Fits.normalize(s("corte")),
+            cues = l("pistas", 4, 80),
         )
     }
 
@@ -177,6 +192,9 @@ object Reader {
             put("modelo", r.model)
             putJsonArray("defectos") { r.flaws.forEach { add(it) } }
             putJsonArray("detalles") { r.details.forEach { add(it) } }
+            put("sexo", r.gender)
+            put("corte", r.fit)
+            putJsonArray("pistas") { r.cues.forEach { add(it) } }
         }
     }
 

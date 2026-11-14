@@ -94,3 +94,27 @@ class StageTest {
         assertEquals(Stage.UPLOADED, st(null, setOf("me")))
     }
 }
+
+class FitsTest {
+    @Test
+    fun `the cut decides the jeans category and the model number wins`() {
+        assertEquals(Fits.SLIM, Fits.ofModel("Levi's", "511"))
+        assertEquals(Fits.STRAIGHT, Fits.ofModel("Levis", "505 Regular"))
+        assertEquals(Fits.BAGGY, Fits.normalize("Loose Straight"))
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Fits.jeansCategory(Gender.MEN, Fits.STRAIGHT))
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros de campana", Fits.jeansCategory(Gender.WOMEN, Fits.BOOTCUT))
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", Fits.forGender("Hombre › Ropa › Vaqueros › Vaqueros rectos", Gender.WOMEN))
+        // The AI said «ajustados» but the patch reads 505: straight.
+        val jeans = Listing(type = "jeans", brand = "Levi's", model = "505", gender = Gender.MEN)
+        val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","corte":"slim",
+            "categoria":"Hombre › Ropa › Vaqueros › Vaqueros ajustados","colores":["Azul"],"materiales":[],"dudas":["categoria"],
+            "marca":null,"modelo":null,"talla":null,"titulos":{"SH":"Levi's 505 Jeans Blue"},"hashtags":["levis"]}"""
+        val s = Ai.parse(answer, jeans, listOf(Ai.Account("a", "SH", 0)))
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", s.category)
+        assertTrue("categoria" !in s.doubts)
+        // A women's label read in the photos moves the category to Mujer.
+        val r = Reading(gender = "mujer", fit = Fits.STRAIGHT)
+        val s2 = Ai.parse(answer, jeans.copy(gender = null, model = ""), listOf(Ai.Account("a", "SH", 0)), r)
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s2.category)
+    }
+}

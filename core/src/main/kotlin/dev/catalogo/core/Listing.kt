@@ -81,11 +81,11 @@ data class Listing(
 
 /** Main flat measures in centimetres; blank when not taken. */
 @Serializable
-data class Measures(val waist: String = "", val chest: String = "", val length: String = "") {
-    fun isEmpty() = waist.isBlank() && chest.isBlank() && length.isBlank()
+data class Measures(val waist: String = "", val chest: String = "", val length: String = "", val rise: String = "") {
+    fun isEmpty() = waist.isBlank() && chest.isBlank() && length.isBlank() && rise.isBlank()
 
-    /** "Pecho 55 cm · Largo 70 cm" or "Cintura 42 cm · Largo 104 cm": only the ones written. */
-    fun text(): String = listOf("Pecho" to chest, "Cintura" to waist, "Largo" to length)
+    /** "Pecho 55 cm · Largo 70 cm" or "Cintura 48 cm · Tiro 29 cm · Largo 105 cm": only the ones written. */
+    fun text(): String = listOf("Pecho" to chest, "Cintura" to waist, "Tiro" to rise, "Largo" to length)
         .filter { it.second.isNotBlank() }
         .joinToString(" · ") { "${it.first} ${it.second.trim()} cm" }
 }
@@ -267,7 +267,7 @@ object ListingWriter {
         ✅ Estado: {estado}
         🚚 Envío: 24 horas
 
-        👀 Más prendas de este estilo en mi perfil
+        👀 Descubre más prendas similares en mi perfil
 
         {hashtags}
         """,
@@ -286,9 +286,10 @@ object ListingWriter {
 
     /** Lines of older templates: dropped (null) or replaced by the current wording. */
     private val LEGACY_LINES: Map<String, String?> = mapOf(
+        "👀 Más prendas de este estilo en mi perfil" to "👀 Descubre más prendas similares en mi perfil",
         "📏 Medidas en plano: {medidas}" to "📏 Medidas: {medidas}",
         "✨ Estado: {estado}" to "✅ Estado: {estado}",
-        "🛍️ Más prendas de este estilo en mi perfil" to "👀 Más prendas de este estilo en mi perfil",
+        "🛍️ Más prendas de este estilo en mi perfil" to "👀 Descubre más prendas similares en mi perfil",
         "✅ {estado}" to "✨ {estado}",
         "👀 Más prendas así en mi perfil" to "🛍️ Más prendas así en mi perfil",
         "📝 Medidas tomadas en plano, aproximadas. Tómalas como referencia junto a la talla." to null,
@@ -299,11 +300,11 @@ object ListingWriter {
         "👕 Talla: {talla}" to "🏷️ Talla: {talla}",
         "📦 Envío: En 24 horas" to "🚚 Envío: 24 horas",
         "🛍️ Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar." to
-            "👀 Más prendas de este estilo en mi perfil",
+            "👀 Descubre más prendas similares en mi perfil",
         "👀 Tengo más prendas de este estilo en mi perfil, ¡échales un ojo!" to
             "🛍️ Más prendas así en mi perfil",
         "🛍️ ¡Echa un vistazo a mi perfil, tengo más prendas de este estilo que te pueden gustar!" to
-            "👀 Más prendas de este estilo en mi perfil",
+            "👀 Descubre más prendas similares en mi perfil",
         "👀 ¡Tengo más prendas de este estilo en mi perfil, échales un ojo!" to
             "🛍️ Más prendas así en mi perfil",
     )

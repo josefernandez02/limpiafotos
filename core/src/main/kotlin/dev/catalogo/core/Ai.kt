@@ -163,8 +163,9 @@ object Ai {
               · Si no hay base razonable, null.
             - tipo_prenda: uno de TIPOS. Si viene, devuelve ese.
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
-            - sexo: "hombre" o "mujer", según corte, marca, modelo, talla y etiquetas. Si viene, devuelve ese.
-            - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda y el sexo.
+            - sexo: "hombre" o "mujer". Si viene en DATOS_DEL_USUARIO, ese. Si no, el de LECTURA_DE_ETIQUETAS si lo trae. Si no, decide con etiquetas, modelo (Levi's 5xx hombre, 3xx/7xx mujer), formato de talla (W/L suele ser hombre; 24-31 o 34-44 mujer) y patrón (tiro alto y cadera marcada → mujer).
+            - corte: en pantalones y vaqueros, uno de skinny, slim, tapered, straight, relaxed, baggy, bootcut, flare, wide, mom, boyfriend; el de LECTURA_DE_ETIQUETAS si lo trae (manda el número de modelo: Levi's 501/505/514 straight, 511 slim, 512 tapered, 510 skinny, 517 bootcut, 550 relaxed, 568/569/578 baggy). Si no, por la silueta: compara el bajo con la rodilla y el muslo. En otras prendas, null.
+            - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda, el sexo y el corte (vaqueros straight → Vaqueros rectos; slim/tapered → Vaqueros ajustados o pitillo; bootcut/flare de mujer → Vaqueros de campana). Debe empezar por el sexo elegido.
             - materiales: de MATERIALES, hasta 3. Si hay composición (en LECTURA_DE_ETIQUETAS o en una foto), SOLO los de la composición (100% algodón → Algodón; 98% algodón 2% elastano → Algodón, Elastano), aunque la prenda sea vaquera. Sin composición, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
             - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Nunca pongas talla si sin_etiqueta_de_talla es true (el vendedor tampoco la sabe: decide tú con las medidas y las fotos) ni materiales si notas_del_vendedor dice el material. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
             - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
@@ -299,6 +300,7 @@ object Ai {
             "palabras" to arr(str(Garments.keywords.filter { it.kind != KeywordKind.EPOCH }.map { it.id })),
             "sexo" to str(listOf("hombre", "mujer"), nullable = true),
             // Free text checked afterwards: an enum of hundreds of paths makes the answer much slower.
+            "corte" to str(Fits.ALL, nullable = true),
             "categoria" to str(nullable = true),
             "colores" to arr(str(Vinted.colors), max = Vinted.MAX_COLORS),
             "materiales" to arr(str(Vinted.materials), max = Vinted.MAX_MATERIALS),
@@ -339,9 +341,12 @@ object Ai {
             "mujer" -> Gender.WOMEN
             else -> null
         }
-        val finalGender = listing.gender ?: gender
-        val category = o["categoria"]?.str()?.let(::matchCategory)
-            ?.takeIf { finalGender == null || it.startsWith(finalGender.label + " ") }
+        // A gender read on a label (or clear from the cut) wins over the listing call's guess.
+        val readGender = when (reading?.gender) { "hombre" -> Gender.MEN; "mujer" -> Gender.WOMEN; else -> null }
+        val finalGender = listing.gender ?: readGender ?: gender
+        var category = o["categoria"]?.str()?.let(::matchCategory)?.let { c ->
+            if (finalGender == null) c else Fits.forGender(c, finalGender) ?: c.takeIf { Fits.isJeans(it) }   // same category, right gender
+        }
         val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2).let { c ->
             if (c.size == 2 && SHADES.any { c[0] in it && c[1] in it }) c.take(1) else c
         }
@@ -364,10 +369,21 @@ object Ai {
         // Then what the seller wrote («es lana»): nothing to ask about it.
         val read = reading?.materials.orEmpty().ifEmpty { Reader.materials(listOf(listing.aiNotes)) }
         val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
+        // Jeans: the cut decides the category. A model number is a fact (Levi's 511 → slim);
+        // then the reading call's cut, then the listing call's.
+        val modelFit = Fits.ofModel(listing.brand.ifBlank { brand.orEmpty() }, listing.model.ifBlank { model.orEmpty() })
+        val fit = modelFit ?: reading?.fit ?: Fits.normalize(o["corte"]?.str())
+        val byFit = category?.takeIf { Fits.isJeans(it) }?.let { c ->
+            val g = finalGender ?: if (c.startsWith(Gender.WOMEN.label)) Gender.WOMEN else Gender.MEN
+            fit?.let { Fits.jeansCategory(g, it) }
+        }
+        if (byFit != null) category = byFit
+        if (finalGender != null && category?.startsWith(finalGender.label + " ") == false) category = null   // never the wrong gender
         val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
             .filterNot { it == "materiales" && read.isNotEmpty() }
             .filterNot { it == "talla" && listing.noLabel }      // the seller has no label either: the AI decides
-        return AiSuggestion(type, keywords, gender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
+            .filterNot { it == "categoria" && byFit != null && modelFit != null }   // the model number settles it
+        return AiSuggestion(type, keywords, finalGender, category, colors, sizeLabel, titles, findings, hashtags, brand, model,
             materials, doubts, reading)
     }
 
