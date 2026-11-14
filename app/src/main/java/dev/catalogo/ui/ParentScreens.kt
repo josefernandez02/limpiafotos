@@ -1,5 +1,7 @@
 package dev.catalogo.ui
 
+import androidx.compose.material.icons.filled.Close
+
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -101,6 +103,10 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val outbox by vm.outbox.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf<Filter>(Filter.All) }
+    // Long press: select several to change their status at once.
+    var selected by remember { mutableStateOf(setOf<Int>()) }
+    var bulk by remember { mutableStateOf(false) }
+    androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
     val devices = Catalog.devices(p)
     // Sold or deleted articles stay only until the other phones confirm; they are not shown.
     val active = p.articles.filter { !it.released }.sortedByDescending { it.number }
@@ -114,13 +120,21 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     }
     Scaffold(
         topBar = {
-            Header("Artículos", if (active.size == 1) "1 en catálogo" else "${active.size} en catálogo") {
-                IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
+            if (selected.isNotEmpty()) {
+                Header(if (selected.size == 1) "1 seleccionado" else "${selected.size} seleccionados") {
+                    TextButton(onClick = { selected = shown.map { it.number }.toSet() }) { Text("Todos") }
+                    FilledTonalButton(onClick = { bulk = true }, shape = RoundedCornerShape(14.dp)) { Text("Cambiar estado") }
+                    IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, contentDescription = "Cancelar") }
+                }
+            } else {
+                Header("Artículos", if (active.size == 1) "1 en catálogo" else "${active.size} en catálogo") {
+                    IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
+                }
             }
         },
         bottomBar = { MainTabs(vm, Screen.Home) },
         floatingActionButton = {
-            FloatingActionButton(
+            if (selected.isEmpty()) FloatingActionButton(
                 onClick = { vm.go(Screen.Editor(null)) },
                 shape = RoundedCornerShape(18.dp),
                 containerColor = MaterialTheme.colorScheme.primary,
@@ -174,14 +188,33 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             }
             if (shown.isEmpty()) item(key = "none") { Muted("Ningún artículo", Modifier.padding(start = 4.dp, top = 16.dp)) }
             items(shown, key = { it.number }) { a ->
-                ArticleRow(vm, p, a, covers[a.number], outbox.values.sumOf { it[a.number] ?: 0 }, Modifier.animateItem())
+                val n = a.number
+                ArticleRow(
+                    vm, p, a, covers[n], outbox.values.sumOf { it[n] ?: 0 }, Modifier.animateItem(),
+                    selected = n in selected,
+                    onClick = { if (selected.isEmpty()) vm.go(Screen.Article(n)) else selected = if (n in selected) selected - n else selected + n },
+                    onLongClick = { selected = if (n in selected) selected - n else selected + n },
+                )
             }
         }
+    }
+    if (bulk) {
+        StageManyDialog(vm, selected.toList(), onDismiss = { bulk = false }, onDone = { selected = emptySet() })
     }
 }
 
 @Composable
-private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: android.net.Uri?, sending: Int, modifier: Modifier) {
+private fun ArticleRow(
+    vm: MainViewModel,
+    p: ParentState,
+    a: Article,
+    cover: android.net.Uri?,
+    sending: Int,
+    modifier: Modifier,
+    selected: Boolean = false,
+    onClick: () -> Unit = { vm.go(Screen.Article(a.number)) },
+    onLongClick: (() -> Unit)? = null,
+) {
     // Until the AI writes the title, the row shows what was typed instead of a provisional title.
     val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
         ?: a.listing?.let { l ->
@@ -189,7 +222,7 @@ private fun ArticleRow(vm: MainViewModel, p: ParentState, a: Article, cover: and
         }
     val devices = Catalog.devices(p)
     val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
-    Tile(modifier, onClick = { vm.go(Screen.Article(a.number)) }) {
+    Tile(modifier, onClick = onClick, onLongClick = onLongClick, selected = selected) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             Cover(cover, size = 64.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {

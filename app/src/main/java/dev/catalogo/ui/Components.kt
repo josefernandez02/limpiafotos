@@ -10,6 +10,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -115,15 +116,28 @@ fun Cover(uri: Uri?, size: Dp = 56.dp) {
 const val GAP = "\u2003"
 
 /** Rounded surface block used for every list item. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun Tile(modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+fun Tile(
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    selected: Boolean = false,
+    content: @Composable ColumnScope.() -> Unit,
+) {
     val shape = RoundedCornerShape(20.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
             .clip(shape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .let { if (onClick != null) it.clickable(onClick = onClick) else it }
+            .background(if (selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainer)
+            .let {
+                when {
+                    onLongClick != null -> it.combinedClickable(onClick = { onClick?.invoke() }, onLongClick = onLongClick)
+                    onClick != null -> it.clickable(onClick = onClick)
+                    else -> it
+                }
+            }
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = content,

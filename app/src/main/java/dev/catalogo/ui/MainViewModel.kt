@@ -282,6 +282,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = "Estado: ${stage.label}"
     }
 
+    /** The same status for several articles; those the PC cannot change now are reported. */
+    fun setStageMany(numbers: List<Int>, stage: dev.catalogo.core.Stage) = run {
+        val failed = mutableListOf<Int>()
+        for (n in numbers) runCatching { app.drafts.setStage(n, stage) }.onFailure { failed += n }
+        _message.value = if (failed.isEmpty()) "${numbers.size} en «${stage.label}»"
+        else "${numbers.size - failed.size} cambiados; ${failed.size} no (¿PC sin conexión?)"
+    }
+
     fun setMode(number: Int, mode: String) = run {
         app.drafts.setMode(number, mode)
         _message.value = dev.catalogo.core.Mode.label(mode)

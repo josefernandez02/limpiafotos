@@ -210,6 +210,37 @@ private fun SecondButton(text: String, onClick: () -> Unit) {
     ) { OneLine(text) }
 }
 
+/** Status for several articles at once (long press in the list). */
+@Composable
+fun StageManyDialog(vm: MainViewModel, numbers: List<Int>, onDismiss: () -> Unit, onDone: () -> Unit) {
+    val options = listOf(Stage.TO_UPLOAD, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED)
+    var picked by remember { mutableStateOf<Stage?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (numbers.size == 1) "Cambiar estado" else "Cambiar estado de ${numbers.size}") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (o in options) {
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { picked = o }.padding(vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = picked == o, onClick = { picked = o })
+                        Text(o.label, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { picked?.let { vm.setStageMany(numbers, it) }; onDismiss(); onDone() }, enabled = picked != null) {
+                Text("Guardar")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+    )
+}
+
 /**
  * Where the article stands, set by hand (done by hand, or the system got it wrong).
  * The PC is told, so it does not like a link twice or publish a draft that must stay one.
