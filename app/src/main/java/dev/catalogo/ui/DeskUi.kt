@@ -92,15 +92,16 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
         when (stage) {
             Stage.TO_UPLOAD -> {
                 ModePicker(mode) { mode = it }
+                Muted(
+                    when (mode) {
+                        Mode.DRAFT -> "Crea el borrador en Vinted y lo deja ahí hasta que digas."
+                        Mode.PLAY -> "Ya está subido: su link va al siguiente juego."
+                        else -> "Crea el borrador, lo publica justo antes del siguiente juego y le da likes."
+                    },
+                )
                 if (mode == Mode.PLAY) {
-                    OutlinedTextField(
-                        value = link,
-                        onValueChange = { link = it.trim() },
-                        label = { Text("Link del artículo en Vinted") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    MainButton("Añadir a los juegos", enabled = link.isNotBlank()) { vm.playOnly(article.number, link) }
+                    LinkField(link) { link = it }
+                    MainButton("Añadir a los juegos", enabled = vintedLink(link) != null) { vm.playOnly(article.number, vintedLink(link)!!) }
                 } else {
                     if (article.price == null) Muted("Falta el precio de Vinted (Editar)")
                     MainButton("Preparar borrador") { choosing = true }
@@ -135,7 +136,7 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
             }
             Stage.DRAFT -> {
                 val onlyDraft = desk?.mode == Mode.DRAFT
-                Muted(if (onlyDraft) "Se queda como borrador: el PC no lo publica." else "Se publicará cuando un juego necesite un link.")
+                Muted(if (onlyDraft) "Se queda como borrador: el PC no lo publica." else "Se publicará justo antes del siguiente juego.")
                 if (onlyDraft) MainButton("Subir y jugar") { vm.setMode(article.number, Mode.UPLOAD_PLAY) }
                 else SecondButton("Dejar solo como borrador") { vm.setMode(article.number, Mode.DRAFT) }
             }
@@ -143,14 +144,8 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
                 val waiting = desk?.mode == Mode.PLAY || desk?.status == "publicado" && desk.mode == Mode.UPLOAD_PLAY
                 Muted(if (waiting) "Sin jugar: irá al siguiente juego." else "Subido. No está en los juegos.")
                 if (!waiting) {
-                    OutlinedTextField(
-                        value = link,
-                        onValueChange = { link = it.trim() },
-                        label = { Text("Link del artículo en Vinted") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    MainButton("Meter en los juegos", enabled = link.isNotBlank()) { vm.playOnly(article.number, link) }
+                    LinkField(link) { link = it }
+                    MainButton("Meter en los juegos", enabled = vintedLink(link) != null) { vm.playOnly(article.number, vintedLink(link)!!) }
                 }
             }
             Stage.PLAYED -> Muted(desk?.game?.takeIf { it.isNotBlank() }?.let { "Jugado en $it." } ?: "Jugado.")
@@ -171,6 +166,25 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
         )
     }
     if (changing) StageDialog(vm, article, stage, onDismiss = { changing = false })
+}
+
+/** The article's Vinted link from whatever was pasted (share text included), or null. */
+private fun vintedLink(text: String): String? =
+    Regex("""(?:https?://)?(?:www\.)?vinted\.[a-z.]{2,8}/items/\d+[^\s]*""").find(text)?.value
+        ?.let { if (it.startsWith("http")) it.replaceFirst("http://", "https://") else "https://$it" }
+
+@Composable
+private fun LinkField(link: String, onChange: (String) -> Unit) {
+    val bad = link.isNotBlank() && vintedLink(link) == null
+    OutlinedTextField(
+        value = link,
+        onValueChange = { onChange(it.trim()) },
+        label = { Text("Link del artículo en Vinted") },
+        singleLine = true,
+        isError = bad,
+        supportingText = if (bad) ({ Text("No es un link de un artículo de Vinted") }) else null,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /** What to do with the article: three equal options, one line each. */
