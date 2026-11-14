@@ -1,5 +1,11 @@
 package dev.catalogo.data
 
+import kotlinx.coroutines.coroutineScope
+
+import kotlinx.coroutines.awaitAll
+
+import kotlinx.coroutines.async
+
 import android.util.Log
 
 import dev.catalogo.core.AiException
@@ -222,8 +228,10 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                         continue
                     }
                     val before = a.desk!!.status
+                    // A state set by hand meanwhile wins: the PC is told first, then it answers.
                     repo.updateDesk(a.number) { d ->
-                        d?.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
+                        if (d == null || d.pending.isNotBlank()) d
+                        else d.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
                     }
                     if (before != job.status) {
                         AppLog.i("cola", "${job.ref} PC: $before -> ${job.status} ${job.message.take(160)}")
@@ -266,7 +274,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * likes a link twice or publishes a draft that must stay a draft. If the PC
      * cannot be reached, the change stays here and is sent on the next check.
      */
-    suspend fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "") {
+    suspend fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "", notify: Boolean = true) {
         val p = repo.state.parent ?: return
         val a = current(number) ?: return
         val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
@@ -295,13 +303,34 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             val base = d ?: DeskState(ref, status, at = System.currentTimeMillis())
             // Marked «Subido» by hand: it does not go to a game unless asked («Meter en los juegos»).
             // An article the PC published and is waiting for its game keeps its place.
-            val mode = if (stage == dev.catalogo.core.Stage.UPLOADED && d?.status != "publicado") dev.catalogo.core.Mode.DRAFT else base.mode
+            // Marked «Borrador» by hand: it stays a draft until «Subir y jugar» is pressed.
+            val mode = when {
+                stage == dev.catalogo.core.Stage.DRAFT && d?.status != "borrador" -> dev.catalogo.core.Mode.DRAFT
+                stage == dev.catalogo.core.Stage.UPLOADED && d?.status != "publicado" -> dev.catalogo.core.Mode.DRAFT
+                else -> base.mode
+            }
             base.copy(ref = ref, status = status, message = "", doubts = emptyList(), url = cleanUrl,
                 pending = status, mode = mode, at = System.currentTimeMillis())
         }
         repo.setUploaded(number, p.self.id, stage != dev.catalogo.core.Stage.DRAFT)
         AppLog.i("cola", "$ref a mano: $status")
-        push(number)
+        if (notify) push(number)
+    }
+
+    /**
+     * The same status for several articles. Everything changes here at once; the PC is told
+     * in parallel afterwards (if it cannot hear it now, the next check sends it). Returns the
+     * articles that could not change («Por subir» needs the PC to drop them first).
+     */
+    suspend fun setStageMany(numbers: List<Int>, stage: dev.catalogo.core.Stage): List<Int> = coroutineScope {
+        val failed = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        if (stage == dev.catalogo.core.Stage.TO_UPLOAD) {
+            numbers.map { n -> async { runCatching { setStage(n, stage) }.onFailure { failed += n } } }.awaitAll()
+        } else {
+            for (n in numbers) runCatching { setStage(n, stage, notify = false) }.onFailure { failed += n }
+            numbers.filter { it !in failed }.map { n -> async { push(n) } }.awaitAll()
+        }
+        failed.toList()
     }
 
     /** What to do with it (only before the PC acts, or for a draft / an uploaded article). */

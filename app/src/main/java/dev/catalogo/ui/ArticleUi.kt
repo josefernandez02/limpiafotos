@@ -71,18 +71,43 @@ private fun accountColor(label: String): Color {
     return Color(palette[(label.lowercase().hashCode() and 0x7fffffff) % palette.size])
 }
 
+/** Real profile pictures of known accounts (the same one as in Vinted). */
+private fun accountPhoto(label: String): Int? = when {
+    "shiora" in label.lowercase() -> dev.catalogo.R.drawable.avatar_shiora
+    else -> null
+}
+
 @Composable
 fun AccountAvatar(label: String, size: Int = 22) {
+    val photo = accountPhoto(label)
     Box(
         Modifier.size(size.dp).clip(CircleShape).background(accountColor(label)),
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            label.trim().firstOrNull()?.uppercase() ?: "?",
-            color = Color(0xFF0E0F11),
-            fontWeight = FontWeight.Bold,
-            fontSize = (size * 0.5f).sp,
-        )
+        if (photo != null) {
+            androidx.compose.foundation.Image(
+                androidx.compose.ui.res.painterResource(photo),
+                contentDescription = label,
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                modifier = Modifier.size(size.dp),
+            )
+        } else {
+            // Without font padding and with the line trimmed, the letter sits in the exact centre.
+            Text(
+                label.trim().firstOrNull()?.uppercase() ?: "?",
+                color = Color(0xFF0E0F11),
+                fontWeight = FontWeight.Bold,
+                fontSize = (size * 0.48f).sp,
+                style = androidx.compose.ui.text.TextStyle(
+                    platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false),
+                    lineHeight = (size * 0.48f).sp,
+                    lineHeightStyle = androidx.compose.ui.text.style.LineHeightStyle(
+                        androidx.compose.ui.text.style.LineHeightStyle.Alignment.Center,
+                        androidx.compose.ui.text.style.LineHeightStyle.Trim.Both,
+                    ),
+                ),
+            )
+        }
     }
 }
 

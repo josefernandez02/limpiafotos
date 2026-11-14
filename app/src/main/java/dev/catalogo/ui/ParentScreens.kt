@@ -1,5 +1,11 @@
 package dev.catalogo.ui
 
+import androidx.compose.foundation.layout.statusBarsPadding
+
+import androidx.compose.foundation.layout.navigationBarsPadding
+
+import androidx.compose.material3.Surface
+
 import androidx.compose.material.icons.filled.Close
 
 import android.content.ActivityNotFoundException
@@ -121,18 +127,30 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     Scaffold(
         topBar = {
             if (selected.isNotEmpty()) {
-                Header(if (selected.size == 1) "1 seleccionado" else "${selected.size} seleccionados") {
-                    TextButton(onClick = { selected = shown.map { it.number }.toSet() }) { Text("Todos") }
-                    FilledTonalButton(onClick = { bulk = true }, shape = RoundedCornerShape(14.dp)) { Text("Cambiar estado") }
-                    IconButton(onClick = { selected = emptySet() }) { Icon(Icons.Default.Close, contentDescription = "Cancelar") }
-                }
+                val all = shown.isNotEmpty() && shown.all { it.number in selected }
+                SelectionBar(
+                    count = selected.size,
+                    all = all,
+                    onAll = { selected = if (all) emptySet() else shown.map { it.number }.toSet() },
+                    onClose = { selected = emptySet() },
+                )
             } else {
                 Header("Artículos", if (active.size == 1) "1 en catálogo" else "${active.size} en catálogo") {
                     IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
                 }
             }
         },
-        bottomBar = { MainTabs(vm, Screen.Home) },
+        bottomBar = {
+            if (selected.isNotEmpty()) {
+                Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+                    FilledTonalButton(
+                        onClick = { bulk = true },
+                        modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp).height(52.dp),
+                        shape = RoundedCornerShape(16.dp),
+                    ) { Text("Cambiar estado", maxLines = 1) }
+                }
+            } else MainTabs(vm, Screen.Home)
+        },
         floatingActionButton = {
             if (selected.isEmpty()) FloatingActionButton(
                 onClick = { vm.go(Screen.Editor(null)) },
@@ -215,11 +233,12 @@ private fun ArticleRow(
     onClick: () -> Unit = { vm.go(Screen.Article(a.number)) },
     onLongClick: (() -> Unit)? = null,
 ) {
-    // Until the AI writes the title, the row shows what was typed instead of a provisional title.
-    val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
-        ?: a.listing?.let { l ->
-            listOf(if (l.noBrand) "Sin marca" else l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" ").ifBlank { null }
-        }
+    // Short and readable: brand and model («Levi's 512»), or brand and garment when there is
+    // no model. The long Vinted title is in the article page.
+    val title = a.listing?.let { l ->
+        val what = l.model.ifBlank { dev.catalogo.core.Garments.type(l.type)?.label.orEmpty().lowercase() }
+        listOf(l.brand, what).filter { it.isNotBlank() }.joinToString(" ").ifBlank { null }
+    }
     val devices = Catalog.devices(p)
     val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
     Tile(modifier, onClick = onClick, onLongClick = onLongClick, selected = selected) {
@@ -490,5 +509,25 @@ fun ReviewScreen(vm: MainViewModel, p: ParentState) {
                 }
             }
         }
+    }
+}
+
+
+/** Compact bar while several articles are selected: count, select all, close. */
+@Composable
+private fun SelectionBar(count: Int, all: Boolean, onAll: () -> Unit, onClose: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 4.dp, end = 8.dp, top = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onClose) { Icon(Icons.Default.Close, contentDescription = "Cancelar") }
+        Text(
+            if (count == 1) "1 seleccionado" else "$count seleccionados",
+            style = MaterialTheme.typography.titleLarge,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f).padding(start = 4.dp),
+        )
+        TextButton(onClick = onAll) { Text(if (all) "Ninguno" else "Todos", maxLines = 1) }
     }
 }
