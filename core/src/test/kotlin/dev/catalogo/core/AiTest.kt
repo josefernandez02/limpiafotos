@@ -52,13 +52,13 @@ class AiTest {
     }
 
     @Test
-    fun `wrong gender category, unknown values and duplicated titles are dropped`() {
+    fun `wrong gender category moves to the same one, unknown values and duplicated titles are dropped`() {
         val answer = """{"tipo_prenda":"spaceship","palabras":[],"sexo":"mujer",
             "categoria":"Hombre › Ropa › Vaqueros › Vaqueros rectos","colores":["Azulado"],"talla_etiqueta":"M",
             "titulos":{"SH":"Same Title","SA":"same title"}}"""
         val s = Ai.parse(answer, Listing(), accounts)
         assertNull(s.type)
-        assertNull(s.category)
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s.category)
         assertEquals(emptyList(), s.colors)
         assertEquals("M", s.sizeLabel)
         assertEquals(mapOf("p" to "Same Title"), s.titles)
