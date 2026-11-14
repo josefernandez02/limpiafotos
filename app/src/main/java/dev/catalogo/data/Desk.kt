@@ -33,14 +33,30 @@ class Desk(private val resolver: ContentResolver) {
     data class Job(val ref: String, val status: String, val message: String, val itemId: String, val url: String, val game: String)
 
     /** The PC program: what it is doing and what comes next. */
-    data class Status(val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>)
+    data class Status(val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>, val incidents: Int = 0)
+
+    /** A game link that got no like after several tries: to look at by hand. */
+    data class Incident(val id: String, val at: Long, val game: String, val url: String, val reason: String)
 
     private val json = Json { ignoreUnknownKeys = true }
 
     fun status(link: PcLink): Status {
         val o = call(link, "GET", "/estado", null)
         val queue = (o["cola"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
-        return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue)
+        return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
+            o.str("incidencias").toIntOrNull() ?: 0)
+    }
+
+    fun incidents(link: PcLink): List<Incident> =
+        (call(link, "GET", "/incidencias", null)["incidencias"] as? JsonArray).orEmpty().mapNotNull { e ->
+            (e as? JsonObject)?.let {
+                Incident(it.str("id"), ((it.str("cuando").toDoubleOrNull() ?: 0.0) * 1000).toLong(),
+                    it.str("juego"), it.str("url"), it.str("motivo"))
+            }
+        }
+
+    fun reviewed(link: PcLink, id: String) {
+        call(link, "POST", "/incidencias/${enc(id)}/revisada", "{}")
     }
 
     fun jobs(link: PcLink): List<Job> =

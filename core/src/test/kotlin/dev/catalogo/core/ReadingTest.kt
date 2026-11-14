@@ -118,3 +118,14 @@ class FitsTest {
         assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s2.category)
     }
 }
+
+class CategoryFamilyTest {
+    @Test
+    fun `the garment type narrows the categories the AI sees`() {
+        val jeans = Ai.categoriesFor(Gender.MEN, "jeans")
+        assertTrue(jeans.isNotEmpty() && jeans.all { it.startsWith("Hombre › Ropa › Vaqueros") }, jeans.toString())
+        val hoodies = Ai.categoriesFor(Gender.WOMEN, "hoodie")
+        assertTrue(hoodies.all { "Jerséis y sudaderas" in it }, hoodies.toString())
+        assertEquals(Ai.categoriesFor(Gender.MEN), Ai.categoriesFor(Gender.MEN, ""))    // unknown type: all
+    }
+}

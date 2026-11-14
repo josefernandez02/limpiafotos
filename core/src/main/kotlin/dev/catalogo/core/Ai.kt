@@ -158,14 +158,17 @@ object Ai {
             - marca: solo si marca es null. Escríbela si se lee o es inconfundible (p. ej. la pestaña roja de Levi's en el bolsillo trasero). Si no, null. Si es "SIN MARCA", null.
             - modelo: solo si modelo es null y se lee en una etiqueta o parche (p. ej. "501" en el parche de cuero). Si no, null.
             - talla: solo si talla es null. Primero la que se lea en una etiqueta, tal cual. Si no hay etiqueta, estímala con las medidas en plano, la forma y las fotos:
-              · Pantalones de hombre: W = cintura en plano × 2 / 2,54, redondeada (42 cm → W33). Nunca confundas los cm con la W.
-              · Pantalones de mujer y todo lo demás: talla en letra XS, S, M, L, XL o XXL (el pecho en plano manda en prendas de arriba).
-              · Si no hay base razonable, null.
+              · Pantalones de hombre: W = cintura en plano × 2 / 2,54, redondeada (42 cm → W33). Nunca confundas los cm con la W. Tiro y largo solo confirman proporciones.
+              · Pantalones de mujer y todo lo demás: talla en letra XS, S, M, L, XL o XXL. En prendas de arriba manda el pecho en plano (hombros apoyan; largo y manga solos son señales débiles); en chaquetas y abrigos, el pecho contando la holgura normal de una prenda de abrigo.
+              · Vaqueros de mujer con etiqueta W: equivalencia W23-24=XXS, W25-26=XS, W27-28=S, W29-30=M, W31-32=L, W33-34=XL, W35-36=XXL (W30 de mujer NO es S).
+              · Un número suelto en una etiqueta de vaqueros (30, 32) suele ser la W; en otras prendas no supongas W ni EU por parecido.
+              · Etiqueta de EDAD infantil (12 years, 14Y, 16 años): no es una talla adulta; estima por las medidas o null, y no la menciones en título ni hashtags.
+              · Una etiqueta adulta legible manda sobre las medidas. Si no hay base razonable, null.
             - tipo_prenda: uno de TIPOS. Si viene, devuelve ese.
             - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
             - sexo: "hombre" o "mujer". Si viene en DATOS_DEL_USUARIO, ese. Si no, el de LECTURA_DE_ETIQUETAS si lo trae. Si no, decide con etiquetas, modelo (Levi's 5xx hombre, 3xx/7xx mujer), formato de talla (W/L suele ser hombre; 24-31 o 34-44 mujer) y patrón (tiro alto y cadera marcada → mujer).
             - corte: en pantalones y vaqueros, uno de skinny, slim, tapered, straight, relaxed, baggy, bootcut, flare, wide, mom, boyfriend; el de LECTURA_DE_ETIQUETAS si lo trae (manda el número de modelo: Levi's 501/505/514 straight, 511 slim, 512 tapered, 510 skinny, 517 bootcut, 550 relaxed, 568/569/578 baggy). Si no, por la silueta: compara el bajo con la rodilla y el muslo. En otras prendas, null.
-            - categoria: copia EXACTA de una línea de CATEGORIAS, la más concreta que encaje con la prenda, el sexo y el corte (vaqueros straight → Vaqueros rectos; slim/tapered → Vaqueros ajustados o pitillo; bootcut/flare de mujer → Vaqueros de campana). Debe empezar por el sexo elegido.
+            - categoria: copia EXACTA de una línea de CATEGORIAS: la FINAL más concreta (la línea más larga que siga siendo cierta), coherente con tipo_prenda, el sexo y el corte (vaqueros straight → Vaqueros rectos; slim/tapered → Vaqueros ajustados o pitillo; bootcut/flare de mujer → Vaqueros de campana; sudadera con capucha → Sudaderas y sudaderas con capucha; con cremallera → Sudaderas con cremallera; jersey de punto → el de su cuello (Cuello redondo, Cuello de pico, Cuello alto) o De punto; camiseta de manga larga → Camisetas de manga larga). Debe empezar por el sexo elegido. Nunca construyas una categoría que no esté en la lista.
             - materiales: de MATERIALES, hasta 3. Si hay composición (en LECTURA_DE_ETIQUETAS o en una foto), SOLO los de la composición (100% algodón → Algodón; 98% algodón 2% elastano → Algodón, Elastano), aunque la prenda sea vaquera. Sin composición, solo si el tejido es inconfundible (vaquero → Vaquero). Si no, lista vacía.
             - dudas: nombres de los campos (de categoria, talla, colores, materiales, marca) que hayas rellenado SIN seguridad, para que el vendedor los revise. Nunca pongas talla si sin_etiqueta_de_talla es true (el vendedor tampoco la sabe: decide tú con las medidas y las fotos) ni materiales si notas_del_vendedor dice el material. Por ejemplo un corte que no se distingue en las fotos (slim o recto) → categoria. Si todo está claro, lista vacía. Sé honesto: es mejor una duda que un error.
             - colores: de COLORES, el color del TEJIDO (no fondo, luz, sombras, etiquetas ni costuras). Normalmente UNO. Un segundo solo si la prenda tiene de verdad dos colores distintos (bloques, rayas, estampado); nunca dos tonos parecidos (Beige y Caqui, Azul y Azul claro).
@@ -205,13 +208,64 @@ object Ai {
             MATERIALES: ${Vinted.materials.joinToString(", ")}
 
             CATEGORIAS
-            ${categoriesFor(listing.gender).joinToString("\n")}
+            ${categoriesFor(listing.gender, listing.type).joinToString("\n")}
         """.trimIndent()
     }
 
-    /** Categories for the user's gender, or all when it is not known. */
-    private fun categoriesFor(gender: Gender?): List<String> =
-        if (gender == null) Vinted.categories else Vinted.categories.filter { it.startsWith(gender.label + " ") }
+    /**
+     * Categories for the user's gender and, when the garment type is known, only those of
+     * its family (jeans → Vaqueros…): the AI picks among a handful instead of 360 lines,
+     * which is where most wrong categories came from. Falls back to all when unsure.
+     */
+    fun categoriesFor(gender: Gender?, type: String = ""): List<String> {
+        val byGender = if (gender == null) Vinted.categories else Vinted.categories.filter { it.startsWith(gender.label + " ") }
+        val family = FAMILIES[type] ?: return byGender
+        val picked = byGender.filter { c -> family.any { c.contains(it) } }
+        return if (picked.size >= 2) picked else byGender
+    }
+
+    /** Type id → words that a category of that family has in its path. */
+    private val FAMILIES: Map<String, List<String>> = mapOf(
+        "jeans" to listOf("› Vaqueros"),
+        "trousers" to listOf("› Pantalones"),
+        "cargo" to listOf("› Pantalones"),
+        "joggers" to listOf("› Pantalones", "deportiv"),
+        "denimshorts" to listOf("› Shorts"),
+        "shorts" to listOf("› Shorts", "deportiv"),
+        "tshirt" to listOf("› Camisetas"),
+        "longsleeve" to listOf("› Camisetas"),
+        "football" to listOf("› Camisetas", "deportiv"),
+        "shirt" to listOf("› Camisetas y camisas", "› Camisetas y tops"),
+        "polo" to listOf("Polos", "› Camisetas"),
+        "tanktop" to listOf("› Camisetas"),
+        "top" to listOf("› Camisetas y tops", "› Camisetas y camisas"),
+        "hoodie" to listOf("› Jerséis y sudaderas"),
+        "sweatshirt" to listOf("› Jerséis y sudaderas"),
+        "zipsweat" to listOf("› Jerséis y sudaderas"),
+        "sweater" to listOf("› Jerséis y sudaderas"),
+        "cardigan" to listOf("› Jerséis y sudaderas"),
+        "overshirt" to listOf("› Abrigos", "› Camisetas y camisas", "› Camisetas y tops"),
+        "jacket" to listOf("› Abrigos"),
+        "denimjacket" to listOf("› Abrigos"),
+        "bomber" to listOf("› Abrigos"),
+        "leatherjacket" to listOf("› Abrigos"),
+        "trackjacket" to listOf("› Abrigos", "deportiv", "› Jerséis y sudaderas"),
+        "windbreaker" to listOf("› Abrigos", "deportiv"),
+        "fleecejacket" to listOf("› Abrigos", "› Jerséis y sudaderas"),
+        "coat" to listOf("› Abrigos"),
+        "puffer" to listOf("› Abrigos"),
+        "vest" to listOf("Chalecos"),
+        "blazer" to listOf("› Trajes y blazers"),
+        "dress" to listOf("› Vestidos"),
+        "skirt" to listOf("› Faldas"),
+        "jumpsuit" to listOf("› Monos", "Petos"),
+        "tracksuit" to listOf("deportiv", "Chándal", "chándal"),
+        "sneakers" to listOf("› Calzado"),
+        "boots" to listOf("› Calzado"),
+        "shoes" to listOf("› Calzado"),
+        "bag" to listOf("› Bolsos", "› Accesorios"),
+        "backpack" to listOf("› Bolsos", "› Accesorios"),
+    )
 
     /** Families of close shades: two colours of the same family are one colour seen in two lights. */
     private val SHADES = listOf(
@@ -379,7 +433,9 @@ object Ai {
         }
         if (byFit != null) category = byFit
         if (finalGender != null && category?.startsWith(finalGender.label + " ") == false) category = null   // never the wrong gender
-        val doubts = o.strings("dudas").filter { it in DOUBT_FIELDS }.distinct()
+        // A category outside the garment's family (jersey → Camisetas) is a doubt, not a fact.
+        val outOfFamily = category != null && type != null && category !in categoriesFor(finalGender, type)
+        val doubts = (o.strings("dudas") + listOfNotNull("categoria".takeIf { outOfFamily })).filter { it in DOUBT_FIELDS }.distinct()
             .filterNot { it == "materiales" && read.isNotEmpty() }
             .filterNot { it == "talla" && listing.noLabel }      // the seller has no label either: the AI decides
             .filterNot { it == "categoria" && byFit != null && modelFit != null }   // the model number settles it

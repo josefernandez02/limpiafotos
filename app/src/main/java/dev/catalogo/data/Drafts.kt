@@ -1,5 +1,7 @@
 package dev.catalogo.data
 
+import android.content.Context
+
 import kotlinx.coroutines.coroutineScope
 
 import kotlinx.coroutines.awaitAll
@@ -47,6 +49,35 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private val mutex = Mutex()
     private val _pc = MutableStateFlow(Pc())
     val pc: StateFlow<Pc> = _pc.asStateFlow()
+    private val _incidents = MutableStateFlow<List<Desk.Incident>>(emptyList())
+    val incidents: StateFlow<List<Desk.Incident>> = _incidents.asStateFlow()
+
+    /** Links without like reported by the PC: fetched when their count changes; new ones notify once. */
+    private suspend fun checkIncidents(link: dev.catalogo.core.PcLink, count: Int) {
+        if (count == _incidents.value.size && (count == 0 || _incidents.value.isNotEmpty())) return
+        val list = withContext(Dispatchers.IO) { repo.desk.incidents(link) }.sortedByDescending { it.at }
+        _incidents.value = list
+        val prefs = context.getSharedPreferences("incidencias", Context.MODE_PRIVATE)
+        val seen = prefs.getLong("vistas_hasta", 0)
+        val fresh = list.filter { it.at > seen }
+        if (fresh.isNotEmpty()) {
+            prefs.edit().putLong("vistas_hasta", list.maxOf { it.at }).apply()
+            val games = fresh.map { it.game }.distinct().joinToString(", ")
+            DraftsService.alert(
+                context, 9_000,
+                if (fresh.size == 1) "1 link sin like" else "${fresh.size} links sin like",
+                "$games. Míralos en Estado y dales like a mano.",
+            )
+            AppLog.w("pc", "links sin like: ${fresh.joinToString { it.url }}")
+        }
+    }
+
+    /** «Revisado»: it leaves the list here and on the PC. */
+    suspend fun reviewed(id: String) {
+        val link = repo.state.pc ?: return
+        withContext(Dispatchers.IO) { repo.desk.reviewed(link, id) }
+        _incidents.value = _incidents.value.filterNot { it.id == id }
+    }
 
     /**
      * Two loops: the work here (AI, upload) and, apart, asking the PC how it is
@@ -247,6 +278,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             }
             failures = 0
             _pc.value = Pc(status, null, System.currentTimeMillis())
+            runCatching { checkIncidents(link, status.incidents) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
                 logSent = System.currentTimeMillis()
                 runCatching { repo.desk.log(link, AppLog.tail()) }

@@ -250,6 +250,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** The PC program as last seen (null status = not configured or not reached). */
     val pc = app.drafts.pc
+    val incidents = app.drafts.incidents
+
+    fun incidentReviewed(id: String) = run { app.drafts.reviewed(id) }
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
     /** «Generar y preparar borrador» with the photos the AI should look at (the PC gets all of them). */

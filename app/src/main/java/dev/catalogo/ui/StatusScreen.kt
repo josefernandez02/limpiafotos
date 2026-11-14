@@ -51,6 +51,8 @@ import java.util.Locale
 @Composable
 fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val pc by vm.pc.collectAsStateWithLifecycle()
+    val incidents by vm.incidents.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
     val articles = p.articles.filter { !it.released }
     val groups = listOf(Stage.REVIEW, Stage.WORKING, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED).associateWith { st ->
         articles.filter { Catalog.stage(p, it, p.self) == st }.sortedByDescending { it.desk?.at ?: 0 }
@@ -64,6 +66,31 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
+            if (incidents.isNotEmpty()) {
+                item(key = "h-inc") {
+                    Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Links sin like", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.weight(1f))
+                        Muted("${incidents.size}")
+                    }
+                }
+                item(key = "inc") {
+                    Tile {
+                        Muted("Tras 3 intentos no salieron. Ábrelos, dales like a mano si hace falta y márcalos como revisados.")
+                        incidents.forEach { inc ->
+                            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                            IncidentRow(inc, onOpen = {
+                                runCatching {
+                                    context.startActivity(
+                                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(inc.url))
+                                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                                    )
+                                }
+                            }, onDone = { vm.incidentReviewed(inc.id) })
+                        }
+                    }
+                }
+            }
             if (groups.isEmpty()) item(key = "none") { Muted("Nada en marcha", Modifier.padding(start = 4.dp, top = 12.dp)) }
             for ((stage, list) in groups) {
                 item(key = "h-${stage.name}") {
@@ -189,10 +216,36 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
     if (starting) {
         Confirm(
             title = "¿Empezar en el PC?",
-            text = "Publicará los borradores que tocan y jugará con ellos, con pausas entre acciones.",
+            text = "Creará los borradores que haya en cola y publicará los de «Subir y jugar» justo antes de cada juego.",
             confirm = "Empezar",
             onConfirm = { vm.pcControl("iniciar") },
             onDismiss = { starting = false },
         )
+    }
+}
+
+
+/** One link without like: game and time, the item, why, and two buttons. */
+@Composable
+private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: () -> Unit, onDone: () -> Unit) {
+    val item = Regex("""/items/(\d+)(?:-([^/?#]+))?""").find(inc.url)
+    val name = item?.groupValues?.get(2)?.replace('-', ' ')?.takeIf { it.isNotBlank() } ?: item?.groupValues?.get(1) ?: inc.url
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(inc.game, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f), maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
+            Muted(SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(inc.at)))
+        }
+        Text(name.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
+        Muted(inc.reason.replaceFirstChar(Char::uppercase), maxLines = 2)
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onOpen, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
+                OneLine("Abrir en Vinted")
+            }
+            FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
+                OneLine("Revisado")
+            }
+        }
     }
 }
