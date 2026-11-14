@@ -140,7 +140,7 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
                 else SecondButton("Dejar solo como borrador") { vm.setMode(article.number, Mode.DRAFT) }
             }
             Stage.UPLOADED -> {
-                val waiting = desk?.mode == Mode.PLAY || desk?.status == "publicado" && desk.mode == Mode.UPLOAD_PLAY && desk.url.isNotBlank()
+                val waiting = desk?.mode == Mode.PLAY || desk?.status == "publicado" && desk.mode == Mode.UPLOAD_PLAY
                 Muted(if (waiting) "Sin jugar: irá al siguiente juego." else "Subido. No está en los juegos.")
                 if (!waiting) {
                     OutlinedTextField(

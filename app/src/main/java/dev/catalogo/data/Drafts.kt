@@ -293,8 +293,11 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         }
         repo.updateDesk(number) { d ->
             val base = d ?: DeskState(ref, status, at = System.currentTimeMillis())
+            // Marked «Subido» by hand: it does not go to a game unless asked («Meter en los juegos»).
+            // An article the PC published and is waiting for its game keeps its place.
+            val mode = if (stage == dev.catalogo.core.Stage.UPLOADED && d?.status != "publicado") dev.catalogo.core.Mode.DRAFT else base.mode
             base.copy(ref = ref, status = status, message = "", doubts = emptyList(), url = cleanUrl,
-                pending = status, at = System.currentTimeMillis())
+                pending = status, mode = mode, at = System.currentTimeMillis())
         }
         repo.setUploaded(number, p.self.id, stage != dev.catalogo.core.Stage.DRAFT)
         AppLog.i("cola", "$ref a mano: $status")
