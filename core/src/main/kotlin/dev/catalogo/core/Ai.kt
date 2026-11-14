@@ -226,7 +226,7 @@ object Ai {
 
     /** Type id → words that a category of that family has in its path. */
     private val FAMILIES: Map<String, List<String>> = mapOf(
-        "jeans" to listOf("› Vaqueros"),
+        "jeans" to listOf("Ropa › Vaqueros"),
         "trousers" to listOf("› Pantalones"),
         "cargo" to listOf("› Pantalones"),
         "joggers" to listOf("› Pantalones", "deportiv"),
