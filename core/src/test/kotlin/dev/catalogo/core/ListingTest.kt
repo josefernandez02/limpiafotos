@@ -83,7 +83,7 @@ class ListingTest {
     @Test
     fun `hashtags without ai come from the listing and the sku goes last`() {
         assertEquals(
-            listOf("levis", "levis501", "jeans", "vaqueros", "vintage", "levisvintage", "90s", "90sfashion", "straightleg", "faded"),
+            listOf("levis", "levis501", "jeans", "vaqueros", "vintage", "levisvintage", "90s", "straightleg", "faded"),
             ListingWriter.hashtags(jeans),
         )
         assertEquals(listOf("y2k", "2000s"), ListingWriter.hashtags(Listing(keywords = listOf("y2k"))).filter { it.startsWith("y2") || it.startsWith("20") })

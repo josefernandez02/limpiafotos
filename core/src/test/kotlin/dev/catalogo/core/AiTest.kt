@@ -130,7 +130,7 @@ class AiTest {
         val s = Ai.parse(answer, blank, accounts)
         assertEquals("Levi's", s.brand)
         assertEquals("505", s.model)
-        assertEquals(listOf("levis", "levis505", "vaquerosvintage", "ootd"), s.hashtags)
+        assertEquals(listOf("levis", "levis505", "vaquerosvintage"), s.hashtags)
         val applied = s.applyTo(blank)
         assertEquals("W33", applied.size)
         assertEquals("Levi's", applied.brand)
