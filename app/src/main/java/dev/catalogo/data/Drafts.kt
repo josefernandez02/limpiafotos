@@ -65,8 +65,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             val games = fresh.map { it.game }.distinct().joinToString(", ")
             DraftsService.alert(
                 context, 9_000,
-                if (fresh.size == 1) "1 link sin like" else "${fresh.size} links sin like",
-                "$games. Míralos en Estado y dales like a mano.",
+                if (fresh.size == 1) "1 link por revisar" else "${fresh.size} links por revisar",
+                "$games. Míralos en Estado: link y motivo.",
             )
             AppLog.w("pc", "links sin like: ${fresh.joinToString { it.url }}")
         }

@@ -69,14 +69,14 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             if (incidents.isNotEmpty()) {
                 item(key = "h-inc") {
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Links sin like", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
+                        Text("Links por revisar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(1f))
                         Muted("${incidents.size}")
                     }
                 }
                 item(key = "inc") {
                     Tile {
-                        Muted("Tras 3 intentos no salieron. Ábrelos, dales like a mano si hace falta y márcalos como revisados.")
+                        Muted("Tras 3 intentos no salieron. Ábrelos, mira el motivo, hazlo a mano si hace falta y márcalos como revisados.")
                         incidents.forEach { inc ->
                             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
                             IncidentRow(inc, onOpen = {

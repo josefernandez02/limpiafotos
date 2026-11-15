@@ -48,7 +48,7 @@ class ReadingTest {
     fun `the prompt carries the reading and keeps a country out of the title`() {
         val p = Ai.prompt(jeans, accounts, Reading(composition = listOf("100% algodón")))
         assertTrue("LECTURA_DE_ETIQUETAS" in p && "100% algodón" in p, p)
-        assertTrue("un país cualquiera no aporta en el título" in p)
+        assertTrue("en UN solo sitio" in p)
         assertTrue("LECTURA_DE_ETIQUETAS\n{" !in Ai.prompt(jeans, accounts, null))
     }
 }
