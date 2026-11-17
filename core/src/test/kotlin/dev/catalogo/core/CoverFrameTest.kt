@@ -186,4 +186,61 @@ class CoverFrameTest {
         val zoomedOut = Placement(0.5f, 0f, 0f, 0f)
         assertTrue(CoverFrame.uncoveredShare(zoomedOut, 3000, 4000) > 0.3f)
     }
+
+    /** Trousers seen from above: two long legs joined at a waistband; much taller than wide. */
+    private fun trousers(w: Int, h: Int, top: Int, bottom: Int): Mask {
+        val on = BooleanArray(w * h)
+        val cx = w / 2
+        for (y in top..bottom) for (x in 0 until w) {
+            val waist = y < top + (bottom - top) / 5
+            val dx = abs(x - cx)
+            on[y * w + x] = if (waist) dx <= 22 else dx in 2..22
+        }
+        return Mask(w, h, on)
+    }
+
+    @Test
+    fun `tall trousers in a photo with little margin are framed inside the safe box, not left as they are`() {
+        // the garment takes ~73% of the photo's height, as in a typical flat-lay of trousers
+        val m = trousers(120, 160, top = 22, bottom = 138)
+        val p = assertNotNull(CoverFrame.place(m, 3000, 4000))
+        assertTrue(!p.tight, "must not give up and keep the photo as it is")
+        assertTrue(p.scale < CoverFrame.coverScale(3000, 4000, 0f) - 0.02f, "the photo is moved away a little: scale ${p.scale}")
+        assertTrue(CoverFrame.fillDepth(p, 3000, 4000) <= 0.056f, "the strip to fill is thin: ${CoverFrame.fillDepth(p, 3000, 4000)}")
+        // the garment's bottom stays above the label band of the 4:5 preview (and the top below the crop of the 2:3 one)
+        val b = box(m)
+        val k = 3000f / m.w
+        val gh = (b[3] - b[1] + 1) * k * p.scale / 3000
+        assertTrue(gh <= CoverFrame.SAFE_H * CoverFrame.FRAME_H * 1.04f, "height $gh")   // up to ~3% over: still inside the safe margin
+    }
+
+    @Test
+    fun `the fill depth is zero when the photo covers the frame and grows as it is moved away`() {
+        val cover = Placement(CoverFrame.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
+        assertEquals(0f, CoverFrame.fillDepth(cover, 3000, 4000), 0.001f)
+        assertEquals(0.05f, CoverFrame.fillDepth(Placement(0.9f, 0f, 0f, 0f), 3000, 4000), 0.01f)
+    }
+
+    @Test
+    fun `a shadow in a corner joined to the garment by a thin neck is not part of it`() {
+        val w = 120
+        val h = 160
+        val m = trousers(w, h, top = 40, bottom = 140)
+        val on = m.on.copyOf()
+        for (y in 0 until 22) for (x in 0 until 45) on[y * w + x] = true            // corner blob touching the border
+        for (i in 0 until 20) on[(22 + i) * w + 44 + i / 2] = true                   // a 1-cell neck down to the waistband
+        val clean = assertNotNull(CoverFrame.largestParts(Mask(w, h, on)))
+        assertTrue((0 until 22).none { y -> (0 until 45).any { x -> clean.on[y * w + x] } }, "the corner is gone")
+        assertTrue(clean.on[90 * w + 40], "the garment stays")
+        assertTrue(box(clean)[1] >= 38, "its box starts at the garment's top")
+    }
+
+    @Test
+    fun `a garment cut by the photo's own edge keeps the piece that touches the border`() {
+        val w = 120
+        val h = 160
+        val on = BooleanArray(w * h) { i -> i % w in 30..90 && i / w >= 60 }            // runs off the bottom edge
+        val clean = assertNotNull(CoverFrame.largestParts(Mask(w, h, on)))
+        assertEquals(on.count { it }, clean.count())
+    }
 }

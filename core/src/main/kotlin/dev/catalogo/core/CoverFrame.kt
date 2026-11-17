@@ -60,11 +60,14 @@ object CoverFrame {
     const val MIN_AREA = 0.08f           // silhouettes smaller or bigger than this share of the photo are not trusted
     const val MAX_AREA = 0.92f
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
-    private const val GAP_OK = 0.06f     // largest share of the frame that may be left to mirrored backdrop
+    private const val DEPTH_TINY = 0.02f // a strip of mirrored backdrop this deep (share of the frame's side) is not noticed at all…
+    private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor: tall garments (trousers) need it
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
     private val GROWTHS = floatArrayOf(1f, 1.03f, 1.06f)   // how much bigger than the safe size the garment may get to avoid any fill
     private const val GRID_X = 24        // frame points checked for what the fill would show
     private const val GRID_Y = 32
+    private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
+    private const val OPEN = 4            // cells (of a 128-cell grid) the opening uses to tell floor stains from the garment
     private const val TRIM = 0.002f      // share of the silhouette ignored at each border (stray specks)
 
     /** The garment's silhouette → where to put the photo; null if the silhouette is not believable. */
@@ -97,7 +100,9 @@ object CoverFrame {
      * 0 = the photo covers the whole frame, so there is nothing to fill (or only a sliver of mirrored backdrop);
      * 1 = the garment does not fit in the photo, so the photo is just made to cover the frame.
      * Order of preference: no gap at all, the garment up to a few % bigger and moved around inside the room the safe box
-     * leaves it; then a small gap ([GAP_OK]) of mirrored backdrop that shows no garment; then the photo as it is.
+     * leaves it; then a thin strip ([DEPTH_TINY], then [DEPTH_OK]) of mirrored backdrop that shows no garment; then the photo
+     * as it is. Depth, not area, is what the eye notices: a tall garment in a photo with little margin needs a thin strip on
+     * every side, which the mirrored floor hides well.
      */
     private fun plan(clean: Mask, near: Mask, imageW: Int, imageH: Int, tilt: Float): Pair<Placement, Float>? {
         val grid = rotated(clean, tilt)
@@ -120,9 +125,9 @@ object CoverFrame {
             val p = at(g, kx, ky)
             if (uncoveredShare(p, imageW, imageH) == 0f) return p to 0f
         }
-        for (g in GROWTHS) for ((kx, ky) in moves) {
+        for (limit in floatArrayOf(DEPTH_TINY, DEPTH_OK)) for (g in GROWTHS) for ((kx, ky) in moves) {
             val p = at(g, kx, ky)
-            if (uncoveredShare(p, imageW, imageH) <= GAP_OK && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
+            if (fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
         }
         return Placement(coverScale(imageW, imageH, tilt), 0f, 0f, tilt) to 1f
     }
@@ -136,6 +141,19 @@ object CoverFrame {
             if (u < -EDGE || u > 1f + EDGE || v < -EDGE || v > 1f + EDGE) out++
         }
         return if (n == 0) 0f else out.toFloat() / n
+    }
+
+    /** How far the fill has to reach beyond the photo's edge at the deepest point, as a share of the frame's width (across) or
+     *  height (down), so a strip looks equally thin on every side; 0 when the photo covers the frame. */
+    fun fillDepth(p: Placement, imageW: Int, imageH: Int): Float {
+        var deepest = 0f
+        val ph = p.scale * imageH / imageW
+        forEachFramePoint(p, imageW, imageH) { u, v ->
+            val dx = max(-u, u - 1f).coerceAtLeast(0f) * p.scale
+            val dy = max(-v, v - 1f).coerceAtLeast(0f) * ph
+            deepest = max(deepest, max(dx, dy / FRAME_H))
+        }
+        return deepest
     }
 
     /** For a grid of points over the frame, where each falls in the photo (0..1 across and down; outside = not reached). */
@@ -205,8 +223,8 @@ object CoverFrame {
 
     // ---------- silhouette clean-up ----------
 
-    /** Keeps the biggest piece and the pieces of at least a tenth of it (a vest with a gap), drops the specks. */
-    fun largestParts(m: Mask): Mask? {
+    /** Labels the connected pieces of the silhouette (1, 2, …; 0 = off) and gives each one's size. */
+    private fun pieces(m: Mask): Pair<IntArray, List<Int>> {
         val label = IntArray(m.w * m.h)
         val sizes = ArrayList<Int>()
         val stack = IntArray(m.w * m.h)
@@ -229,9 +247,53 @@ object CoverFrame {
             }
             sizes.add(n)
         }
+        return label to sizes
+    }
+
+    /**
+     * A piece that touches the photo's border while the main one does not is floor (the shadow in a corner, the edge of a
+     * rug or a wall), not garment: it is cut away, even when a thin neck joins it to the garment. When the main piece
+     * itself reaches the border the photo cuts the garment and nothing is removed.
+     */
+    private fun withoutBorderPieces(m: Mask): Mask {
+        val opened = dilated(eroded(m, OPEN), OPEN)             // the opening severs necks thinner than ~2·OPEN cells (legs and sleeves are wider)
+        val (label, sizes) = pieces(opened)
+        if (sizes.isEmpty()) return m
+        val main = sizes.indices.maxByOrNull { sizes[it] }!! + 1
+        val touches = BooleanArray(sizes.size + 1)
+        fun mark(x: Int, y: Int) { val l = label[y * m.w + x]; if (l > 0) touches[l] = true }
+        for (d in 0 until NEAR_BORDER) {                       // «touching» allows for a thin frame around the photo
+            for (x in 0 until m.w) { mark(x, d); mark(x, m.h - 1 - d) }
+            for (y in 0 until m.h) { mark(d, y); mark(m.w - 1 - d, y) }
+        }
+        if (touches[main] || (1..sizes.size).none { touches[it] && it != main }) return m
+        val mainPart = dilated(Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] == main }), OPEN + 1)
+        val floor = dilated(Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] > 0 && label[it] != main && touches[label[it]] }), OPEN + 1)
+        return Mask(m.w, m.h, BooleanArray(m.on.size) { m.on[it] && !(floor.on[it] && !mainPart.on[it]) })
+    }
+
+    /** Keeps the biggest piece and the pieces of at least a tenth of it (a vest with a gap), drops the specks and the floor. */
+    fun largestParts(whole: Mask): Mask? {
+        val m = withoutBorderPieces(whole)
+        val (label, sizes) = pieces(m)
         val biggest = sizes.maxOrNull() ?: return null
         val keep = BooleanArray(sizes.size + 1) { it > 0 && sizes[it - 1] * 10 >= biggest }
         return Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] > 0 && keep[label[it]] })
+    }
+
+    /** The silhouette shrunk by [r] cells (the photo's own border does not eat into it). */
+    fun eroded(m: Mask, r: Int): Mask {
+        var cur = m.on
+        repeat(r) {
+            val next = cur.copyOf()
+            for (y in 0 until m.h) for (x in 0 until m.w) {
+                if (!cur[y * m.w + x]) continue
+                if ((x > 0 && !cur[y * m.w + x - 1]) || (x < m.w - 1 && !cur[y * m.w + x + 1]) ||
+                    (y > 0 && !cur[(y - 1) * m.w + x]) || (y < m.h - 1 && !cur[(y + 1) * m.w + x])) next[y * m.w + x] = false
+            }
+            cur = next
+        }
+        return Mask(m.w, m.h, cur)
     }
 
     // ---------- straightening ----------
@@ -430,22 +492,7 @@ object Backdrop {
             cur = next
         }
         // closing: a pattern (spots, diamonds) must not leave the garment in pieces
-        return fillHoles(eroded(CoverFrame.dilated(Mask(w, h, cur), 3), 3))
-    }
-
-    /** The silhouette shrunk by [r] cells (the photo's own border does not eat into it). */
-    private fun eroded(m: Mask, r: Int): Mask {
-        var cur = m.on
-        repeat(r) {
-            val next = cur.copyOf()
-            for (y in 0 until m.h) for (x in 0 until m.w) {
-                if (!cur[y * m.w + x]) continue
-                if ((x > 0 && !cur[y * m.w + x - 1]) || (x < m.w - 1 && !cur[y * m.w + x + 1]) ||
-                    (y > 0 && !cur[(y - 1) * m.w + x]) || (y < m.h - 1 && !cur[(y + 1) * m.w + x])) next[y * m.w + x] = false
-            }
-            cur = next
-        }
-        return Mask(m.w, m.h, cur)
+        return fillHoles(CoverFrame.eroded(CoverFrame.dilated(Mask(w, h, cur), 3), 3))
     }
 
     /** Cells not reachable from the border without crossing the garment (a pattern, a gap between arms) become garment. */

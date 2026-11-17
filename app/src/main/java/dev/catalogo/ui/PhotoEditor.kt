@@ -349,7 +349,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             if (fr != null) {
                 framing = fr
                 manual = false
-                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede salir cortada: mejor otra foto más abierta. "
+                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede quedar justa en alguna vista: mejor una foto algo más abierta. "
                         else "Encuadre automático (${r.how})") +
                     if (kotlin.math.abs(fr.rotation) >= 0.5f) " · enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
             } else {
@@ -444,8 +444,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
           if (img != null && f != null) {
               slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 6.dp)) }
               if (note.isNotBlank()) Muted(note, Modifier.padding(top = 4.dp))
-              if (CoverFrame.uncoveredShare(Placement(f.scale, f.dx, f.dy, f.rotation), img.width, img.height) > 0.005f) {
-                  Muted("Queda un hueco que se rellena con el fondo: acerca la foto para evitarlo.", Modifier.padding(top = 2.dp))
+              if (CoverFrame.fillDepth(Placement(f.scale, f.dx, f.dy, f.rotation), img.width, img.height) > 0.06f) {
+                  Muted("Se ve el borde de la foto rellenado con el fondo: acerca la foto para evitarlo.", Modifier.padding(top = 2.dp))
               }
               Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                   Muted("Zoom ${"%.2f".format(java.util.Locale.ROOT, f.scale)}×", Modifier.width(88.dp))
