@@ -35,11 +35,12 @@ object CoverFrame {
     private const val PAD = 0.03f        // breathing room between the garment and the edge of any preview, in frame widths
 
     /**
-     * The ways Vinted shows a cover, as (width/height, share of the bottom hidden under a label such as «Destacado»):
-     * item page 3:4, phone grid 4:5 with the label, desktop grid 2:3, square 1:1. A preview cuts the 3:4 frame to its
+     * The ways Vinted shows a cover, as (width/height, share of the bottom hidden by something): item page 3:4, phone grid
+     * 4:5, desktop grid 2:3, square 1:1. Nothing is reserved at the bottom: the «Destacar» button and the visit counts are
+     * seen only by the owner, so the garment is centred, with the same space above and below, for everybody. A preview cuts the 3:4 frame to its
      * own shape from the middle; the garment must stay inside what ALL of them show, so it is never cut anywhere.
      */
-    val PREVIEWS = listOf(0.75f to 0f, 0.80f to 0.15f, 2f / 3f to 0f, 1f to 0f)
+    val PREVIEWS = listOf(0.75f to 0f, 0.80f to 0f, 2f / 3f to 0f, 1f to 0f)
 
     /** The box (frame widths; x from the left, y from the top) that every preview shows, minus [PAD]. */
     private val safe: FloatArray = run {
