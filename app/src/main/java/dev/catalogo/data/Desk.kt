@@ -42,7 +42,11 @@ class Desk(private val resolver: ContentResolver) {
     data class GameDay(val game: String, val hours: Int, val played: Int, val reasons: Map<String, Int>)
 
     /** What the PC's watchdog saw in the last hours: games played, how many fine, with warning, serious. */
-    data class Health(val hours: Int, val games: Int, val ok: Int, val warnings: Int, val serious: Int, val last: List<HealthEntry>)
+    data class Health(val hours: Int, val games: Int, val ok: Int, val warnings: Int, val serious: Int, val last: List<HealthEntry>,
+        val today: List<TodayGame> = emptyList())
+
+    /** One game today as the PC judged it: label is "perfecto", "revisar" or "perdido". */
+    data class TodayGame(val at: Long, val game: String, val time: String, val label: String, val summary: String)
 
     data class HealthEntry(val at: Long, val game: String, val time: String, val level: String, val summary: String)
 
@@ -146,7 +150,13 @@ class Desk(private val resolver: ContentResolver) {
                     it.str("nivel"), it.str("resumen"))
             }
         }
-        return Health(n("horas"), n("juegos"), n("ok"), n("avisos"), n("graves"), last)
+        val todayGames = (this["hoy"] as? JsonArray).orEmpty().mapNotNull { e ->
+            (e as? JsonObject)?.let {
+                TodayGame(((it.str("cuando").toDoubleOrNull() ?: 0.0) * 1000).toLong(), it.str("juego"), it.str("hora"),
+                    it.str("etiqueta"), it.str("resumen"))
+            }
+        }
+        return Health(n("horas"), n("juegos"), n("ok"), n("avisos"), n("graves"), last, todayGames)
     }
 
     private fun JsonObject.job() = Job(str("ref"), str("estado"), str("motivo"), str("item_id"), str("url"), str("juego"))

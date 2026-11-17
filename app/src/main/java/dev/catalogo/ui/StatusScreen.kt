@@ -302,31 +302,30 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
     }
 }
 
-/** The watchdog's last hours at a glance: games, how many fine, warnings, serious ones, and the latest not fine. */
+/** Today's games, one line each: ✔ perfect, ⚠ to check, ✖ not played; what went wrong only for the last two. */
 @Composable
 private fun HealthTile(h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>) {
-    var more by rememberSaveable { mutableStateOf(false) }
+    val games = h?.today.orEmpty()
     Tile {
-        // Two lines are the whole story; the reasons and the latest problems are one tap away.
-        if (today.isNotEmpty()) {
-            Text("Hoy", style = MaterialTheme.typography.titleSmall)
-            Muted(today.sortedBy { it.game }.joinToString(GAP) { "${it.game} ${it.played}/${it.hours}" }, maxLines = 2)
+        Text("Juegos de hoy", style = MaterialTheme.typography.titleSmall)
+        if (games.isEmpty()) {
+            Muted(if (today.isEmpty()) "Todavía ninguno" else today.sortedBy { it.game }.joinToString(", ") { "${it.game} ${it.played} de ${it.hours}" })
+            return@Tile
         }
-        if (h != null) {
-            Text("Últimas ${h.hours} h", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = if (today.isNotEmpty()) 8.dp else 0.dp))
-            Muted(if (h.games == 0) "Ningún juego registrado todavía." else "${h.games} juegos · ${h.ok} bien · ${h.warnings} con aviso · ${h.serious} graves")
-        }
-        val reasons = today.flatMap { g -> g.reasons.entries.map { Triple(g.game, it.key, it.value) } }.sortedByDescending { it.third }.take(3)
-        val problems = h?.last?.filter { it.level == "aviso" || it.level == "grave" }?.takeLast(3)?.reversed().orEmpty()
-        if (reasons.isNotEmpty() || problems.isNotEmpty()) {
-            if (more) {
-                reasons.forEach { (game, why, n) -> Muted("$n × $why ($game)", maxLines = 2) }
-                problems.forEach {
-                    val hhmm = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(it.at))
-                    Muted("${if (it.level == "grave") "🔴" else "🟠"} $hhmm ${it.game}: ${it.summary}", maxLines = 1)
-                }
+        games.sortedBy { it.at }.forEachIndexed { n, g ->
+            val color = when (g.label) {
+                "perdido" -> MaterialTheme.colorScheme.error
+                "revisar" -> MaterialTheme.colorScheme.tertiary
+                else -> MaterialTheme.colorScheme.onSurface
             }
-            TextButton(onClick = { more = !more }) { Text(if (more) "Menos" else "Detalle") }
+            val mark = when (g.label) { "perdido" -> "✖"; "revisar" -> "⚠"; else -> "✔" }
+            val word = when (g.label) { "perdido" -> "No se jugó"; "revisar" -> "A revisar"; else -> "Perfecto" }
+            Row(Modifier.fillMaxWidth().padding(top = if (n == 0) 8.dp else 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(mark, color = color, modifier = Modifier.width(24.dp))
+                Text("${g.time.ifBlank { SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(g.at)) }} ${g.game}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(word, style = MaterialTheme.typography.labelMedium, color = color)
+            }
+            if (g.label != "perfecto" && g.summary.isNotBlank()) Muted(g.summary, Modifier.padding(start = 24.dp), maxLines = 2)
         }
     }
 }
