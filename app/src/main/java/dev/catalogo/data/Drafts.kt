@@ -63,12 +63,17 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         if (fresh.isNotEmpty()) {
             prefs.edit().putLong("vistas_hasta", list.maxOf { it.at }).apply()
             val games = fresh.map { it.game }.distinct().joinToString(", ")
-            DraftsService.alert(
-                context, 9_000,
-                if (fresh.size == 1) "1 link por revisar" else "${fresh.size} links por revisar",
-                "$games. Míralos en Estado: link y motivo.",
-            )
-            AppLog.w("pc", "links sin like: ${fresh.joinToString { it.url }}")
+            val worst = fresh.firstOrNull { it.level == "grave" } ?: fresh.firstOrNull { it.isWarning }
+            val title = when {
+                fresh.size == 1 && worst != null -> worst.title.ifBlank { "Aviso del PC" }
+                worst != null -> "${fresh.size} avisos del PC"
+                fresh.size == 1 -> "1 link por revisar"
+                else -> "${fresh.size} links por revisar"
+            }
+            val text = if (fresh.size == 1 && worst != null) worst.summary.ifBlank { worst.reason }
+                else "$games. Míralos en Estado: qué pasó y qué hacer."
+            DraftsService.alert(context, 9_000 + if (worst?.level == "grave") 1 else 0, title, text, urgent = worst?.level == "grave")
+            AppLog.w("pc", "avisos del PC: ${fresh.joinToString { it.title.ifBlank { it.url } }}")
         }
     }
 

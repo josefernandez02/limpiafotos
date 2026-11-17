@@ -66,23 +66,24 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
+            pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today) } }
             if (incidents.isNotEmpty()) {
                 item(key = "h-inc") {
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Links por revisar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
+                        Text("Avisos por revisar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
                             modifier = Modifier.weight(1f))
                         Muted("${incidents.size}")
                     }
                 }
                 item(key = "inc") {
                     Tile {
-                        Muted("Tras 3 intentos no salieron. Ábrelos, mira el motivo, hazlo a mano si hace falta y márcalos como revisados.")
+                        Muted("Avisos del PC y links que no salieron tras varios intentos. Toca un aviso para ver qué pasó y qué hacer; márcalo como revisado al terminar.")
                         incidents.forEach { inc ->
                             HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
-                            IncidentRow(inc, onOpen = {
+                            IncidentRow(inc, onOpen = { url ->
                                 runCatching {
                                     context.startActivity(
-                                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(inc.url))
+                                        android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url))
                                             .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
                                     )
                                 }
@@ -225,26 +226,92 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 }
 
 
-/** One link without like: game and time, the item, why, and two buttons. */
+/** One notice from the PC: a watchdog warning (what happened, what to do) or a single link without like. */
 @Composable
-private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: () -> Unit, onDone: () -> Unit) {
-    val item = Regex("""/items/(\d+)(?:-([^/?#]+))?""").find(inc.url)
-    val name = item?.groupValues?.get(2)?.replace('-', ' ')?.takeIf { it.isNotBlank() } ?: item?.groupValues?.get(1) ?: inc.url
+private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -> Unit, onDone: () -> Unit) {
+    var open by remember(inc.id) { mutableStateOf(inc.level == "grave") }
+    val color = when (inc.level) {
+        "grave" -> MaterialTheme.colorScheme.error
+        "aviso" -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val links = inc.links.ifEmpty { listOfNotNull(inc.url.takeIf { it.startsWith("http") }) }
+    fun itemName(url: String): String {
+        val item = Regex("""/items/(\d+)(?:-([^/?#]+))?""").find(url)
+        return item?.groupValues?.get(2)?.replace('-', ' ')?.takeIf { it.isNotBlank() } ?: item?.groupValues?.get(1) ?: url
+    }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(inc.game, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f), maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(enabled = inc.isWarning) { open = !open }) {
+            Text(
+                if (inc.isWarning) inc.title.ifBlank { inc.game } else inc.game,
+                style = MaterialTheme.typography.labelLarge, color = color, modifier = Modifier.weight(1f), maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
             Muted(SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(inc.at)))
         }
-        Text(name.replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
-            overflow = TextOverflow.Ellipsis)
-        Muted(inc.reason.replaceFirstChar(Char::uppercase), maxLines = 2)
+        if (inc.repeated) Text("REINCIDENTE: no es la primera vez", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        if (inc.isWarning) {
+            if (inc.game.isNotBlank() && inc.game != inc.title) Muted(inc.game)
+            Muted(inc.summary.ifBlank { inc.reason }, maxLines = if (open) Int.MAX_VALUE else 2)
+            if (open) {
+                if (inc.details.isNotEmpty()) {
+                    Text("Qué ha pasado", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                    inc.details.forEach { Muted("• $it") }
+                }
+                if (inc.actions.isNotEmpty()) {
+                    Text("Qué hacer", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                    inc.actions.forEachIndexed { i, s -> Muted("${i + 1}. $s") }
+                }
+                if (links.isNotEmpty()) {
+                    Text("Links por revisar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                    links.take(8).forEach { u ->
+                        Text(itemName(u).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { onOpen(u) }.padding(vertical = 4.dp))
+                    }
+                    if (links.size > 8) Muted("y ${links.size - 8} más")
+                }
+            } else {
+                Muted("Toca para ver qué hacer")
+            }
+        } else {
+            Text(itemName(inc.url).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                overflow = TextOverflow.Ellipsis)
+            Muted(inc.reason.replaceFirstChar(Char::uppercase), maxLines = 2)
+        }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            OutlinedButton(onClick = onOpen, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
-                OneLine("Abrir en Vinted")
+            if (!inc.isWarning && links.isNotEmpty()) {
+                OutlinedButton(onClick = { onOpen(links.first()) }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
+                    OneLine("Abrir en Vinted")
+                }
             }
             FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
                 OneLine("Revisado")
+            }
+        }
+    }
+}
+
+/** The watchdog's last hours at a glance: games, how many fine, warnings, serious ones, and the latest not fine. */
+@Composable
+private fun HealthTile(h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>) {
+    Tile {
+        if (today.isNotEmpty()) {
+            Text("Horas de juego de hoy", style = MaterialTheme.typography.titleSmall)
+            today.sortedBy { it.game }.forEach { g ->
+                Muted("${g.game}: ${g.played} de ${g.hours} jugadas")
+                g.reasons.entries.sortedByDescending { it.value }.take(3).forEach { (why, n) -> Muted("   $n × $why", maxLines = 2) }
+            }
+        }
+        if (h == null) return@Tile
+        Text("Últimas ${h.hours} h", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = if (today.isNotEmpty()) 8.dp else 0.dp))
+        if (h.games == 0) {
+            Muted("Ningún juego registrado todavía.")
+        } else {
+            Muted("${h.games} juegos · ${h.ok} bien · ${h.warnings} con aviso · ${h.serious} graves")
+            h.last.filter { it.level == "aviso" || it.level == "grave" }.takeLast(3).reversed().forEach {
+                val hhmm = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(it.at))
+                Muted("${if (it.level == "grave") "🔴" else "🟠"} $hhmm ${it.game} ${it.time}: ${it.summary}", maxLines = 2)
             }
         }
     }

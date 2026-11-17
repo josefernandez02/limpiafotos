@@ -33,10 +33,29 @@ class Desk(private val resolver: ContentResolver) {
     data class Job(val ref: String, val status: String, val message: String, val itemId: String, val url: String, val game: String)
 
     /** The PC program: what it is doing and what comes next. */
-    data class Status(val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>, val incidents: Int = 0)
+    data class Status(
+        val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>, val incidents: Int = 0,
+        val health: Health? = null, val today: List<GameDay> = emptyList(),
+    )
+
+    /** One game today: hours played out of hours it had, and the reasons the rest were lost. */
+    data class GameDay(val game: String, val hours: Int, val played: Int, val reasons: Map<String, Int>)
+
+    /** What the PC's watchdog saw in the last hours: games played, how many fine, with warning, serious. */
+    data class Health(val hours: Int, val games: Int, val ok: Int, val warnings: Int, val serious: Int, val last: List<HealthEntry>)
+
+    data class HealthEntry(val at: Long, val game: String, val time: String, val level: String, val summary: String)
 
     /** A game link that got no like after several tries: to look at by hand. */
-    data class Incident(val id: String, val at: Long, val game: String, val url: String, val reason: String)
+    data class Incident(
+        val id: String, val at: Long, val game: String, val url: String, val reason: String,
+        val level: String = "", val title: String = "", val summary: String = "",
+        val details: List<String> = emptyList(), val actions: List<String> = emptyList(),
+        val links: List<String> = emptyList(), val repeated: Boolean = false,
+    ) {
+        /** A watchdog warning (a game left unfinished, a repeat…) as opposed to a single link without like. */
+        val isWarning get() = level == "aviso" || level == "grave"
+    }
 
     private val json = Json { ignoreUnknownKeys = true }
 
@@ -44,14 +63,17 @@ class Desk(private val resolver: ContentResolver) {
         val o = call(link, "GET", "/estado", null)
         val queue = (o["cola"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
-            o.str("incidencias").toIntOrNull() ?: 0)
+            o.str("incidencias").toIntOrNull() ?: 0, (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject))
     }
 
     fun incidents(link: PcLink): List<Incident> =
         (call(link, "GET", "/incidencias", null)["incidencias"] as? JsonArray).orEmpty().mapNotNull { e ->
             (e as? JsonObject)?.let {
                 Incident(it.str("id"), ((it.str("cuando").toDoubleOrNull() ?: 0.0) * 1000).toLong(),
-                    it.str("juego"), it.str("url"), it.str("motivo"))
+                    it.str("juego"), it.str("url"), it.str("motivo"),
+                    level = it.str("nivel"), title = it.str("titulo"), summary = it.str("resumen"),
+                    details = it.strs("detalles"), actions = it.strs("acciones"), links = it.strs("enlaces"),
+                    repeated = it.str("reincidente") == "true")
             }
         }
 
@@ -103,6 +125,29 @@ class Desk(private val resolver: ContentResolver) {
     // ---------- internals ----------
 
     private fun JsonObject.str(key: String): String = (this[key] as? JsonPrimitive)?.contentOrNull.orEmpty()
+
+    private fun JsonObject.strs(key: String): List<String> =
+        (this[key] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
+
+    private fun today(o: JsonObject?): List<GameDay> = o?.mapNotNull { (game, v) ->
+        (v as? JsonObject)?.let {
+            fun n(k: String) = it.str(k).toIntOrNull() ?: 0
+            val reasons = (it["motivos"] as? JsonObject)?.mapValues { (_, c) -> (c as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
+            GameDay(game, n("horas"), n("jugados"), reasons)
+        }
+    }.orEmpty()
+
+    private fun JsonObject.health(): Health? {
+        if (str("juegos").isBlank()) return null
+        fun n(k: String) = str(k).toIntOrNull() ?: 0
+        val last = (this["ultimos"] as? JsonArray).orEmpty().mapNotNull { e ->
+            (e as? JsonObject)?.let {
+                HealthEntry(((it.str("cuando").toDoubleOrNull() ?: 0.0) * 1000).toLong(), it.str("juego"), it.str("hora"),
+                    it.str("nivel"), it.str("resumen"))
+            }
+        }
+        return Health(n("horas"), n("juegos"), n("ok"), n("avisos"), n("graves"), last)
+    }
 
     private fun JsonObject.job() = Job(str("ref"), str("estado"), str("motivo"), str("item_id"), str("url"), str("juego"))
 
