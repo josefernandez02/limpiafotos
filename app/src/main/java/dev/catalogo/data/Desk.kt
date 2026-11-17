@@ -35,7 +35,7 @@ class Desk(private val resolver: ContentResolver) {
     /** The PC program: what it is doing and what comes next. */
     data class Status(
         val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>, val incidents: Int = 0,
-        val health: Health? = null, val today: List<GameDay> = emptyList(),
+        val lastIncident: String = "", val health: Health? = null, val today: List<GameDay> = emptyList(),
     )
 
     /** One game today: hours played out of hours it had, and the reasons the rest were lost. */
@@ -63,7 +63,7 @@ class Desk(private val resolver: ContentResolver) {
         val o = call(link, "GET", "/estado", null)
         val queue = (o["cola"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
-            o.str("incidencias").toIntOrNull() ?: 0, (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject))
+            o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject))
     }
 
     fun incidents(link: PcLink): List<Incident> =

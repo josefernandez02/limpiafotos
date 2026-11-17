@@ -53,8 +53,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     val incidents: StateFlow<List<Desk.Incident>> = _incidents.asStateFlow()
 
     /** Links without like reported by the PC: fetched when their count changes; new ones notify once. */
-    private suspend fun checkIncidents(link: dev.catalogo.core.PcLink, count: Int) {
-        if (count == _incidents.value.size && (count == 0 || _incidents.value.isNotEmpty())) return
+    private suspend fun checkIncidents(link: dev.catalogo.core.PcLink, count: Int, last: String) {
+        val known = _incidents.value
+        if (count == known.size && (count == 0 || (known.isNotEmpty() && (last.isBlank() || known.any { it.id == last })))) return
         val list = withContext(Dispatchers.IO) { repo.desk.incidents(link) }.sortedByDescending { it.at }
         _incidents.value = list
         val prefs = context.getSharedPreferences("incidencias", Context.MODE_PRIVATE)
@@ -283,7 +284,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             }
             failures = 0
             _pc.value = Pc(status, null, System.currentTimeMillis())
-            runCatching { checkIncidents(link, status.incidents) }
+            runCatching { checkIncidents(link, status.incidents, status.lastIncident) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
                 logSent = System.currentTimeMillis()
                 runCatching { repo.desk.log(link, AppLog.tail()) }
