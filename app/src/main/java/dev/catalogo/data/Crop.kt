@@ -62,7 +62,7 @@ object Crop {
 
     /**
      * Draws [src] framed by [f] in a frame of [fw] x [fw]/[RATIO] with its top-left corner at ([left], [top]).
-     * Where the photo does not reach, its own outermost pixels are carried on (floor continues as floor).
+     * Where the photo does not reach, the photo is mirrored (pieces of its own backdrop, no stretched pixels).
      * The editor, its previews and the final JPEG all go through here, so what is seen is what is saved.
      */
     fun draw(canvas: Canvas, src: Bitmap, f: Framing, left: Float, top: Float, fw: Float) {
@@ -76,7 +76,7 @@ object Crop {
             postRotate(f.rotation, cx, cy)
         }
         val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
-        paint.shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also { it.setLocalMatrix(m) }
+        paint.shader = BitmapShader(src, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR).also { it.setLocalMatrix(m) }
         canvas.drawRect(left, top, left + fw, top + fw / RATIO, paint)
     }
 

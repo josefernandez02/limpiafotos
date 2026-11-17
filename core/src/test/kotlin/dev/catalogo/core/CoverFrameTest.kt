@@ -124,4 +124,30 @@ class CoverFrameTest {
         val allGarment = IntArray(w * h) { (0xFF shl 24) or ((60 + rnd.nextInt(30)) shl 16) or (80 shl 8) or 150 }
         assertNull(CoverFrame.place(Backdrop.mask(allGarment, w, h), 1000, 1300))
     }
+
+    @Test
+    fun `a garment that fits is framed ideally and the rest is filled with mirrored backdrop`() {
+        // small garment in the middle of a big photo: the ideal size is bigger than the photo, but what is missing is backdrop
+        val p = assertNotNull(CoverFrame.place(jumper(120, 140, s = 1), 3000, 3500))
+        assertTrue(p.scale >= CoverFrame.coverScale(3000, 3500, p.rotation) - 0.001f)
+    }
+
+    @Test
+    fun `a garment that touches the photo's edge is not zoomed out so no garment is mirrored`() {
+        val w = 120
+        val h = 160
+        // a garment running off the bottom of the photo: mirroring the bottom edge would show a second garment
+        val on = BooleanArray(w * h) { val x = it % w; val y = it / w; x in 30..89 && y >= 50 }
+        val p = assertNotNull(CoverFrame.place(Mask(w, h, on), 3000, 4000))
+        assertEquals(CoverFrame.coverScale(3000, 4000, p.rotation), p.scale, 0.001f)
+        assertEquals(0f, p.dx, 0.001f)
+        assertEquals(0f, p.dy, 0.001f)
+    }
+
+    @Test
+    fun `cover scale never leaves a gap`() {
+        assertEquals(1f, CoverFrame.coverScale(3000, 4000, 0f), 0.001f)                  // 3:4 photo = frame
+        assertTrue(CoverFrame.coverScale(3000, 4000, 5f) > 1f)                           // turned: needs a little more
+        assertTrue(CoverFrame.coverScale(4000, 3000, 0f) > 1.7f)                         // landscape photo must grow to fill the height
+    }
 }
