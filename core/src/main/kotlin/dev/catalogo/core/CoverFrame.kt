@@ -51,7 +51,10 @@ object CoverFrame {
             val top = (FRAME_H - h) / 2
             y0 = max(y0, top); y1 = min(y1, top + h * (1f - label))
         }
-        floatArrayOf(x0 + PAD, y0 + PAD, x1 - PAD, y1 - PAD)
+        // Same space above and below the garment: the box is made symmetric about the frame's middle (the label of the phone
+        // grid used to push the garment up, which left more margin below than above on the item page).
+        val half = min(FRAME_H / 2 - (y0 + PAD), (y1 - PAD) - FRAME_H / 2)
+        floatArrayOf(x0 + PAD, FRAME_H / 2 - half, x1 - PAD, FRAME_H / 2 + half)
     }
     val SAFE_W: Float = safe[2] - safe[0]                        // the garment never takes more than this of the frame's width…
     val SAFE_H: Float = (safe[3] - safe[1]) / FRAME_H            // …or of its height (as a share of it)
@@ -131,6 +134,23 @@ object CoverFrame {
             if (fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
         }
         return Placement(coverScale(imageW, imageH, tilt), 0f, 0f, tilt) to 1f
+    }
+
+    /**
+     * The same placement made a little bigger (about the frame's middle) until the photo covers the whole frame, so nothing
+     * has to be filled in: a few % more garment is not noticed, an invented backdrop is. When even that is not enough,
+     * the photo just covers the frame.
+     */
+    fun noFill(p: Placement, imageW: Int, imageH: Int): Placement {
+        if (uncoveredShare(p, imageW, imageH) == 0f) return p
+        var s = p.scale
+        repeat(60) {
+            s *= 1.01f
+            val k = s / p.scale
+            val q = p.copy(scale = s, dx = p.dx * k, dy = p.dy * k)
+            if (uncoveredShare(q, imageW, imageH) == 0f) return q
+        }
+        return Placement(coverScale(imageW, imageH, p.rotation), 0f, 0f, p.rotation, p.tight)
     }
 
     /** Share of the frame the photo does not reach with this placement (0 = it covers everything). */

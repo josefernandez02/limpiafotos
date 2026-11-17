@@ -8,7 +8,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -48,6 +48,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -305,39 +306,163 @@ private fun SlotImage(slot: Slot, modifier: Modifier) {
     }
 }
 
+private enum class Grip { NONE, MOVE, TL, TR, BL, BR }
+
+/** Where the photo sits on screen: [d] screen pixels per image pixel, its centre at ([cx], [cy]); the crop box moves over it. */
+private class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val imgH: Int) {
+    val minW = d * imgW * 0.15f
+}
+
+private fun Framing.placement() = Placement(scale, dx, dy, rotation)
+private fun Placement.framing() = Framing(scale, dx, dy, rotation)
+private fun Framing.covers(w: Int, h: Int) = CoverFrame.uncoveredShare(placement(), w, h) == 0f
+
+/** The crop box (left, top, right, bottom, in screen pixels) of a framing: the 3:4 frame, with the photo fixed under it. */
+private fun boxOf(f: Framing, g: Geo): FloatArray {
+    val bw = g.d * g.imgW / f.scale
+    val bx = g.cx - f.dx * bw
+    val by = g.cy - f.dy * bw
+    val bh = bw / Crop.RATIO
+    return floatArrayOf(bx - bw / 2, by - bh / 2, bx + bw / 2, by + bh / 2)
+}
+
+private fun framingOf(l: Float, t: Float, r: Float, b: Float, rotation: Float, g: Geo): Framing {
+    val bw = r - l
+    return Framing(g.d * g.imgW / bw, (g.cx - (l + r) / 2) / bw, (g.cy - (t + b) / 2) / bw, rotation)
+}
+
+private fun gripAt(at: Offset, b: FloatArray, slop: Float): Grip {
+    fun near(x: Float, y: Float) = kotlin.math.abs(at.x - x) <= slop && kotlin.math.abs(at.y - y) <= slop
+    return when {
+        near(b[0], b[1]) -> Grip.TL
+        near(b[2], b[1]) -> Grip.TR
+        near(b[0], b[3]) -> Grip.BL
+        near(b[2], b[3]) -> Grip.BR
+        at.x in b[0]..b[2] && at.y in b[1]..b[3] -> Grip.MOVE
+        else -> Grip.NONE
+    }
+}
+
+/** The framing after dragging [grip] by ([mx], [my]) screen pixels; a corner resizes the box around the opposite corner. */
+private fun dragged(f: Framing, grip: Grip, mx: Float, my: Float, g: Geo): Framing? {
+    val b = boxOf(f, g)
+    var l = b[0]; var t = b[1]; var r = b[2]; var bt = b[3]
+    val w0 = r - l
+    val grow = when (grip) {
+        Grip.BR -> (mx + my * Crop.RATIO) / 2
+        Grip.BL -> (-mx + my * Crop.RATIO) / 2
+        Grip.TR -> (mx - my * Crop.RATIO) / 2
+        Grip.TL -> (-mx - my * Crop.RATIO) / 2
+        else -> 0f
+    }
+    val w = (w0 + grow).coerceAtLeast(g.minW)
+    val h = w / Crop.RATIO
+    when (grip) {
+        Grip.MOVE -> { l += mx; r += mx; t += my; bt += my }
+        Grip.BR -> { r = l + w; bt = t + h }
+        Grip.BL -> { l = r - w; bt = t + h }
+        Grip.TR -> { r = l + w; t = bt - h }
+        Grip.TL -> { l = r - w; t = bt - h }
+        Grip.NONE -> return null
+    }
+    return framingOf(l, t, r, bt, f.rotation, g)
+}
+
+/** The photo stays still; the 3:4 box is dragged by its corners (size) and its inside (position), never beyond the photo. */
+@Composable
+private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, onChange: (Framing) -> Unit) {
+    val density = LocalDensity.current
+    val current by rememberUpdatedState(f)
+    val paint = remember { android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG) }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val areaW = with(density) { maxWidth.toPx() }
+        val areaH = with(density) { maxHeight.toPx() }
+        val geo = Geo(areaW / 2f, areaH / 2f, minOf(areaW / img.width, areaH / img.height) * 0.9f, img.width, img.height)
+        val slop = with(density) { 40.dp.toPx() }
+        var grip by remember { mutableStateOf(Grip.NONE) }
+        Canvas(
+            Modifier.fillMaxSize().pointerInput(img, areaW, areaH) {
+                detectDragGestures(
+                    onDragStart = { at -> grip = gripAt(at, boxOf(current, geo), slop) },
+                    onDragEnd = { grip = Grip.NONE },
+                    onDragCancel = { grip = Grip.NONE },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        val cur = current
+                        // Never beyond the photo: if the whole step does not fit, try a smaller one (and, moving, each axis alone).
+                        val tries = ArrayList<Pair<Float, Float>>()
+                        for (k in floatArrayOf(1f, 0.5f, 0.25f)) tries.add(drag.x * k to drag.y * k)
+                        if (grip == Grip.MOVE) { tries.add(drag.x to 0f); tries.add(0f to drag.y) }
+                        for ((mx, my) in tries) {
+                            val c = dragged(cur, grip, mx, my, geo) ?: break
+                            if (c.covers(img.width, img.height)) { onChange(c); break }
+                        }
+                    },
+                )
+            },
+        ) {
+            drawIntoCanvas { c ->
+                val nc = c.nativeCanvas
+                nc.save()
+                nc.rotate(f.rotation, geo.cx, geo.cy)
+                val pw = geo.d * img.width
+                val ph = geo.d * img.height
+                nc.drawBitmap(img.asAndroidBitmap(), null, android.graphics.RectF(geo.cx - pw / 2, geo.cy - ph / 2, geo.cx + pw / 2, geo.cy + ph / 2), paint)
+                nc.restore()
+            }
+            val b = boxOf(f, geo)
+            val bw = b[2] - b[0]
+            val dim = Color.Black.copy(alpha = 0.55f)
+            drawRect(dim, Offset(0f, 0f), GSize(size.width, b[1].coerceAtLeast(0f)))
+            drawRect(dim, Offset(0f, b[3]), GSize(size.width, (size.height - b[3]).coerceAtLeast(0f)))
+            drawRect(dim, Offset(0f, b[1]), GSize(b[0].coerceAtLeast(0f), b[3] - b[1]))
+            drawRect(dim, Offset(b[2], b[1]), GSize((size.width - b[2]).coerceAtLeast(0f), b[3] - b[1]))
+            // thirds
+            val faint = Color.White.copy(alpha = 0.35f)
+            for (k in 1..2) {
+                drawLine(faint, Offset(b[0] + bw * k / 3, b[1]), Offset(b[0] + bw * k / 3, b[3]), 1.dp.toPx())
+                drawLine(faint, Offset(b[0], b[1] + (b[3] - b[1]) * k / 3), Offset(b[2], b[1] + (b[3] - b[1]) * k / 3), 1.dp.toPx())
+            }
+            if (guide) {
+                // the margin the garment should touch, so every cover has the same space around it
+                val sb = CoverFrame.safeBox()
+                drawRect(
+                    color = Color.White.copy(alpha = 0.8f),
+                    topLeft = Offset(b[0] + sb[0] * bw, b[1] + sb[1] * bw),
+                    size = GSize((sb[2] - sb[0]) * bw, (sb[3] - sb[1]) * bw),
+                    style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
+                )
+            }
+            drawRect(Color.White, Offset(b[0], b[1]), GSize(bw, b[3] - b[1]), style = Stroke(width = 1.5.dp.toPx()))
+            val len = 24.dp.toPx()
+            val th = 4.dp.toPx()
+            fun corner(x: Float, y: Float, sx: Float, sy: Float) {
+                drawLine(Color.White, Offset(x - sx * th / 2, y), Offset(x + sx * len, y), th)
+                drawLine(Color.White, Offset(x, y - sy * th / 2), Offset(x, y + sy * len), th)
+            }
+            corner(b[0], b[1], 1f, 1f); corner(b[2], b[1], -1f, 1f); corner(b[0], b[3], 1f, -1f); corner(b[2], b[3], -1f, -1f)
+        }
+    }
+}
+
 /**
- * The 3:4 template over the photo. Drag to move and pinch to zoom; the inner
- * guide marks the margin the garment should touch, so every photo of the
- * catalogue ends up with about the same space around the garment.
+ * Crop like in any photo app: the photo stays still and a 3:4 box is dragged by its corners and its middle. The box never
+ * goes beyond the photo, so nothing is ever made up around it. "Giro" straightens the photo.
  */
 @Composable
 private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel: () -> Unit, onDone: (ByteArray, Framing, String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     BackHandler(onBack = onCancel)
-    // The photo to frame, and the colour of its edges that fills what it does not cover.
-    val loaded by produceState<Pair<ImageBitmap, Color>?>(null, slot.source) {
-        value = withContext(Dispatchers.IO) {
-            runCatching {
-                val big = loadPhoto(context, slot.source, 1600)
-                val small = android.graphics.ImageDecoder.decodeBitmap(
-                    android.graphics.ImageDecoder.createSource(context.contentResolver, slot.source),
-                ) { decoder, info, _ ->
-                    decoder.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
-                    val s = 200f / maxOf(info.size.width, info.size.height)
-                    if (s < 1f) decoder.setTargetSize((info.size.width * s).toInt().coerceAtLeast(1), (info.size.height * s).toInt().coerceAtLeast(1))
-                }
-                big to Color(Crop.edgeColor(small))
-            }.getOrNull()
-        }
+    val image by produceState<ImageBitmap?>(null, slot.source) {
+        value = withContext(Dispatchers.IO) { runCatching { loadPhoto(context, slot.source, 1600) }.getOrNull() }
     }
-    val image = loaded?.first
     var framing by remember { mutableStateOf(slot.framing) }
     var working by remember { mutableStateOf(false) }
     val img = image
     var note by remember { mutableStateOf("") }
     var analyzing by remember { mutableStateOf(false) }
-    var touched by remember { mutableStateOf(false) }      // the user has moved the photo: an automatic framing on opening must not undo it
+    var touched by remember { mutableStateOf(false) }      // the user has moved the box: an automatic framing on opening must not undo it
     var manual by remember { mutableStateOf(false) }       // how the framing was made, for the record
     val auto: (Boolean) -> Unit = { onOpen ->
         scope.launch {
@@ -349,18 +474,23 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             if (fr != null) {
                 framing = fr
                 manual = false
-                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede quedar justa en alguna vista: mejor una foto algo más abierta. "
+                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede quedar justa en alguna vista: mejor una foto algo más abierta."
                         else "Encuadre automático (${r.how})") +
-                    if (kotlin.math.abs(fr.rotation) >= 0.5f) " · enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
+                    if (kotlin.math.abs(fr.rotation) >= 0.5f) ", enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
             } else {
                 note = "No localicé la prenda: ajústala a mano"
             }
         }
     }
     LaunchedEffect(img) {
-        if (img != null && framing == null) {
-            framing = Crop.cover(img.width, img.height)
-            if (isCover && slot.edit == null) auto(true)
+        if (img != null) {
+            val cur = framing
+            if (cur == null) {
+                framing = Crop.cover(img.width, img.height)
+                if (isCover && slot.edit == null) auto(true)
+            } else if (!cur.covers(img.width, img.height)) {
+                framing = CoverFrame.noFill(cur.placement(), img.width, img.height).framing()      // an old crop with made-up edges is tidied
+            }
         }
     }
 
@@ -376,7 +506,11 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         OutlinedButton(
-                            onClick = { touched = true; manual = true; framing = framing?.copy(dx = 0f, dy = 0f) },
+                            onClick = {
+                                val c = framing?.copy(dx = 0f, dy = 0f)
+                                if (c != null && c.covers(img.width, img.height)) { touched = true; manual = true; framing = c }
+                                else note = "No se puede centrar sin salir de la foto"
+                            },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine("Centrar") }
                         OutlinedButton(
@@ -397,78 +531,35 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             }
         },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-          Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val f = framing
+                if (img == null || f == null) return@Box
+                CropArea(img, f, isCover) { framing = it; touched = true; manual = true }
+            }
             val f = framing
-            if (img == null || f == null) return@Box
-            BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(Crop.RATIO, matchHeightConstraintsFirst = true)) {
-                val frameW = with(LocalDensity.current) { maxWidth.toPx() }
-                Canvas(
-                    Modifier.fillMaxSize().clip(RoundedCornerShape(4.dp)).background(loaded?.second ?: Color(0xFF2A2C2F))
-                        .pointerInput(img) {
-                            detectTransformGestures { centroid, pan, zoom, _ ->
-                                val cur = framing ?: return@detectTransformGestures
-                                touched = true
-                                manual = true
-                                val scale = (cur.scale * zoom).coerceIn(0.3f, 6f)
-                                val k = scale / cur.scale
-                                // Zoom around the fingers: the point under them stays put.
-                                val cx = (centroid.x - size.width / 2f) / frameW
-                                val cy = (centroid.y - size.height / 2f) / frameW
-                                framing = cur.copy(
-                                    scale = scale,
-                                    dx = (cx + (cur.dx - cx) * k + pan.x / frameW).coerceIn(-1.5f, 1.5f),
-                                    dy = (cy + (cur.dy - cy) * k + pan.y / frameW).coerceIn(-2f, 2f),
-                                )
-                            }
+            if (img != null && f != null) {
+                Muted("Arrastra las esquinas para el tamaño y el centro para mover", Modifier.padding(top = 6.dp))
+                slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 2.dp)) }
+                if (note.isNotBlank()) Muted(note, Modifier.padding(top = 2.dp))
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
+                    Slider(
+                        value = f.rotation.coerceIn(-15f, 15f),
+                        onValueChange = {
+                            touched = true; manual = true
+                            framing = CoverFrame.noFill(f.copy(rotation = it).placement(), img.width, img.height).framing()
                         },
-                ) {
-                    drawFramed(img, f, 0f, 0f, size.width)
-                    // Margin guide: the garment should touch this line on its widest side.
-                    val box = CoverFrame.safeBox()
-                    drawRect(
-                        color = Color.White.copy(alpha = 0.8f),
-                        topLeft = Offset(box[0] * size.width, box[1] * size.width),
-                        size = GSize((box[2] - box[0]) * size.width, (box[3] - box[1]) * size.width),
-                        style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
+                        valueRange = -15f..15f, modifier = Modifier.weight(1f),
                     )
-                    // Centre lines, to keep the garment symmetric.
-                    val faint = Color.White.copy(alpha = 0.25f)
-                    drawLine(faint, Offset(size.width / 2, 0f), Offset(size.width / 2, size.height), 1.dp.toPx())
-                    drawLine(faint, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
-                    drawRect(Color.White, style = Stroke(width = 2.dp.toPx()))
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((ratio, label) in CoverFrame.PREVIEWS) {
+                        val name = when (ratio) { 0.75f -> "Ficha 3:4"; 0.8f -> "Móvil 4:5"; 1f -> "Cuadrado"; else -> "PC 2:3" }
+                        FramePreview(img, f, Color(0xFF2A2C2F), ratio, name, Modifier.weight(1f), label)
+                    }
                 }
             }
-          }
-          val f = framing
-          if (img != null && f != null) {
-              slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 6.dp)) }
-              if (note.isNotBlank()) Muted(note, Modifier.padding(top = 4.dp))
-              if (CoverFrame.fillDepth(Placement(f.scale, f.dx, f.dy, f.rotation), img.width, img.height) > 0.06f) {
-                  Muted("Se ve el borde de la foto rellenado con el fondo: acerca la foto para evitarlo.", Modifier.padding(top = 2.dp))
-              }
-              Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-                  Muted("Zoom ${"%.2f".format(java.util.Locale.ROOT, f.scale)}×", Modifier.width(88.dp))
-                  Slider(
-                      value = f.scale.coerceIn(0.5f, 3f),
-                      onValueChange = { touched = true; manual = true; framing = f.copy(scale = it, dx = f.dx * it / f.scale, dy = f.dy * it / f.scale) },
-                      valueRange = 0.5f..3f, modifier = Modifier.weight(1f),
-                  )
-              }
-              Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                  Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
-                  Slider(
-                      value = f.rotation.coerceIn(-15f, 15f), onValueChange = { touched = true; manual = true; framing = f.copy(rotation = it) },
-                      valueRange = -15f..15f, modifier = Modifier.weight(1f),
-                  )
-              }
-              Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  for ((ratio, label) in CoverFrame.PREVIEWS) {
-                      val name = when (ratio) { 0.75f -> "Ficha 3:4"; 0.8f -> "Móvil 4:5"; 1f -> "Cuadrado"; else -> "PC 2:3" }
-                      FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), ratio, name, Modifier.weight(1f), label)
-                  }
-              }
-          }
         }
     }
 }

@@ -59,7 +59,7 @@ object AutoFrame {
                 }
             }
             note(bmp, model, floor, byModel, byFloor, agree, p, how)
-            Result(p.toFraming(), how, p.tight)
+            Result(CoverFrame.noFill(p, bmp.width, bmp.height).toFraming(), how, p.tight)   // never an invented backdrop
         } finally {
             bmp.recycle()
         }

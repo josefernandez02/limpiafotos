@@ -145,6 +145,26 @@ class CoverFrameTest {
     }
 
     @Test
+    fun `the safe box leaves the same space above and below`() {
+        val b = CoverFrame.safeBox()
+        assertEquals(b[1], CoverFrame.FRAME_H - b[3], 0.001f)
+        assertEquals(0f, CoverFrame.LIFT, 0.001f)
+    }
+
+    @Test
+    fun `noFill grows a placement with a gap until the photo covers the frame, and leaves a covering one alone`() {
+        val covering = Placement(1.2f, 0.02f, 0.02f, 0f)
+        assertEquals(covering, CoverFrame.noFill(covering, 3000, 4000))
+        val gap = Placement(0.9f, 0f, 0.05f, 0f)
+        assertTrue(CoverFrame.uncoveredShare(gap, 3000, 4000) > 0f)
+        val fixed = CoverFrame.noFill(gap, 3000, 4000)
+        assertEquals(0f, CoverFrame.uncoveredShare(fixed, 3000, 4000), 0f)
+        assertTrue(fixed.scale >= gap.scale && fixed.scale < 1.3f, "scale ${fixed.scale}")
+        val hopeless = CoverFrame.noFill(Placement(0.5f, 3f, 3f, 0f), 3000, 4000)
+        assertEquals(0f, CoverFrame.uncoveredShare(hopeless, 3000, 4000), 0f)
+    }
+
+    @Test
     fun `cover scale never leaves a gap`() {
         assertEquals(1f, CoverFrame.coverScale(3000, 4000, 0f), 0.001f)                  // 3:4 photo = frame
         assertTrue(CoverFrame.coverScale(3000, 4000, 5f) > 1f)                           // turned: needs a little more
