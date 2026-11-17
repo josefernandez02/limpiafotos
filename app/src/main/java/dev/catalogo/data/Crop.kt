@@ -2,11 +2,13 @@ package dev.catalogo.data
 
 import android.content.ContentResolver
 import android.graphics.Bitmap
+import android.graphics.BitmapShader
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ImageDecoder
+import android.graphics.Matrix
 import android.graphics.Paint
-import android.graphics.RectF
+import android.graphics.Shader
 import android.net.Uri
 import dev.catalogo.core.JpegClean
 import java.io.ByteArrayOutputStream
@@ -16,10 +18,10 @@ import kotlin.math.roundToInt
 /**
  * Framing of a photo inside the 3:4 template. Sizes are in frame widths:
  * [scale] is the photo's width, [dx]/[dy] move the photo's centre away from
- * the frame's centre. Where the photo does not reach, the frame is filled
+ * the frame's centre; [rotation] turns it (degrees, clockwise) around its centre. Where the photo does not reach, the frame is filled
  * with the colour of the photo's own edges (the floor or backdrop).
  */
-data class Framing(val scale: Float, val dx: Float, val dy: Float)
+data class Framing(val scale: Float, val dx: Float, val dy: Float, val rotation: Float = 0f)
 
 object Crop {
     const val RATIO = 3f / 4f // width / height, as Vinted shows the grid
@@ -49,17 +51,33 @@ object Crop {
         try {
             val canvas = Canvas(out)
             canvas.drawColor(edgeColor(src))
-            val w = f.scale * OUT_W
-            val h = w * src.height / src.width
-            val cx = OUT_W / 2f + f.dx * OUT_W
-            val cy = OUT_H / 2f + f.dy * OUT_W
-            canvas.drawBitmap(src, null, RectF(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2), Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG))
+            draw(canvas, src, f, 0f, 0f, OUT_W.toFloat())
             val bytes = ByteArrayOutputStream(2 * 1024 * 1024).also { out.compress(Bitmap.CompressFormat.JPEG, 92, it) }.toByteArray()
             return JpegClean.strip(bytes, keepIcc = false)
         } finally {
             src.recycle()
             out.recycle()
         }
+    }
+
+    /**
+     * Draws [src] framed by [f] in a frame of [fw] x [fw]/[RATIO] with its top-left corner at ([left], [top]).
+     * Where the photo does not reach, its own outermost pixels are carried on (floor continues as floor).
+     * The editor, its previews and the final JPEG all go through here, so what is seen is what is saved.
+     */
+    fun draw(canvas: Canvas, src: Bitmap, f: Framing, left: Float, top: Float, fw: Float) {
+        val w = f.scale * fw
+        val h = w * src.height / src.width
+        val cx = left + fw / 2 + f.dx * fw
+        val cy = top + fw / RATIO / 2 + f.dy * fw
+        val m = Matrix().apply {
+            postScale(w / src.width, h / src.height)
+            postTranslate(cx - w / 2, cy - h / 2)
+            postRotate(f.rotation, cx, cy)
+        }
+        val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+        paint.shader = BitmapShader(src, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP).also { it.setLocalMatrix(m) }
+        canvas.drawRect(left, top, left + fw, top + fw / RATIO, paint)
     }
 
     /** Average colour of the photo's outer border. */

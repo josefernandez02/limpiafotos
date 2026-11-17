@@ -38,6 +38,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,7 +58,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -68,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.ParentState
+import dev.catalogo.data.AutoFrame
 import dev.catalogo.data.Crop
 import dev.catalogo.data.Framing
 import dev.catalogo.data.Repo
@@ -91,6 +97,9 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     var selected by remember { mutableStateOf<Int?>(null) }
     var cropping by remember { mutableStateOf<Int?>(null) }
     var confirmLeave by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var autoWorking by remember { mutableStateOf(false) }
 
     LaunchedEffect(number, deviceId) {
         val photos = vm.editablePhotos(number, deviceId)
@@ -148,6 +157,26 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                             selected = null
                         }
                     }
+                    OutlinedButton(
+                        onClick = {
+                            val l = slots
+                            if (l != null && l.isNotEmpty()) scope.launch {
+                                autoWorking = true
+                                val r = AutoFrame.analyze(context, l[0].source)
+                                val fr = r.framing
+                                if (fr == null) {
+                                    vm.say("No localicé la prenda en la portada: recórtala a mano")
+                                } else {
+                                    runCatching { vm.renderCrop(l[0].source, fr) }
+                                        .onSuccess { b -> slots = slots?.toMutableList()?.also { s -> if (s.isNotEmpty()) s[0] = s[0].copy(bytes = b) } }
+                                        .onFailure { vm.say("No se pudo recortar la foto") }
+                                }
+                                autoWorking = false
+                            }
+                        },
+                        enabled = list != null && list.isNotEmpty() && !autoWorking,
+                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                    ) { OneLine(if (autoWorking) "Encuadrando…" else "Encuadrar la portada automáticamente") }
                     BigButton(
                         "Guardar",
                         enabled = changed,
@@ -290,7 +319,29 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
     var framing by remember { mutableStateOf<Framing?>(null) }
     var working by remember { mutableStateOf(false) }
     val img = image
-    LaunchedEffect(img) { if (img != null && framing == null) framing = Crop.cover(img.width, img.height) }
+    var note by remember { mutableStateOf("") }
+    var analyzing by remember { mutableStateOf(false) }
+    val auto: () -> Unit = {
+        scope.launch {
+            analyzing = true
+            val r = AutoFrame.analyze(context, slot.source)
+            analyzing = false
+            val fr = r.framing
+            if (fr != null) {
+                framing = fr
+                note = "Encuadre automático (${r.how})" +
+                    if (kotlin.math.abs(fr.rotation) >= 0.5f) " · enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
+            } else {
+                note = "No localicé la prenda: ajústala a mano"
+            }
+        }
+    }
+    LaunchedEffect(img) {
+        if (img != null && framing == null) {
+            framing = Crop.cover(img.width, img.height)
+            auto()
+        }
+    }
 
     Scaffold(
         topBar = { Bar("Recortar", onBack = onCancel) },
@@ -299,11 +350,16 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                 if (img != null) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
+                            onClick = auto,
+                            enabled = !analyzing,
+                            modifier = Modifier.weight(1f).height(48.dp),
+                        ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
+                        OutlinedButton(
                             onClick = { framing = framing?.copy(dx = 0f, dy = 0f) },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine("Centrar") }
                         OutlinedButton(
-                            onClick = { framing = Crop.cover(img.width, img.height) },
+                            onClick = { framing = Crop.cover(img.width, img.height); note = "" },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine("Restablecer") }
                     }
@@ -320,7 +376,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
             }
         },
     ) { padding ->
-        Box(Modifier.padding(padding).fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+          Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             val f = framing
             if (img == null || f == null) return@Box
             BoxWithConstraints(Modifier.fillMaxWidth().aspectRatio(Crop.RATIO, matchHeightConstraintsFirst = true)) {
@@ -343,15 +400,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                             }
                         },
                 ) {
-                    val w = f.scale * size.width
-                    val h = w * img.height / img.width
-                    val cx = size.width / 2 + f.dx * size.width
-                    val cy = size.height / 2 + f.dy * size.width
-                    drawImage(
-                        img,
-                        dstOffset = IntOffset((cx - w / 2).toInt(), (cy - h / 2).toInt()),
-                        dstSize = IntSize(w.toInt().coerceAtLeast(1), h.toInt().coerceAtLeast(1)),
-                    )
+                    drawFramed(img, f, 0f, 0f, size.width)
                     // Margin guide: the garment should touch this line on its widest side.
                     val inset = size.width * 0.08f
                     drawRect(
@@ -367,6 +416,46 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                     drawRect(Color.White, style = Stroke(width = 2.dp.toPx()))
                 }
             }
+          }
+          val f = framing
+          if (img != null && f != null) {
+              if (note.isNotBlank()) Muted(note, Modifier.padding(top = 6.dp))
+              Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
+                  Slider(
+                      value = f.rotation.coerceIn(-15f, 15f), onValueChange = { framing = f.copy(rotation = it) },
+                      valueRange = -15f..15f, modifier = Modifier.weight(1f),
+                  )
+              }
+              Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), Crop.RATIO, "Ficha 3:4", Modifier.weight(1f))
+                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), 4f / 5f, "Cuadrícula 4:5", Modifier.weight(1f))
+                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), 1f, "Cuadrado 1:1", Modifier.weight(1f))
+              }
+          }
         }
     }
+}
+
+/**
+ * How the framed photo looks in a container of another shape: the 3:4 image fills it and what falls outside is cut,
+ * as Vinted does in its grids. If the garment shows complete in all three, it is safe on any phone.
+ */
+@Composable
+private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, modifier: Modifier) {
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
+            val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
+            val fh = fw / Crop.RATIO
+            val left = (size.width - fw) / 2f
+            val top = (size.height - fh) / 2f
+            drawFramed(img, f, left, top, fw)
+        }
+        Muted(label, Modifier.padding(top = 2.dp), maxLines = 1)
+    }
+}
+
+/** The same drawing the saved JPEG gets (see [Crop.draw]), so the previews do not lie. */
+private fun DrawScope.drawFramed(img: ImageBitmap, f: Framing, left: Float, top: Float, fw: Float) {
+    drawIntoCanvas { Crop.draw(it.nativeCanvas, img.asAndroidBitmap(), f, left, top, fw) }
 }
