@@ -243,4 +243,15 @@ class CoverFrameTest {
         val clean = assertNotNull(CoverFrame.largestParts(Mask(w, h, on)))
         assertEquals(on.count { it }, clean.count())
     }
+
+    @Test
+    fun `trousers filling 73 percent of the photo's height (the real case) are framed, not left as they are`() {
+        // measured on the phone: silhouette 22%..73% across, 17%..90% down, photo 3:4
+        for (grow in 0..2) {
+            val m = CoverFrame.dilated(trousers(120, 160, top = 27, bottom = 144), grow)
+            val p = assertNotNull(CoverFrame.place(m, 480, 640), "grow $grow")
+            assertTrue(!p.tight, "grow $grow must not be left as it is")
+            assertTrue(CoverFrame.fillDepth(p, 480, 640) <= 0.09f + 0.001f, "grow $grow depth ${CoverFrame.fillDepth(p, 480, 640)}")
+        }
+    }
 }

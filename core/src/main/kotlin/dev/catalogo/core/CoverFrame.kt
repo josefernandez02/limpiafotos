@@ -61,9 +61,10 @@ object CoverFrame {
     const val MAX_AREA = 0.92f
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
     private const val DEPTH_TINY = 0.02f // a strip of mirrored backdrop this deep (share of the frame's side) is not noticed at all…
-    private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor: tall garments (trousers) need it
+    private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor…
+    private const val DEPTH_MAX = 0.09f  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
-    private val GROWTHS = floatArrayOf(1f, 1.03f, 1.06f)   // how much bigger than the safe size the garment may get to avoid any fill
+    private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)   // how much bigger than the safe size the garment may get to avoid any fill
     private const val GRID_X = 24        // frame points checked for what the fill would show
     private const val GRID_Y = 32
     private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
@@ -125,7 +126,7 @@ object CoverFrame {
             val p = at(g, kx, ky)
             if (uncoveredShare(p, imageW, imageH) == 0f) return p to 0f
         }
-        for (limit in floatArrayOf(DEPTH_TINY, DEPTH_OK)) for (g in GROWTHS) for ((kx, ky) in moves) {
+        for (limit in floatArrayOf(DEPTH_TINY, DEPTH_OK, DEPTH_MAX)) for (g in GROWTHS) for ((kx, ky) in moves) {
             val p = at(g, kx, ky)
             if (fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
         }
