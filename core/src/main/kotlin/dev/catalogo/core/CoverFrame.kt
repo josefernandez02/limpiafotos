@@ -16,7 +16,7 @@ import kotlin.math.sin
  * [dx]/[dy] move the photo's centre away from the frame's centre (also in frame widths), and
  * [rotation] turns it (degrees, clockwise) around its centre. Same meaning as the app's Framing.
  */
-data class Placement(val scale: Float, val dx: Float, val dy: Float, val rotation: Float)
+data class Placement(val scale: Float, val dx: Float, val dy: Float, val rotation: Float, val tight: Boolean = false)
 
 /** A yes/no picture of where the garment is: [on] has [w] x [h] cells, row by row. */
 class Mask(val w: Int, val h: Int, val on: BooleanArray) {
@@ -32,9 +32,30 @@ class Mask(val w: Int, val h: Int, val on: BooleanArray) {
  */
 object CoverFrame {
     const val FRAME_H = 4f / 3f          // frame height in frame widths (3:4)
-    const val SAFE_W = 0.88f             // the garment never takes more than this of the frame's width…
-    const val SAFE_H = 0.70f             // …or of its height: the square (1:1) crop of Vinted's previews keeps the middle 75% of the frame
-    const val LIFT = 0.015f              // garment centre a bit above the middle (the grid's «Destacado» band covers the bottom)
+    private const val PAD = 0.03f        // breathing room between the garment and the edge of any preview, in frame widths
+
+    /**
+     * The ways Vinted shows a cover, as (width/height, share of the bottom hidden under a label such as «Destacado»):
+     * item page 3:4, phone grid 4:5 with the label, desktop grid 2:3, square 1:1. A preview cuts the 3:4 frame to its
+     * own shape from the middle; the garment must stay inside what ALL of them show, so it is never cut anywhere.
+     */
+    val PREVIEWS = listOf(0.75f to 0f, 0.80f to 0.15f, 2f / 3f to 0f, 1f to 0f)
+
+    /** The box (frame widths; x from the left, y from the top) that every preview shows, minus [PAD]. */
+    private val safe: FloatArray = run {
+        var x0 = 0f; var x1 = 1f; var y0 = 0f; var y1 = FRAME_H
+        for ((ratio, label) in PREVIEWS) {
+            val w = min(1f, ratio * FRAME_H)                      // visible width / height of the frame in frame widths
+            val h = min(FRAME_H, 1f / ratio)
+            x0 = max(x0, (1f - w) / 2); x1 = min(x1, 1f - (1f - w) / 2)
+            val top = (FRAME_H - h) / 2
+            y0 = max(y0, top); y1 = min(y1, top + h * (1f - label))
+        }
+        floatArrayOf(x0 + PAD, y0 + PAD, x1 - PAD, y1 - PAD)
+    }
+    val SAFE_W: Float = safe[2] - safe[0]                        // the garment never takes more than this of the frame's width…
+    val SAFE_H: Float = (safe[3] - safe[1]) / FRAME_H            // …or of its height (as a share of it)
+    val LIFT: Float = (FRAME_H / 2 - (safe[1] + safe[3]) / 2) / FRAME_H   // garment centre a little above the middle: labels cover the bottom
     const val MAX_TILT = 10f             // degrees it will ever straighten
     const val MIN_AREA = 0.08f           // silhouettes smaller or bigger than this share of the photo are not trusted
     const val MAX_AREA = 0.92f
@@ -53,8 +74,20 @@ object CoverFrame {
         val near = dilated(clean, 2)
         val turned = plan(clean, near, imageW, imageH, tilt(clean)) ?: return null
         // when the garment cannot be framed without going beyond the photo, do not also turn it: leave the shot as it is
-        if (turned.second > 0.5f && turned.first.rotation != 0f) return plan(clean, near, imageW, imageH, 0f)?.first
-        return turned.first
+        val (p, blend) = if (turned.second > 0.5f && turned.first.rotation != 0f) plan(clean, near, imageW, imageH, 0f) ?: return null else turned
+        return p.copy(tight = blend > 0.5f)             // tight: the garment fills the photo, it may show cut
+    }
+
+    /** The box every preview shows (x0, y0, x1, y1 in frame widths from the frame's top-left), for the editor's guide. */
+    fun safeBox(): FloatArray = safe.copyOf()
+
+    /** How much two silhouettes (same grid) agree: shared area over joint area (1 = identical). */
+    fun agreement(a: Mask, b: Mask): Float {
+        if (a.w != b.w || a.h != b.h) return 0f
+        var both = 0
+        var either = 0
+        for (i in a.on.indices) { if (a.on[i] && b.on[i]) both++; if (a.on[i] || b.on[i]) either++ }
+        return if (either == 0) 0f else both.toFloat() / either
     }
 
     /**
@@ -75,6 +108,17 @@ object CoverFrame {
         val scale = min(SAFE_W * imageW / bw, SAFE_H * FRAME_H * imageW / bh).coerceIn(0.3f, 6f)
         val dx = -bcx * scale / imageW
         val dy = -bcy * scale / imageW - LIFT * FRAME_H
+        // first: the ideal size, the garment moved around inside the room the safe box leaves it, so that the photo
+        // reaches as much of the frame as it can (what it does not reach is mirrored backdrop, never garment)
+        val gw = bw * scale / imageW
+        val gh = bh * scale / imageW
+        val roomX = max(0f, (SAFE_W - gw) / 2) + PAD * 0.7f
+        val roomY = max(0f, (SAFE_H * FRAME_H - gh) / 2) + PAD * 0.7f
+        val moves = (-2..2).flatMap { kx -> (-2..2).map { ky -> kx to ky } }.sortedBy { abs(it.first) + abs(it.second) }
+        for ((kx, ky) in moves) {
+            val p = Placement(scale, dx + kx / 2f * roomX, dy + ky / 2f * roomY, tilt)
+            if (fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
+        }
         val cover = coverScale(imageW, imageH, tilt)
         for (i in 0..STEPS) {
             val a = i.toFloat() / STEPS
@@ -264,10 +308,10 @@ object CoverFrame {
 }
 
 /**
- * A silhouette from the photo alone, for when no segmentation model is at hand. Two colour groups are told apart in the
- * Lab colour space: the backdrop, modelled as a smooth surface (lighting changes across a floor or wall) fitted to the
- * photo's borders, and the garment, the colour that stands out most from it. Each pixel goes to the nearer group and the
- * two models are refined a few rounds. If the garment covers the borders the result is implausible and
+ * A silhouette from the photo alone, for when no segmentation model is at hand. The backdrop is modelled as a smooth
+ * surface (lighting changes across a floor or wall) fitted to the photo's borders in the Lab colour space; the garment is
+ * whatever deviates from it (any colour, patterned or not) plus, as a second opinion, the colour group that stands out
+ * from it (a garment as pale or as grey as the floor). If the garment covers the borders the result is implausible and
  * [CoverFrame.place] refuses it.
  */
 object Backdrop {
@@ -278,6 +322,7 @@ object Backdrop {
     /** [argb] is the photo (w x h). */
     fun mask(argb: IntArray, w: Int, h: Int): Mask {
         val n = w * h
+        val empty = Mask(w, h, BooleanArray(n))
         val lab = Array(3) { FloatArray(n) }
         for (i in 0 until n) {
             val c = argb[i]
@@ -289,22 +334,43 @@ object Backdrop {
             val y = (i / w) / (max(h - 1, 1).toFloat()) * 2f - 1f
             floatArrayOf(1f, x, y, x * x, x * y, y * y)
         }
-        val frame = BooleanArray(n) { val x = it % w; val y = it / w; x < 2 || y < 2 || x >= w - 2 || y >= h - 2 }
-        val med = FloatArray(3) { c -> lab[c].filterIndexed { i, _ -> frame[i] }.sorted().let { it[it.size / 2] } }
+        val ring = BooleanArray(n) { val x = it % w; val y = it / w; x < 3 || y < 3 || x >= w - 3 || y >= h - 3 }
+        val med = FloatArray(3) { c -> lab[c].filterIndexed { i, _ -> ring[i] }.sorted().let { it[it.size / 2] } }
         fun dist(i: Int, a: Float, b: Float, c: Float): Float {
             val d0 = (lab[0][i] - a) * WEIGHT[0]
             val d1 = (lab[1][i] - b) * WEIGHT[1]
             val d2 = (lab[2][i] - c) * WEIGHT[2]
             return Math.sqrt((d0 * d0 + d1 * d1 + d2 * d2).toDouble()).toFloat()
         }
+        fun surface(coef: Array<DoubleArray>, i: Int) = FloatArray(3) { c ->
+            var s = 0.0; for (k in 0 until TERMS) s += coef[c][k] * basis[i][k]; s.toFloat()
+        }
+        fun median(v: List<Float>) = v.sorted().let { it[it.size / 2] }
         val d0 = FloatArray(n) { dist(it, med[0], med[1], med[2]) }
-        val borderD = (0 until n).filter { frame[it] }.map { d0[it] }.sorted()
-        val cut = max(6f, 2.5f * borderD[(borderD.size * 0.4f).toInt()])
+        val ringD = (0 until n).filter { ring[it] }.map { d0[it] }.sorted()
+        val cut = max(6f, 2.5f * ringD[(ringD.size * 0.6f).toInt()])
+
+        // (1) deviation from the backdrop surface fitted to the photo's borders: finds any garment that differs
+        //     from the floor, patterned or not
+        var floor = BooleanArray(n) { ring[it] && d0[it] < cut }
+        var sigma = 0f
+        var gap = FloatArray(n)
+        repeat(4) {
+            val coef = fit(basis, lab, floor) ?: return empty
+            gap = FloatArray(n) { i -> val p = surface(coef, i); dist(i, p[0], p[1], p[2]) }
+            val r = (0 until n).filter { ring[it] }.map { gap[it] }
+            val m = median(r)
+            sigma = 1.4826f * median(r.map { abs(it - m) }) + m
+            floor = BooleanArray(n) { ring[it] && gap[it] < max(8f, 3f * sigma) }
+        }
+        val deviates = BooleanArray(n) { gap[it] > max(9f, 4f * sigma) }
+
+        // (2) two colour groups, floor surface against garment colour: finds a garment as pale or as grey as the floor
         val strong = d0.sorted()[(n * 0.85f).toInt().coerceAtMost(n - 1)]
-        var floor = BooleanArray(n) { frame[it] && d0[it] < cut }
+        var fl2 = BooleanArray(n) { ring[it] && d0[it] < cut }
         var garment = BooleanArray(n) { d0[it] > strong }
         repeat(ROUNDS) {
-            val coef = fit(basis, lab, floor) ?: return Mask(w, h, BooleanArray(n))
+            val coef = fit(basis, lab, fl2) ?: return@repeat
             val gc = FloatArray(3)
             var gn = 0
             for (i in 0 until n) if (garment[i]) { for (c in 0 until 3) gc[c] += lab[c][i]; gn++ }
@@ -313,25 +379,25 @@ object Backdrop {
             val next = BooleanArray(n)
             var on = 0
             for (i in 0 until n) {
-                val p = FloatArray(3) { c -> var s = 0.0; for (k in 0 until TERMS) s += coef[c][k] * basis[i][k]; s.toFloat() }
+                val p = surface(coef, i)
                 next[i] = dist(i, gc[0], gc[1], gc[2]) < dist(i, p[0], p[1], p[2])
                 if (next[i]) on++
             }
             if (on < 20 || n - on < 50) return@repeat
             garment = next
-            floor = BooleanArray(n) { !next[it] }
+            fl2 = BooleanArray(n) { !next[it] }
         }
-        // the two groups must really differ, otherwise there is no garment to speak of (texture noise split in two)
-        val coef = fit(basis, lab, floor) ?: return Mask(w, h, BooleanArray(n))
-        val gap = FloatArray(n) { i ->
-            val p = FloatArray(3) { c -> var t = 0.0; for (k in 0 until TERMS) t += coef[c][k] * basis[i][k]; t.toFloat() }
-            dist(i, p[0], p[1], p[2])
+        // that second opinion only counts if its two groups really differ (else it is texture noise split in two)
+        val coef2 = fit(basis, lab, fl2)
+        var separated = false
+        if (coef2 != null) {
+            val g = (0 until n).filter { garment[it] }.map { i -> val p = surface(coef2, i); dist(i, p[0], p[1], p[2]) }
+            val f = (0 until n).filter { !garment[it] }.map { i -> val p = surface(coef2, i); dist(i, p[0], p[1], p[2]) }
+            separated = g.isNotEmpty() && f.isNotEmpty() && median(g) >= max(10f, 3f * f.sorted()[f.size * 9 / 10])
         }
-        val floorGap = (0 until n).filter { !garment[it] }.map { gap[it] }.sorted()
-        val garmentGap = (0 until n).filter { garment[it] }.map { gap[it] }.sorted()
-        if (floorGap.isEmpty() || garmentGap.isEmpty()) return Mask(w, h, BooleanArray(n))
-        if (garmentGap[garmentGap.size / 2] < max(10f, 3f * floorGap[floorGap.size * 9 / 10])) return Mask(w, h, BooleanArray(n))
-        var cur = garment
+        val union = BooleanArray(n) { deviates[it] || (separated && garment[it]) }
+        if (union.count { it } < n / 50) return empty
+        var cur = union
         // two passes of majority vote smooth the texture and fill pin-holes
         repeat(2) {
             val next = BooleanArray(n)
@@ -347,7 +413,23 @@ object Backdrop {
             }
             cur = next
         }
-        return fillHoles(Mask(w, h, cur))
+        // closing: a pattern (spots, diamonds) must not leave the garment in pieces
+        return fillHoles(eroded(CoverFrame.dilated(Mask(w, h, cur), 3), 3))
+    }
+
+    /** The silhouette shrunk by [r] cells (the photo's own border does not eat into it). */
+    private fun eroded(m: Mask, r: Int): Mask {
+        var cur = m.on
+        repeat(r) {
+            val next = cur.copyOf()
+            for (y in 0 until m.h) for (x in 0 until m.w) {
+                if (!cur[y * m.w + x]) continue
+                if ((x > 0 && !cur[y * m.w + x - 1]) || (x < m.w - 1 && !cur[y * m.w + x + 1]) ||
+                    (y > 0 && !cur[(y - 1) * m.w + x]) || (y < m.h - 1 && !cur[(y + 1) * m.w + x])) next[y * m.w + x] = false
+            }
+            cur = next
+        }
+        return Mask(m.w, m.h, cur)
     }
 
     /** Cells not reachable from the border without crossing the garment (a pattern, a gap between arms) become garment. */

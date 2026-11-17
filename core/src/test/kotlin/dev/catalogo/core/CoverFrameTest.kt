@@ -150,4 +150,22 @@ class CoverFrameTest {
         assertTrue(CoverFrame.coverScale(3000, 4000, 5f) > 1f)                           // turned: needs a little more
         assertTrue(CoverFrame.coverScale(4000, 3000, 0f) > 1.7f)                         // landscape photo must grow to fill the height
     }
+
+    @Test
+    fun `the backdrop silhouette holds a patterned garment together even where the pattern matches the floor`() {
+        val w = 120
+        val h = 160
+        val rnd = java.util.Random(11)
+        val photo = IntArray(w * h) { i ->
+            val x = i % w; val y = i / w
+            val tex = rnd.nextInt(11) - 5
+            val light = 130 + 40 * x / w + 20 * (h - y) / h
+            val inside = x in 30..89 && y in 40..119
+            val spot = inside && ((x / 3 + y / 3) % 2 == 0)                      // black spots; between them, floor-coloured wool
+            val v = if (spot) 25 + tex else light + tex
+            (0xFF shl 24) or (v shl 16) or (v shl 8) or v
+        }
+        val b = box(CoverFrame.largestParts(Backdrop.mask(photo, w, h))!!)
+        assertTrue(abs(b[0] - 30) <= 4 && abs(b[2] - 89) <= 4 && abs(b[1] - 40) <= 4 && abs(b[3] - 119) <= 4, "box ${b.toList()}")
+    }
 }

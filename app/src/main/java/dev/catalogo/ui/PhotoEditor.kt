@@ -72,6 +72,7 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
+import dev.catalogo.core.CoverFrame
 import dev.catalogo.core.ParentState
 import dev.catalogo.data.AutoFrame
 import dev.catalogo.data.Crop
@@ -329,7 +330,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
             val fr = r.framing
             if (fr != null) {
                 framing = fr
-                note = "Encuadre automático (${r.how})" +
+                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede salir cortada: mejor otra foto más abierta. "
+                        else "Encuadre automático (${r.how})") +
                     if (kotlin.math.abs(fr.rotation) >= 0.5f) " · enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
             } else {
                 note = "No localicé la prenda: ajústala a mano"
@@ -402,11 +404,11 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                 ) {
                     drawFramed(img, f, 0f, 0f, size.width)
                     // Margin guide: the garment should touch this line on its widest side.
-                    val inset = size.width * 0.08f
+                    val box = CoverFrame.safeBox()
                     drawRect(
                         color = Color.White.copy(alpha = 0.8f),
-                        topLeft = Offset(inset, inset),
-                        size = GSize(size.width - 2 * inset, size.height - 2 * inset),
+                        topLeft = Offset(box[0] * size.width, box[1] * size.width),
+                        size = GSize((box[2] - box[0]) * size.width, (box[3] - box[1]) * size.width),
                         style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
                     )
                     // Centre lines, to keep the garment symmetric.
@@ -428,9 +430,10 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                   )
               }
               Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), Crop.RATIO, "Ficha 3:4", Modifier.weight(1f))
-                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), 4f / 5f, "Cuadrícula 4:5", Modifier.weight(1f))
-                  FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), 1f, "Cuadrado 1:1", Modifier.weight(1f))
+                  for ((ratio, label) in CoverFrame.PREVIEWS) {
+                      val name = when (ratio) { 0.75f -> "Ficha 3:4"; 0.8f -> "Móvil 4:5"; 1f -> "Cuadrado"; else -> "PC 2:3" }
+                      FramePreview(img, f, loaded?.second ?: Color(0xFF2A2C2F), ratio, name, Modifier.weight(1f), label)
+                  }
               }
           }
         }
@@ -442,7 +445,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
  * as Vinted does in its grids. If the garment shows complete in all three, it is safe on any phone.
  */
 @Composable
-private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, modifier: Modifier) {
+private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, modifier: Modifier, labelBand: Float = 0f) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
             val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
@@ -450,6 +453,7 @@ private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, 
             val left = (size.width - fw) / 2f
             val top = (size.height - fh) / 2f
             drawFramed(img, f, left, top, fw)
+            if (labelBand > 0f) drawRect(Color(0xFF3F9FAF).copy(alpha = 0.85f), Offset(0f, size.height * (1f - labelBand)), GSize(size.width, size.height * labelBand))   // «Destacado» band
         }
         Muted(label, Modifier.padding(top = 2.dp), maxLines = 1)
     }

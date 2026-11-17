@@ -25,20 +25,29 @@ import kotlin.math.max
  */
 object AutoFrame {
     /** [how]: «IA» (model), «fondo» (backdrop colour) or empty (nothing found). */
-    data class Result(val framing: Framing?, val how: String)
+    data class Result(val framing: Framing?, val how: String, val tight: Boolean = false)
 
     private const val DECODE_EDGE = 640
     private const val MASK_EDGE = 128
+    private const val AGREE = 0.8f             // overlap of the two silhouettes from which they count as the same
     private const val MODEL_WAIT_MS = 25_000L   // the first time Google Play services may have to download the model
 
     suspend fun analyze(context: Context, uri: Uri): Result = withContext(Dispatchers.Default) {
         val bmp = runCatching { decode(context, uri) }.getOrNull() ?: return@withContext Result(null, "")
         try {
             val model = runCatching { modelMask(bmp) }.getOrNull()
-            model?.let { CoverFrame.place(it, bmp.width, bmp.height) }?.let { return@withContext Result(it.toFraming(), "IA") }
-            val floor = runCatching { backdropMask(bmp) }.getOrNull()
-            floor?.let { CoverFrame.place(it, bmp.width, bmp.height) }?.let { return@withContext Result(it.toFraming(), "fondo") }
-            Result(null, "")
+            val floor = runCatching { backdropMask(bmp, model?.w, model?.h) }.getOrNull()
+            val byModel = model?.let { CoverFrame.place(it, bmp.width, bmp.height) }
+            val byFloor = floor?.let { CoverFrame.place(it, bmp.width, bmp.height) }
+            // Two independent opinions. When they agree, the model's smoother edge wins; when they do not (the model
+            // loses a sleeve or a pattern, or the floor is tricky), the one that gave a believable silhouette is used.
+            val agree = model != null && floor != null && CoverFrame.agreement(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= AGREE
+            val (p, how) = when {
+                byModel != null && (agree || byFloor == null) -> byModel to "IA"
+                byFloor != null -> byFloor to "fondo"
+                else -> return@withContext Result(null, "")
+            }
+            Result(p.toFraming(), how, p.tight)
         } finally {
             bmp.recycle()
         }
@@ -92,9 +101,10 @@ object AutoFrame {
         }
     }
 
-    private fun backdropMask(bmp: Bitmap): Mask {
+    /** [mw]x[mh]: the grid of the model's mask, so both can be compared cell by cell. */
+    private fun backdropMask(bmp: Bitmap, mw: Int?, mh: Int?): Mask {
         val s = MASK_EDGE.toFloat() / max(bmp.width, bmp.height)
-        val small = Bitmap.createScaledBitmap(bmp, (bmp.width * s).toInt().coerceAtLeast(1), (bmp.height * s).toInt().coerceAtLeast(1), true)
+        val small = Bitmap.createScaledBitmap(bmp, mw ?: (bmp.width * s).toInt().coerceAtLeast(1), mh ?: (bmp.height * s).toInt().coerceAtLeast(1), true)
         try {
             val px = IntArray(small.width * small.height)
             small.getPixels(px, 0, small.width, 0, 0, small.width, small.height)
