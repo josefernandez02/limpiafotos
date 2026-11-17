@@ -168,4 +168,22 @@ class CoverFrameTest {
         val b = box(CoverFrame.largestParts(Backdrop.mask(photo, w, h))!!)
         assertTrue(abs(b[0] - 30) <= 4 && abs(b[2] - 89) <= 4 && abs(b[1] - 40) <= 4 && abs(b[3] - 119) <= 4, "box ${b.toList()}")
     }
+
+    @Test
+    fun `the framing leaves no gap, or at most a tiny one, whatever the photo`() {
+        // a garment filling different parts of a few photo shapes: never a big hole to invent
+        for ((w, h) in listOf(3000 to 4000, 3000 to 3000, 4000 to 3000)) for (sx in listOf(-12, 0, 12)) {
+            val m = jumper(120, 140, shiftX = sx)
+            val p = assertNotNull(CoverFrame.place(m, w, h), "$w x $h shift $sx")
+            assertTrue(CoverFrame.uncoveredShare(p, w, h) <= 0.07f, "$w x $h shift $sx: ${CoverFrame.uncoveredShare(p, w, h)}")
+        }
+    }
+
+    @Test
+    fun `a photo that covers the frame reports no uncovered share`() {
+        val cover = Placement(CoverFrame.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
+        assertEquals(0f, CoverFrame.uncoveredShare(cover, 3000, 4000), 0.0001f)
+        val zoomedOut = Placement(0.5f, 0f, 0f, 0f)
+        assertTrue(CoverFrame.uncoveredShare(zoomedOut, 3000, 4000) > 0.3f)
+    }
 }

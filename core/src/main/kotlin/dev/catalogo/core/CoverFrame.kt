@@ -60,8 +60,10 @@ object CoverFrame {
     const val MIN_AREA = 0.08f           // silhouettes smaller or bigger than this share of the photo are not trusted
     const val MAX_AREA = 0.92f
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
-    private const val STEPS = 10         // from the ideal placement to «photo just covers the frame»
-    private const val GRID_X = 24        // frame points checked for what the mirrored fill would show
+    private const val GAP_OK = 0.06f     // largest share of the frame that may be left to mirrored backdrop
+    private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
+    private val GROWTHS = floatArrayOf(1f, 1.03f, 1.06f)   // how much bigger than the safe size the garment may get to avoid any fill
+    private const val GRID_X = 24        // frame points checked for what the fill would show
     private const val GRID_Y = 32
     private const val TRIM = 0.002f      // share of the silhouette ignored at each border (stray specks)
 
@@ -91,10 +93,11 @@ object CoverFrame {
     }
 
     /**
-     * The ideal placement for the given turn (garment centred, always the same size) and, if the photo does not reach
-     * the frame, how far it had to be moved towards covering it (0 = ideal, 1 = photo just covers the frame).
-     * What the photo does not reach is filled with mirrored backdrop, so the ideal is accepted as long as that mirror
-     * shows no garment; otherwise the photo is brought closer to the frame, step by step.
+     * The ideal placement for the given turn (garment centred, always the same size) and how it was reached:
+     * 0 = the photo covers the whole frame, so there is nothing to fill (or only a sliver of mirrored backdrop);
+     * 1 = the garment does not fit in the photo, so the photo is just made to cover the frame.
+     * Order of preference: no gap at all, the garment up to a few % bigger and moved around inside the room the safe box
+     * leaves it; then a small gap ([GAP_OK]) of mirrored backdrop that shows no garment; then the photo as it is.
      */
     private fun plan(clean: Mask, near: Mask, imageW: Int, imageH: Int, tilt: Float): Pair<Placement, Float>? {
         val grid = rotated(clean, tilt)
@@ -105,27 +108,47 @@ object CoverFrame {
         if (bw < 1f || bh < 1f) return null
         val bcx = ((box.x0 + box.x1 + 1) / 2f - grid.w / 2f) * k
         val bcy = ((box.y0 + box.y1 + 1) / 2f - grid.h / 2f) * k
-        val scale = min(SAFE_W * imageW / bw, SAFE_H * FRAME_H * imageW / bh).coerceIn(0.3f, 6f)
-        val dx = -bcx * scale / imageW
-        val dy = -bcy * scale / imageW - LIFT * FRAME_H
-        // first: the ideal size, the garment moved around inside the room the safe box leaves it, so that the photo
-        // reaches as much of the frame as it can (what it does not reach is mirrored backdrop, never garment)
-        val gw = bw * scale / imageW
-        val gh = bh * scale / imageW
-        val roomX = max(0f, (SAFE_W - gw) / 2) + PAD * 0.7f
-        val roomY = max(0f, (SAFE_H * FRAME_H - gh) / 2) + PAD * 0.7f
+        val ideal = min(SAFE_W * imageW / bw, SAFE_H * FRAME_H * imageW / bh).coerceIn(0.3f, 6f)
         val moves = (-2..2).flatMap { kx -> (-2..2).map { ky -> kx to ky } }.sortedBy { abs(it.first) + abs(it.second) }
-        for ((kx, ky) in moves) {
-            val p = Placement(scale, dx + kx / 2f * roomX, dy + ky / 2f * roomY, tilt)
-            if (fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
+        fun at(g: Float, kx: Int, ky: Int): Placement {
+            val s = ideal * g
+            val roomX = max(0f, (SAFE_W - bw * s / imageW) / 2) + PAD * 0.7f
+            val roomY = max(0f, (SAFE_H * FRAME_H - bh * s / imageW) / 2) + PAD * 0.7f
+            return Placement(s, -bcx * s / imageW + kx / 2f * roomX, -bcy * s / imageW - LIFT * FRAME_H + ky / 2f * roomY, tilt)
         }
-        val cover = coverScale(imageW, imageH, tilt)
-        for (i in 0..STEPS) {
-            val a = i.toFloat() / STEPS
-            val p = Placement((1 - a) * scale + a * cover, (1 - a) * dx, (1 - a) * dy, tilt)
-            if (fillIsBackdrop(near, p, imageW, imageH)) return p to a
+        for (g in GROWTHS) for ((kx, ky) in moves) {
+            val p = at(g, kx, ky)
+            if (uncoveredShare(p, imageW, imageH) == 0f) return p to 0f
         }
-        return Placement(cover, 0f, 0f, tilt) to 1f
+        for (g in GROWTHS) for ((kx, ky) in moves) {
+            val p = at(g, kx, ky)
+            if (uncoveredShare(p, imageW, imageH) <= GAP_OK && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
+        }
+        return Placement(coverScale(imageW, imageH, tilt), 0f, 0f, tilt) to 1f
+    }
+
+    /** Share of the frame the photo does not reach with this placement (0 = it covers everything). */
+    fun uncoveredShare(p: Placement, imageW: Int, imageH: Int): Float {
+        var out = 0
+        var n = 0
+        forEachFramePoint(p, imageW, imageH) { u, v ->
+            n++
+            if (u < -EDGE || u > 1f + EDGE || v < -EDGE || v > 1f + EDGE) out++
+        }
+        return if (n == 0) 0f else out.toFloat() / n
+    }
+
+    /** For a grid of points over the frame, where each falls in the photo (0..1 across and down; outside = not reached). */
+    private inline fun forEachFramePoint(p: Placement, imageW: Int, imageH: Int, f: (Float, Float) -> Unit) {
+        val rad = p.rotation * PI / 180.0
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        val ph = p.scale * imageH / imageW
+        for (j in 0..GRID_Y) for (i in 0..GRID_X) {
+            val px = i.toFloat() / GRID_X - 0.5f - p.dx
+            val py = j.toFloat() / GRID_Y * FRAME_H - FRAME_H / 2 - p.dy
+            f((c * px + s * py) / p.scale + 0.5f, (-s * px + c * py) / ph + 0.5f)
+        }
     }
 
     /** Smallest photo width (in frame widths) with which the photo, turned [tilt], covers the whole frame when centred. */
@@ -140,21 +163,14 @@ object CoverFrame {
 
     /** True when every frame point the photo does not reach would show, once mirrored, backdrop and no garment. */
     private fun fillIsBackdrop(near: Mask, p: Placement, imageW: Int, imageH: Int): Boolean {
-        val rad = p.rotation * PI / 180.0
-        val c = cos(rad).toFloat()
-        val s = sin(rad).toFloat()
-        val ph = p.scale * imageH / imageW
-        for (j in 0..GRID_Y) for (i in 0..GRID_X) {
-            val px = i.toFloat() / GRID_X - 0.5f - p.dx
-            val py = j.toFloat() / GRID_Y * FRAME_H - FRAME_H / 2 - p.dy
-            val u = (c * px + s * py) / p.scale + 0.5f
-            val v = (-s * px + c * py) / ph + 0.5f
-            if (u in 0f..1f && v in 0f..1f) continue
+        var clean = true
+        forEachFramePoint(p, imageW, imageH) { u, v ->
+            if (!clean || (u in 0f..1f && v in 0f..1f)) return@forEachFramePoint
             val x = (mirrored(u) * near.w).toInt().coerceIn(0, near.w - 1)
             val y = (mirrored(v) * near.h).toInt().coerceIn(0, near.h - 1)
-            if (near.on[y * near.w + x]) return false
+            if (near.on[y * near.w + x]) clean = false
         }
-        return true
+        return clean
     }
 
     /** Where a coordinate outside 0..1 lands when the photo is mirrored again and again (Android's MIRROR tiling). */

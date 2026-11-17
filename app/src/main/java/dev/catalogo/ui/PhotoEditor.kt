@@ -73,6 +73,10 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CoverFrame
+import dev.catalogo.core.CropEdit
+import dev.catalogo.core.CropHistory
+import dev.catalogo.core.Placement
+import dev.catalogo.data.CropLog
 import dev.catalogo.core.ParentState
 import dev.catalogo.data.AutoFrame
 import dev.catalogo.data.Crop
@@ -83,7 +87,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** A photo in the editor: its source and, once cropped, the new JPEG. */
-private data class Slot(val source: Uri, val bytes: ByteArray? = null, val key: Int)
+private data class Slot(val source: Uri, val bytes: ByteArray? = null, val key: Int, val edit: CropEdit? = null, val framing: Framing? = null)
 
 /**
  * Order, cover (the first photo), removal and crop of one account's photos.
@@ -105,7 +109,8 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     LaunchedEffect(number, deviceId) {
         val photos = vm.editablePhotos(number, deviceId)
         original = photos
-        slots = photos.mapIndexed { i, uri -> Slot(uri, key = i) }
+        val log = CropHistory.aligned(CropLog.load(context, deviceId, number), photos.size)
+        slots = photos.mapIndexed { i, uri -> Slot(uri, key = i, edit = log.getOrNull(i)) }
     }
     val list = slots
     val changed = list != null && (list.map { it.source } != original || list.any { it.bytes != null })
@@ -127,9 +132,12 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
         CropScreen(
             vm = vm,
             slot = list[crop],
+            isCover = crop == 0,
             onCancel = { cropping = null },
-            onDone = { bytes ->
-                slots = list.toMutableList().also { it[crop] = it[crop].copy(bytes = bytes) }
+            onDone = { bytes, f, kind ->
+                slots = list.toMutableList().also {
+                    it[crop] = it[crop].copy(bytes = bytes, framing = f, edit = CropHistory.next(it[crop].edit, kind, System.currentTimeMillis()))
+                }
                 cropping = null
             },
         )
@@ -169,7 +177,11 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                                     vm.say("No localicé la prenda en la portada: recórtala a mano")
                                 } else {
                                     runCatching { vm.renderCrop(l[0].source, fr) }
-                                        .onSuccess { b -> slots = slots?.toMutableList()?.also { s -> if (s.isNotEmpty()) s[0] = s[0].copy(bytes = b) } }
+                                        .onSuccess { b ->
+                                            slots = slots?.toMutableList()?.also { s ->
+                                                if (s.isNotEmpty()) s[0] = s[0].copy(bytes = b, framing = fr, edit = CropHistory.next(s[0].edit, CropHistory.AUTO, System.currentTimeMillis()))
+                                            }
+                                        }
                                         .onFailure { vm.say("No se pudo recortar la foto") }
                                 }
                                 autoWorking = false
@@ -181,7 +193,10 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                     BigButton(
                         "Guardar",
                         enabled = changed,
-                        onClick = { vm.savePhotos(number, deviceId, list.orEmpty().map { Repo.EditedPhoto(it.source, it.bytes) }) },
+                        onClick = {
+                            CropLog.save(context, deviceId, number, list.orEmpty().map { it.edit })
+                            vm.savePhotos(number, deviceId, list.orEmpty().map { Repo.EditedPhoto(it.source, it.bytes) })
+                        },
                     )
                 }
             }
@@ -219,9 +234,9 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                             .clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.primary)
                             .padding(horizontal = 8.dp, vertical = 2.dp),
                     )
-                    if (slot.bytes != null) {
+                    if (slot.bytes != null || slot.edit != null) {
                         Text(
-                            "Recortada",
+                            slot.edit?.takeIf { it.count > 1 }?.let { "Recortada ×${it.count}" } ?: "Recortada",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.align(Alignment.BottomStart).padding(6.dp)
@@ -296,7 +311,7 @@ private fun SlotImage(slot: Slot, modifier: Modifier) {
  * catalogue ends up with about the same space around the garment.
  */
 @Composable
-private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDone: (ByteArray) -> Unit) {
+private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel: () -> Unit, onDone: (ByteArray, Framing, String) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     BackHandler(onBack = onCancel)
@@ -317,19 +332,23 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
         }
     }
     val image = loaded?.first
-    var framing by remember { mutableStateOf<Framing?>(null) }
+    var framing by remember { mutableStateOf(slot.framing) }
     var working by remember { mutableStateOf(false) }
     val img = image
     var note by remember { mutableStateOf("") }
     var analyzing by remember { mutableStateOf(false) }
-    val auto: () -> Unit = {
+    var touched by remember { mutableStateOf(false) }      // the user has moved the photo: an automatic framing on opening must not undo it
+    var manual by remember { mutableStateOf(false) }       // how the framing was made, for the record
+    val auto: (Boolean) -> Unit = { onOpen ->
         scope.launch {
             analyzing = true
             val r = AutoFrame.analyze(context, slot.source)
             analyzing = false
+            if (onOpen && touched) return@launch
             val fr = r.framing
             if (fr != null) {
                 framing = fr
+                manual = false
                 note = (if (r.tight) "La prenda ocupa casi toda la foto y puede salir cortada: mejor otra foto más abierta. "
                         else "Encuadre automático (${r.how})") +
                     if (kotlin.math.abs(fr.rotation) >= 0.5f) " · enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
@@ -341,7 +360,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
     LaunchedEffect(img) {
         if (img != null && framing == null) {
             framing = Crop.cover(img.width, img.height)
-            auto()
+            if (isCover && slot.edit == null) auto(true)
         }
     }
 
@@ -352,16 +371,16 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                 if (img != null) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
-                            onClick = auto,
+                            onClick = { auto(false) },
                             enabled = !analyzing,
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         OutlinedButton(
-                            onClick = { framing = framing?.copy(dx = 0f, dy = 0f) },
+                            onClick = { touched = true; manual = true; framing = framing?.copy(dx = 0f, dy = 0f) },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine("Centrar") }
                         OutlinedButton(
-                            onClick = { framing = Crop.cover(img.width, img.height); note = "" },
+                            onClick = { touched = true; manual = true; framing = Crop.cover(img.width, img.height); note = "" },
                             modifier = Modifier.weight(1f).height(48.dp),
                         ) { OneLine("Restablecer") }
                     }
@@ -372,7 +391,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                     scope.launch {
                         val bytes = runCatching { vm.renderCrop(slot.source, f) }
                         working = false
-                        bytes.onSuccess(onDone).onFailure { vm.say("No se pudo recortar la foto") }
+                        bytes.onSuccess { onDone(it, f, if (manual) CropHistory.MANUAL else CropHistory.AUTO) }.onFailure { vm.say("No se pudo recortar la foto") }
                     }
                 })
             }
@@ -389,6 +408,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
                         .pointerInput(img) {
                             detectTransformGestures { centroid, pan, zoom, _ ->
                                 val cur = framing ?: return@detectTransformGestures
+                                touched = true
+                                manual = true
                                 val scale = (cur.scale * zoom).coerceIn(0.3f, 6f)
                                 val k = scale / cur.scale
                                 // Zoom around the fingers: the point under them stays put.
@@ -421,11 +442,23 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, onCancel: () -> Unit, onDo
           }
           val f = framing
           if (img != null && f != null) {
-              if (note.isNotBlank()) Muted(note, Modifier.padding(top = 6.dp))
+              slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 6.dp)) }
+              if (note.isNotBlank()) Muted(note, Modifier.padding(top = 4.dp))
+              if (CoverFrame.uncoveredShare(Placement(f.scale, f.dx, f.dy, f.rotation), img.width, img.height) > 0.005f) {
+                  Muted("Queda un hueco que se rellena con el fondo: acerca la foto para evitarlo.", Modifier.padding(top = 2.dp))
+              }
               Row(Modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                  Muted("Zoom ${"%.2f".format(java.util.Locale.ROOT, f.scale)}×", Modifier.width(88.dp))
+                  Slider(
+                      value = f.scale.coerceIn(0.5f, 3f),
+                      onValueChange = { touched = true; manual = true; framing = f.copy(scale = it, dx = f.dx * it / f.scale, dy = f.dy * it / f.scale) },
+                      valueRange = 0.5f..3f, modifier = Modifier.weight(1f),
+                  )
+              }
+              Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                   Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
                   Slider(
-                      value = f.rotation.coerceIn(-15f, 15f), onValueChange = { framing = f.copy(rotation = it) },
+                      value = f.rotation.coerceIn(-15f, 15f), onValueChange = { touched = true; manual = true; framing = f.copy(rotation = it) },
                       valueRange = -15f..15f, modifier = Modifier.weight(1f),
                   )
               }

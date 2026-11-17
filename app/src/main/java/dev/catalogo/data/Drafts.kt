@@ -72,8 +72,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 fresh.size == 1 -> "1 link por revisar"
                 else -> "${fresh.size} links por revisar"
             }
-            val text = if (fresh.size == 1 && worst != null) worst.summary.ifBlank { worst.reason }
-                else "$games. Míralos en Estado: qué pasó y qué hacer."
+            val text = if (fresh.size == 1 && worst != null) worst.summary.ifBlank { worst.reason }.let { if (it.length > 90) it.take(89).trimEnd() + "…" else it }
+                else games.let { if (it.length > 70) it.take(69).trimEnd() + "…" else it }
             DraftsService.alert(context, 9_000, title, text)
             AppLog.w("pc", "avisos del PC: ${fresh.joinToString { it.title.ifBlank { it.url } }}")
         }

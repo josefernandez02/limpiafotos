@@ -19,6 +19,7 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +27,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,6 +56,12 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val incidents by vm.incidents.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val articles = p.articles.filter { !it.released }
+    // The notices stay out of the way unless something serious just happened; the user can open or hide them any time.
+    val now = System.currentTimeMillis()
+    val urgent = incidents.any { it.level == "grave" && now - it.at < 3 * 3_600_000L }
+    var alertsChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    val showAlerts = alertsChoice ?: urgent
+    var showPlayed by rememberSaveable { mutableStateOf(false) }
     val groups = listOf(Stage.REVIEW, Stage.WORKING, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED).associateWith { st ->
         articles.filter { Catalog.stage(p, it, p.self) == st }.sortedByDescending { it.desk?.at ?: 0 }
             .let { if (st == Stage.PLAYED) it.take(10) else it }
@@ -70,16 +78,16 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             if (incidents.isNotEmpty()) {
                 item(key = "h-inc") {
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("Avisos por revisar", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.error,
+                        Text("Avisos (${incidents.size})", style = MaterialTheme.typography.titleSmall,
+                            color = if (urgent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.weight(1f))
-                        Muted("${incidents.size}")
+                        TextButton(onClick = { alertsChoice = !showAlerts }) { Text(if (showAlerts) "Ocultar" else "Ver") }
                     }
                 }
-                item(key = "inc") {
+                if (showAlerts) item(key = "inc") {
                     Tile {
-                        Muted("Avisos del PC y links que no salieron tras varios intentos. Toca un aviso para ver qué pasó y qué hacer; márcalo como revisado al terminar.")
-                        incidents.forEach { inc ->
-                            HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                        incidents.forEachIndexed { n, inc ->
+                            if (n > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
                             IncidentRow(inc, onOpen = { url ->
                                 runCatching {
                                     context.startActivity(
@@ -88,6 +96,13 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
                                     )
                                 }
                             }, onDone = { vm.incidentReviewed(inc.id) })
+                        }
+                        if (incidents.size > 1) {
+                            OutlinedButton(
+                                onClick = { incidents.forEach { vm.incidentReviewed(it.id) } },
+                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(44.dp),
+                                shape = RoundedCornerShape(14.dp),
+                            ) { OneLine("Marcar todos como revisados") }
                         }
                     }
                 }
@@ -108,9 +123,10 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
                             modifier = Modifier.weight(1f),
                         )
                         Muted("${list.size}")
+                        if (stage == Stage.PLAYED) TextButton(onClick = { showPlayed = !showPlayed }) { Text(if (showPlayed) "Ocultar" else "Ver") }
                     }
                 }
-                item(key = "g-${stage.name}") {
+                if (stage != Stage.PLAYED || showPlayed) item(key = "g-${stage.name}") {
                     Tile {
                         list.forEachIndexed { i, a ->
                             if (i > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -229,7 +245,7 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 /** One notice from the PC: a watchdog warning (what happened, what to do) or a single link without like. */
 @Composable
 private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -> Unit, onDone: () -> Unit) {
-    var open by remember(inc.id) { mutableStateOf(inc.level == "grave") }
+    var open by remember(inc.id) { mutableStateOf(false) }
     val color = when (inc.level) {
         "grave" -> MaterialTheme.colorScheme.error
         "aviso" -> MaterialTheme.colorScheme.tertiary
@@ -249,30 +265,24 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
             )
             Muted(SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(inc.at)))
         }
-        if (inc.repeated) Text("REINCIDENTE: no es la primera vez", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+        if (inc.repeated) Text("Reincidente", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
         if (inc.isWarning) {
-            if (inc.game.isNotBlank() && inc.game != inc.title) Muted(inc.game)
-            Muted(inc.summary.ifBlank { inc.reason }, maxLines = if (open) Int.MAX_VALUE else 2)
+            // Short by default: one line of what happened; tapping adds the first things to do, never a wall of text.
+            Muted(inc.summary.ifBlank { inc.reason }, maxLines = if (open) 4 else 2)
             if (open) {
-                if (inc.details.isNotEmpty()) {
-                    Text("Qué ha pasado", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
-                    inc.details.forEach { Muted("• $it") }
-                }
                 if (inc.actions.isNotEmpty()) {
                     Text("Qué hacer", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
-                    inc.actions.forEachIndexed { i, s -> Muted("${i + 1}. $s") }
+                    inc.actions.take(2).forEachIndexed { i, s -> Muted("${i + 1}. $s", maxLines = 3) }
                 }
                 if (links.isNotEmpty()) {
-                    Text("Links por revisar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
-                    links.take(8).forEach { u ->
+                    Text("Para revisar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
+                    links.take(3).forEach { u ->
                         Text(itemName(u).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.clickable { onOpen(u) }.padding(vertical = 4.dp))
                     }
-                    if (links.size > 8) Muted("y ${links.size - 8} más")
+                    if (links.size > 3) Muted("y ${links.size - 3} más")
                 }
-            } else {
-                Muted("Toca para ver qué hacer")
             }
         } else {
             Text(itemName(inc.url).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
@@ -295,24 +305,28 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
 /** The watchdog's last hours at a glance: games, how many fine, warnings, serious ones, and the latest not fine. */
 @Composable
 private fun HealthTile(h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>) {
+    var more by rememberSaveable { mutableStateOf(false) }
     Tile {
+        // Two lines are the whole story; the reasons and the latest problems are one tap away.
         if (today.isNotEmpty()) {
-            Text("Horas de juego de hoy", style = MaterialTheme.typography.titleSmall)
-            today.sortedBy { it.game }.forEach { g ->
-                Muted("${g.game}: ${g.played} de ${g.hours} jugadas")
-                g.reasons.entries.sortedByDescending { it.value }.take(3).forEach { (why, n) -> Muted("   $n × $why", maxLines = 2) }
-            }
+            Text("Hoy", style = MaterialTheme.typography.titleSmall)
+            Muted(today.sortedBy { it.game }.joinToString(GAP) { "${it.game} ${it.played}/${it.hours}" }, maxLines = 2)
         }
-        if (h == null) return@Tile
-        Text("Últimas ${h.hours} h", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = if (today.isNotEmpty()) 8.dp else 0.dp))
-        if (h.games == 0) {
-            Muted("Ningún juego registrado todavía.")
-        } else {
-            Muted("${h.games} juegos · ${h.ok} bien · ${h.warnings} con aviso · ${h.serious} graves")
-            h.last.filter { it.level == "aviso" || it.level == "grave" }.takeLast(3).reversed().forEach {
-                val hhmm = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(it.at))
-                Muted("${if (it.level == "grave") "🔴" else "🟠"} $hhmm ${it.game} ${it.time}: ${it.summary}", maxLines = 2)
+        if (h != null) {
+            Text("Últimas ${h.hours} h", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(top = if (today.isNotEmpty()) 8.dp else 0.dp))
+            Muted(if (h.games == 0) "Ningún juego registrado todavía." else "${h.games} juegos · ${h.ok} bien · ${h.warnings} con aviso · ${h.serious} graves")
+        }
+        val reasons = today.flatMap { g -> g.reasons.entries.map { Triple(g.game, it.key, it.value) } }.sortedByDescending { it.third }.take(3)
+        val problems = h?.last?.filter { it.level == "aviso" || it.level == "grave" }?.takeLast(3)?.reversed().orEmpty()
+        if (reasons.isNotEmpty() || problems.isNotEmpty()) {
+            if (more) {
+                reasons.forEach { (game, why, n) -> Muted("$n × $why ($game)", maxLines = 2) }
+                problems.forEach {
+                    val hhmm = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(it.at))
+                    Muted("${if (it.level == "grave") "🔴" else "🟠"} $hhmm ${it.game}: ${it.summary}", maxLines = 1)
+                }
             }
+            TextButton(onClick = { more = !more }) { Text(if (more) "Menos" else "Detalle") }
         }
     }
 }
