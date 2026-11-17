@@ -65,7 +65,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             prefs.edit().putLong("vistas_hasta", list.maxOf { it.at }).apply()
             val games = fresh.map { it.game }.distinct().joinToString(", ")
             val worst = fresh.firstOrNull { it.level == "grave" } ?: fresh.firstOrNull { it.isWarning }
-            val title = when {
+            val mark = if (worst?.level == "grave") "\uD83D\uDD34 " else ""
+            val title = mark + when {
                 fresh.size == 1 && worst != null -> worst.title.ifBlank { "Aviso del PC" }
                 worst != null -> "${fresh.size} avisos del PC"
                 fresh.size == 1 -> "1 link por revisar"
@@ -73,7 +74,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             }
             val text = if (fresh.size == 1 && worst != null) worst.summary.ifBlank { worst.reason }
                 else "$games. Míralos en Estado: qué pasó y qué hacer."
-            DraftsService.alert(context, 9_000 + if (worst?.level == "grave") 1 else 0, title, text, urgent = worst?.level == "grave")
+            DraftsService.alert(context, 9_000, title, text)
             AppLog.w("pc", "avisos del PC: ${fresh.joinToString { it.title.ifBlank { it.url } }}")
         }
     }
@@ -241,6 +242,23 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     }
 
     private var failures = 0
+    private var downSince = 0L
+    private var downAlerted = false
+
+    /**
+     * The PC stops answering for a long stretch in the daytime: one normal notification per outage
+     * (the app is the one asking, so it is also the one that notices; the PC cannot say it is off).
+     */
+    private fun checkDown(now: Long) {
+        val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+        if (downAlerted || downSince == 0L || now - downSince < DOWN_ALERT_MS || hour !in 9..23) return
+        downAlerted = true
+        DraftsService.alert(
+            context, 9_002, "No llego al PC",
+            "Lleva ${(now - downSince) / 60_000} min sin responder. Mira que el PC esté encendido, con internet y el programa abierto.",
+        )
+        AppLog.w("pc", "sin respuesta del PC desde hace ${(now - downSince) / 60_000} min")
+    }
     private var logSent = 0L
 
     /** Asks the PC how it is doing and copies each article's progress. */
@@ -283,6 +301,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 }
             }
             failures = 0
+            downSince = 0L
+            downAlerted = false
             _pc.value = Pc(status, null, System.currentTimeMillis())
             runCatching { checkIncidents(link, status.incidents, status.lastIncident) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
@@ -295,6 +315,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             // One slow answer (phone waking up, Tailscale reconnecting) is not «sin conexión»:
             // the last status stays until three tries in a row fail.
             failures++
+            val now = System.currentTimeMillis()
+            if (downSince == 0L) downSince = now
+            checkDown(now)
             AppLog.w("pc", "estado: ${e.message ?: e.javaClass.simpleName} (fallo $failures)")
             if (failures >= 3 || _pc.value.status == null) {
                 _pc.value = Pc(_pc.value.status, e.message ?: "No llego al PC", System.currentTimeMillis())
@@ -469,6 +492,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         /** AI or upload waiting on this phone (e.g. after a cut connection). */
         private const val LOCAL_MS = 10_000L
         private const val LOG_EVERY_MS = 5 * 60_000L
+        private const val DOWN_ALERT_MS = 15 * 60_000L
         private const val POLL_BUSY_MS = 8_000L
         private const val POLL_IDLE_MS = 30_000L
         private const val IDLE_MS = 60_000L
