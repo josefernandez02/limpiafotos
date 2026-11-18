@@ -88,6 +88,38 @@ object CoverFrame {
         return p.copy(tight = blend > 0.5f)             // tight: the garment fills the photo, it may show cut
     }
 
+    /** The garment's box in the photo turned [deg]: edges in photo pixels from the photo's centre (x0, y0, x1, y1). */
+    private fun garmentBox(mask: Mask, imageW: Int, deg: Float): FloatArray? {
+        val clean = largestParts(mask) ?: return null
+        val grid = rotated(clean, deg)
+        val box = bounds(grid) ?: return null
+        val k = imageW.toFloat() / clean.w
+        return floatArrayOf((box.x0 - grid.w / 2f) * k, (box.y0 - grid.h / 2f) * k,
+            (box.x1 + 1 - grid.w / 2f) * k, (box.y1 + 1 - grid.h / 2f) * k)
+    }
+
+    /**
+     * Space between the garment and the frame's edges for this placement, in pixels of a frame [outW] wide:
+     * top, bottom, left, right (negative = the garment is cut). Null without a believable silhouette.
+     */
+    fun margins(mask: Mask, imageW: Int, p: Placement, outW: Int): IntArray? {
+        val g = garmentBox(mask, imageW, p.rotation) ?: return null
+        val u = p.scale / imageW                                   // frame widths per photo pixel
+        val left = 0.5f + p.dx + g[0] * u
+        val right = 0.5f + p.dx + g[2] * u
+        val top = FRAME_H / 2 + p.dy + g[1] * u
+        val bottom = FRAME_H / 2 + p.dy + g[3] * u
+        return intArrayOf((top * outW).roundToInt(), ((FRAME_H - bottom) * outW).roundToInt(),
+            (left * outW).roundToInt(), ((1f - right) * outW).roundToInt())
+    }
+
+    /** The same placement with the garment's centre moved onto the frame's centre (null without a silhouette). */
+    fun centered(mask: Mask, imageW: Int, p: Placement): Placement? {
+        val g = garmentBox(mask, imageW, p.rotation) ?: return null
+        val u = p.scale / imageW
+        return p.copy(dx = -(g[0] + g[2]) / 2 * u, dy = -(g[1] + g[3]) / 2 * u)
+    }
+
     /** The box every preview shows (x0, y0, x1, y1 in frame widths from the frame's top-left), for the editor's guide. */
     fun safeBox(): FloatArray = safe.copyOf()
 
@@ -126,6 +158,15 @@ object CoverFrame {
             val roomY = max(0f, (SAFE_H * FRAME_H - bh * s / imageW) / 2) + PAD * 0.7f
             return Placement(s, -bcx * s / imageW + kx / 2f * roomX, -bcy * s / imageW - LIFT * FRAME_H + ky / 2f * roomY, tilt)
         }
+        // Symmetry first: the garment stays exactly in the middle (the same space above and below, left and right) whenever
+        // that costs nothing the eye notices: a few % bigger, or a thin strip of plain mirrored backdrop at one edge.
+        for (limit in floatArrayOf(0f, DEPTH_TINY, DEPTH_OK)) for (g in GROWTHS) {
+            val p = at(g, 0, 0)
+            val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
+                       else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
+            if (fine) return p to 0f
+        }
+        // Only when that is not possible is the garment moved off-centre (inside the room the safe box leaves it).
         for (g in GROWTHS) for ((kx, ky) in moves) {
             val p = at(g, kx, ky)
             if (uncoveredShare(p, imageW, imageH) == 0f) return p to 0f

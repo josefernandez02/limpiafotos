@@ -464,6 +464,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
     var analyzing by remember { mutableStateOf(false) }
     var touched by remember { mutableStateOf(false) }      // the user has moved the box: an automatic framing on opening must not undo it
     var manual by remember { mutableStateOf(false) }       // how the framing was made, for the record
+    var garment by remember { mutableStateOf<dev.catalogo.core.Mask?>(null) }   // the garment's silhouette, to measure the space around it
     val auto: (Boolean) -> Unit = { onOpen ->
         scope.launch {
             analyzing = true
@@ -471,6 +472,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             analyzing = false
             if (onOpen && touched) return@launch
             val fr = r.framing
+            if (r.mask != null) garment = r.mask
             if (fr != null) {
                 framing = fr
                 manual = false
@@ -491,6 +493,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             } else if (!cur.covers(img.width, img.height)) {
                 framing = CoverFrame.noFill(cur.placement(), img.width, img.height).framing()      // an old crop with made-up edges is tidied
             }
+            // an already framed cover: the silhouette is only looked for to measure the space around the garment
+            if (isCover && !(cur == null && slot.edit == null)) garment = AutoFrame.analyze(context, slot.source).mask
         }
     }
 
@@ -507,7 +511,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         OutlinedButton(
                             onClick = {
-                                val c = framing?.copy(dx = 0f, dy = 0f)
+                                val c = garment?.let { g -> framing?.let { CoverFrame.centered(g, img.width, it.placement())?.framing() } }
+                                    ?: framing?.copy(dx = 0f, dy = 0f)
                                 if (c != null && c.covers(img.width, img.height)) { touched = true; manual = true; framing = c }
                                 else note = "No se puede centrar sin salir de la foto"
                             },
@@ -542,6 +547,14 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                 Muted("Arrastra las esquinas para el tamaño y el centro para mover", Modifier.padding(top = 6.dp))
                 slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 2.dp)) }
                 if (note.isNotBlank()) Muted(note, Modifier.padding(top = 2.dp))
+                val g = garment
+                if (isCover && g != null) {
+                    val m = remember(f, g, img) { CoverFrame.margins(g, img.width, f.placement(), Crop.OUT_W) }
+                    if (m != null) {
+                        Muted("Margen de la prenda (px, portada ${Crop.OUT_W}×${Crop.OUT_W * 4 / 3}): arriba ${m[0]} · abajo ${m[1]} · izq. ${m[2]} · der. ${m[3]}", Modifier.padding(top = 2.dp))
+                        Muted("Diferencia arriba-abajo ${kotlin.math.abs(m[0] - m[1])} px · izq.-der. ${kotlin.math.abs(m[2] - m[3])} px", Modifier.padding(top = 1.dp))
+                    }
+                }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
                     Slider(

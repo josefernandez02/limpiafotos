@@ -26,7 +26,7 @@ import kotlin.math.min
  */
 object AutoFrame {
     /** [how]: «IA» (model), «fondo» (backdrop colour) or empty (nothing found). */
-    data class Result(val framing: Framing?, val how: String, val tight: Boolean = false)
+    data class Result(val framing: Framing?, val how: String, val tight: Boolean = false, val mask: Mask? = null)
 
     private const val DECODE_EDGE = 640
     private const val MASK_EDGE = 128
@@ -59,7 +59,7 @@ object AutoFrame {
                 }
             }
             note(bmp, model, floor, byModel, byFloor, agree, p, how)
-            Result(CoverFrame.noFill(p, bmp.width, bmp.height).toFraming(), how, p.tight)   // never an invented backdrop
+            Result(CoverFrame.noFill(p, bmp.width, bmp.height).toFraming(), how, p.tight, if (how == "IA") model else floor)   // never an invented backdrop
         } finally {
             bmp.recycle()
         }

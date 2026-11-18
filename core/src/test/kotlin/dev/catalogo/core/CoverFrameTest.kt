@@ -42,7 +42,7 @@ class CoverFrameTest {
         // in frame widths: the limiting side is exactly the safe box, the other one fits
         val gw = bw * p.scale / 3000
         val gh = bh * p.scale / 3000
-        assertEquals(1f, max(gw / CoverFrame.SAFE_W, gh / (CoverFrame.SAFE_H * CoverFrame.FRAME_H)), 0.02f)
+        assertEquals(1f, max(gw / CoverFrame.SAFE_W, gh / (CoverFrame.SAFE_H * CoverFrame.FRAME_H)), 0.07f)   // up to 6% bigger is allowed to avoid any fill
         // centred: the garment's centre lands on the frame's centre (a little higher by LIFT)
         val gcx = ((b[0] + b[2] + 1) / 2f - m.w / 2f) * k
         val gcy = ((b[1] + b[3] + 1) / 2f - m.h / 2f) * k
@@ -320,5 +320,31 @@ class CoverFrameTest {
             assertTrue(!p.tight, "grow $grow must not be left as it is")
             assertTrue(CoverFrame.fillDepth(p, 480, 640) <= 0.091f, "grow $grow depth ${CoverFrame.fillDepth(p, 480, 640)}")
         }
+    }
+
+    @Test
+    fun `a garment that sits off-centre in the photo still gets the same space above and below`() {
+        // the garment is high, centred or low in the photo: the cover must show the same margin on both sides each time
+        for (shiftY in intArrayOf(0, 6, 12, 18)) {
+            val m = jumper(120, 140, shiftY = shiftY)
+            val p = assertNotNull(CoverFrame.place(m, 3000, 3500))
+            val g = assertNotNull(CoverFrame.margins(m, 3000, p, 1536))
+            assertTrue(abs(g[0] - g[1]) <= 6, "shiftY $shiftY: above ${g[0]} px, below ${g[1]} px")
+            assertTrue(abs(g[2] - g[3]) <= 6, "shiftY $shiftY: left ${g[2]} px, right ${g[3]} px")
+        }
+    }
+
+    @Test
+    fun `margins are measured in pixels of the cover and centered puts the garment in the middle`() {
+        val m = jumper(120, 140)
+        val off = Placement(1.3f, 0.07f, -0.05f, 0f)
+        val before = assertNotNull(CoverFrame.margins(m, 3000, off, 1536))
+        assertTrue(abs(before[0] - before[1]) > 20 && abs(before[2] - before[3]) > 20, "starts off-centre: ${before.toList()}")
+        val c = assertNotNull(CoverFrame.centered(m, 3000, off))
+        val after = assertNotNull(CoverFrame.margins(m, 3000, c, 1536))
+        assertTrue(abs(after[0] - after[1]) <= 2 && abs(after[2] - after[3]) <= 2, "centred: ${after.toList()}")
+        // a bigger garment leaves less room
+        val big = assertNotNull(CoverFrame.margins(m, 3000, c.copy(scale = c.scale * 1.2f), 1536))
+        assertTrue(big[0] < after[0] && big[2] < after[2])
     }
 }
