@@ -66,7 +66,8 @@ object CoverFrame {
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
     private const val DEPTH_TINY = 0.02f // a strip of mirrored backdrop this deep (share of the frame's side) is not noticed at all…
     private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor…
-    private const val DEPTH_MAX = 0.09f  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
+    const val FILL_MAX = 0.09f       // (public: the editor lets a hand-made framing reach this far too)
+    private const val DEPTH_MAX = FILL_MAX  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
     private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
     private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
@@ -160,9 +161,11 @@ object CoverFrame {
             return Placement(s, -bcx * s / imageW + kx / 2f * roomX, -bcy * s / imageW - LIFT * FRAME_H + ky / 2f * roomY, tilt)
         }
         // Symmetry first: the garment stays exactly in the middle (the same space above and below, left and right) whenever
-        // that costs nothing the eye notices: a few % bigger, or a thin strip of plain mirrored backdrop at one edge.
-        // The garment never grows more than [CENTRED_GROWTH]: the more it grows, the less breathing room it has in the narrow previews.
-        for (limit in floatArrayOf(0f, DEPTH_TINY)) for (g in CENTRED_GROWTHS) {
+        // that costs nothing the eye notices: a few % bigger, or a strip of plain mirrored backdrop at one edge (the thinnest
+        // that does it; a garment lying low in a photo whose frame already reaches the photo's bottom needs one, and a floor
+        // mirrored over a few % of the cover is far less noticeable than a garment with more air above than below).
+        // The garment never grows more than [CENTRED_GROWTHS]: the more it grows, the less breathing room it has in the narrow previews.
+        for (limit in floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX)) for (g in CENTRED_GROWTHS) {
             val p = at(g, 0, 0)
             val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
                        else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
@@ -198,21 +201,21 @@ object CoverFrame {
     }
 
     /** True when the photo covers the frame, or leaves at most a strip of mirrored backdrop too thin to be noticed ([DEPTH_TINY]). */
-    fun isCovered(p: Placement, imageW: Int, imageH: Int): Boolean = fillDepth(p, imageW, imageH) <= DEPTH_TINY
+    fun isCovered(p: Placement, imageW: Int, imageH: Int, tolerance: Float = DEPTH_TINY): Boolean = fillDepth(p, imageW, imageH) <= tolerance
 
     /**
      * Like [noFill], but a strip of mirrored backdrop that thin is left alone: the garment is made bigger only as much as needed
      * to get under that depth (never more than ~12 %), so it stays centred and keeps the room it has in the narrow previews.
      * When the photo is too far from covering the frame, the photo grows until it does (as [noFill]).
      */
-    fun settle(p: Placement, imageW: Int, imageH: Int): Placement {
-        if (isCovered(p, imageW, imageH)) return p
+    fun settle(p: Placement, imageW: Int, imageH: Int, tolerance: Float = DEPTH_TINY): Placement {
+        if (isCovered(p, imageW, imageH, tolerance)) return p
         var s = p.scale
         repeat(12) {
             s *= 1.01f
             val k = s / p.scale
             val q = p.copy(scale = s, dx = p.dx * k, dy = p.dy * k)
-            if (isCovered(q, imageW, imageH)) return q
+            if (isCovered(q, imageW, imageH, tolerance)) return q
         }
         return noFill(p, imageW, imageH)
     }

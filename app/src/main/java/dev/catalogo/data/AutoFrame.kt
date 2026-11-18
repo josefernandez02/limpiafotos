@@ -59,7 +59,7 @@ object AutoFrame {
                 }
             }
             note(bmp, model, floor, byModel, byFloor, agree, p, how)
-            Result(CoverFrame.settle(p, bmp.width, bmp.height).toFraming(), how, p.tight, if (how == "IA") model else floor)   // at most a hair-thin strip of backdrop
+            Result(CoverFrame.settle(p, bmp.width, bmp.height, CoverFrame.FILL_MAX).toFraming(), how, p.tight, if (how == "IA") model else floor)   // the plan already chose its fill (plain backdrop only, never deeper than FILL_MAX)
         } finally {
             bmp.recycle()
         }

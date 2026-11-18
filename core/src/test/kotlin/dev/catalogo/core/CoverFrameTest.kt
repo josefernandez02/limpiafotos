@@ -371,4 +371,19 @@ class CoverFrameTest {
             assertTrue(gw <= CoverFrame.SAFE_W * 1.021f, "shiftY $shiftY: ${gw / CoverFrame.SAFE_W}")
         }
     }
+
+    @Test
+    fun `a garment lying low in a photo the frame already fills is still centred, with a strip of mirrored floor`() {
+        // a 3:4 photo: the frame reaches its bottom, so centring the garment needs a few % of floor mirrored under it
+        for (shiftY in intArrayOf(30, 40)) {
+            val m = jumper(120, 160, shiftY = shiftY)
+            val p = assertNotNull(CoverFrame.place(m, 3000, 4000))
+            val g = assertNotNull(CoverFrame.margins(m, 3000, p, 1536))
+            assertTrue(abs(g[0] - g[1]) <= 6, "shiftY $shiftY: above ${g[0]} px, below ${g[1]} px")
+            assertTrue(abs(g[2] - g[3]) <= 6, "shiftY $shiftY: left ${g[2]} px, right ${g[3]} px")
+            assertTrue(CoverFrame.fillDepth(p, 3000, 4000) <= CoverFrame.FILL_MAX + 0.001f, "depth ${CoverFrame.fillDepth(p, 3000, 4000)}")
+            assertTrue(CoverFrame.isCovered(CoverFrame.settle(p, 3000, 4000, CoverFrame.FILL_MAX), 3000, 4000, CoverFrame.FILL_MAX))
+            assertEquals(p, CoverFrame.settle(p, 3000, 4000, CoverFrame.FILL_MAX))          // the planned fill is kept as it is
+        }
+    }
 }
