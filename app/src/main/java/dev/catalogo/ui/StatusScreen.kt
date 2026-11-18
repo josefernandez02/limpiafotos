@@ -62,6 +62,8 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     var alertsChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
     val showAlerts = alertsChoice ?: incidents.isNotEmpty()
     var showPlayed by rememberSaveable { mutableStateOf(false) }
+    var allAlerts by rememberSaveable { mutableStateOf(false) }
+    val shownAlerts = if (allAlerts) incidents else incidents.take(ALERTS_SHOWN)
     val groups = listOf(Stage.REVIEW, Stage.WORKING, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED).associateWith { st ->
         articles.filter { Catalog.stage(p, it, p.self) == st }.sortedByDescending { it.desk?.at ?: 0 }
             .let { if (st == Stage.PLAYED) it.take(10) else it }
@@ -74,7 +76,7 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
-            pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today) } }
+            pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today, incidents) } }
             if (incidents.isNotEmpty()) {
                 item(key = "h-inc") {
                     Row(Modifier.fillMaxWidth().padding(start = 4.dp, top = 12.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -86,8 +88,8 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
                 }
                 if (showAlerts) item(key = "inc") {
                     Tile {
-                        incidents.forEachIndexed { n, inc ->
-                            if (n > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
+                        shownAlerts.forEachIndexed { n, inc ->
+                            if (n > 0) HorizontalDivider(Modifier.padding(vertical = 6.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
                             IncidentRow(inc, onOpen = { url ->
                                 runCatching {
                                     context.startActivity(
@@ -98,11 +100,17 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
                             }, onDone = { vm.incidentReviewed(inc.id) })
                         }
                         if (incidents.size > 1) {
-                            OutlinedButton(
-                                onClick = { incidents.forEach { vm.incidentReviewed(it.id) } },
-                                modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(44.dp),
-                                shape = RoundedCornerShape(14.dp),
-                            ) { OneLine("Marcar todos como revisados") }
+                            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (incidents.size > ALERTS_SHOWN) {
+                                    TextButton(onClick = { allAlerts = !allAlerts }) {
+                                        OneLine(if (allAlerts) "Ver menos" else "Ver ${incidents.size - ALERTS_SHOWN} más")
+                                    }
+                                }
+                                Spacer(Modifier.weight(1f))
+                                if (incidents.size > 1) {
+                                    TextButton(onClick = { incidents.forEach { vm.incidentReviewed(it.id) } }) { OneLine("Marcar todos como revisados") }
+                                }
+                            }
                         }
                     }
                 }
@@ -139,6 +147,8 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     }
 }
 
+private const val ALERTS_SHOWN = 3
+
 /** «0031  Levi's 505 W32 ·········· ● En curso», and below what is happening, if anything. */
 @Composable
 private fun StatusRow(vm: MainViewModel, p: ParentState, a: Article) {
@@ -173,27 +183,32 @@ private fun StatusRow(vm: MainViewModel, p: ParentState, a: Article) {
     }
 }
 
-/** The PC: what it is doing, when that was checked, and the two buttons that matter. */
+/** The PC: what it is doing, when that was checked, and the buttons that matter (pause / go on now / stop). */
 @Composable
 private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
     val status = pc.status
     var asking by remember { mutableStateOf(false) }
     var starting by remember { mutableStateOf(false) }
+    var stopping by remember { mutableStateOf(false) }
     // «Actualizar» shows it is asking until a newer answer (or error) arrives.
     LaunchedEffect(pc.at) { asking = false }
     LaunchedEffect(asking) { if (asking) { delay(12_000); asking = false } }
+    val running = status != null && status.text != "parado"
+    val waiting = running && status?.usingPc == true
     Tile {
         Text(
             when {
                 pc.error != null -> "PC sin conexión"
                 status == null -> "Conectando con el PC"
+                waiting -> "Esperando a que dejes el PC"
                 status.paused -> "PC en pausa"
                 status.text == "parado" -> "PC parado"
                 else -> status.text.replaceFirstChar(Char::uppercase)
             },
             style = MaterialTheme.typography.titleLarge,
         )
-        val sub = pc.error ?: status?.next?.takeIf { it.isNotBlank() }
+        val sub = pc.error
+            ?: if (waiting) "Retoma lo que estaba haciendo en cuanto pares" else status?.next?.takeIf { it.isNotBlank() }
         if (sub != null) Muted(sub, Modifier.padding(top = 2.dp))
         if (pc.at > 0) {
             Muted(
@@ -215,7 +230,6 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
                 if (asking) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else OneLine("Actualizar")
             }
             if (status != null && pc.error == null) {
-                val running = status.text != "parado"
                 FilledTonalButton(
                     onClick = {
                         when {
@@ -229,6 +243,22 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
                 ) { OneLine(if (!running) "Empezar" else if (status.paused) "Seguir" else "Pausar") }
             }
         }
+        if (running && pc.error == null) {
+            Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (waiting) {
+                    FilledTonalButton(
+                        onClick = { vm.pcControl("seguir") },
+                        modifier = Modifier.weight(1f).height(48.dp),
+                        shape = RoundedCornerShape(16.dp),
+                    ) { OneLine("Seguir ya") }
+                }
+                OutlinedButton(
+                    onClick = { stopping = true },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { OneLine("Detener", Modifier) }
+            }
+        }
     }
     if (starting) {
         Confirm(
@@ -239,10 +269,19 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
             onDismiss = { starting = false },
         )
     }
+    if (stopping) {
+        Confirm(
+            title = "¿Detener el programa del PC?",
+            text = "Para lo que esté haciendo. Para volver a ponerlo en marcha, pulsa «Empezar» aquí mismo.",
+            confirm = "Detener",
+            onConfirm = { vm.pcControl("detener") },
+            onDismiss = { stopping = false },
+            destructive = true,
+        )
+    }
 }
 
-
-/** One notice from the PC: a watchdog warning (what happened, what to do) or a single link without like. */
+/** One notice from the PC: a watchdog warning or a single link without like. Compact; tap it for what to do. */
 @Composable
 private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -> Unit, onDone: () -> Unit) {
     var open by remember(inc.id) { mutableStateOf(false) }
@@ -256,47 +295,32 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
         val item = Regex("""/items/(\d+)(?:-([^/?#]+))?""").find(url)
         return item?.groupValues?.get(2)?.replace('-', ' ')?.takeIf { it.isNotBlank() } ?: item?.groupValues?.get(1) ?: url
     }
+    val title = (if (inc.isWarning) inc.title.ifBlank { inc.game } else inc.game).removePrefix("REINCIDENTE · ")
+    val time = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(inc.at))
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.clickable(enabled = inc.isWarning) { open = !open }) {
-            Text(
-                if (inc.isWarning) inc.title.ifBlank { inc.game } else inc.game,
-                style = MaterialTheme.typography.labelLarge, color = color, modifier = Modifier.weight(1f), maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Muted(SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(inc.at)))
-        }
-        if (inc.repeated) Text("Reincidente", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
-        if (inc.isWarning) {
-            // Short by default: one line of what happened; tapping adds the first things to do, never a wall of text.
-            Muted(inc.summary.ifBlank { inc.reason }, maxLines = if (open) 4 else 2)
-            if (open) {
-                if (inc.actions.isNotEmpty()) {
-                    Text("Qué hacer", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
-                    inc.actions.take(2).forEachIndexed { i, s -> Muted("${i + 1}. $s", maxLines = 3) }
-                }
-                if (links.isNotEmpty()) {
-                    Text("Para revisar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 6.dp))
-                    links.take(3).forEach { u ->
-                        Text(itemName(u).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.clickable { onOpen(u) }.padding(vertical = 4.dp))
-                    }
-                    if (links.size > 3) Muted("y ${links.size - 3} más")
-                }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { open = !open }.padding(vertical = 4.dp)) {
+                Text(title, style = MaterialTheme.typography.labelLarge, color = color, maxLines = if (open) 3 else 1,
+                    overflow = TextOverflow.Ellipsis)
+                val body = if (inc.isWarning) inc.summary.ifBlank { inc.reason }
+                else itemName(inc.url).replaceFirstChar(Char::uppercase) + GAP + inc.reason
+                Muted((if (inc.repeated) "$time$GAP" + "Reincidente$GAP" else "$time$GAP") + body, maxLines = if (open) 6 else 1)
             }
-        } else {
-            Text(itemName(inc.url).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium, maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
-            Muted(inc.reason.replaceFirstChar(Char::uppercase), maxLines = 2)
+            TextButton(onClick = onDone) { OneLine("Revisado") }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            if (!inc.isWarning && links.isNotEmpty()) {
-                OutlinedButton(onClick = { onOpen(links.first()) }, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
-                    OneLine("Abrir en Vinted")
-                }
+        if (open) {
+            if (inc.isWarning && inc.actions.isNotEmpty()) {
+                Text("Qué hacer", style = MaterialTheme.typography.labelMedium)
+                inc.actions.take(2).forEachIndexed { i, a -> Muted("${i + 1}. $a", maxLines = 3) }
             }
-            FilledTonalButton(onClick = onDone, modifier = Modifier.weight(1f).height(44.dp), shape = RoundedCornerShape(14.dp)) {
-                OneLine("Revisado")
+            if (links.isNotEmpty()) {
+                Text("Para revisar", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(top = 4.dp))
+                links.take(3).forEach { u ->
+                    Text(itemName(u).replaceFirstChar(Char::uppercase), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.clickable { onOpen(u) }.padding(vertical = 4.dp))
+                }
+                if (links.size > 3) Muted("y ${links.size - 3} más")
             }
         }
     }
@@ -304,7 +328,9 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
 
 /** Today's games, one line each: ✔ perfect, ⚠ to check, ✖ not played; what went wrong only for the last two. */
 @Composable
-private fun HealthTile(h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>) {
+private fun HealthTile(
+    h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>, notices: List<dev.catalogo.data.Desk.Incident>,
+) {
     val games = h?.today.orEmpty()
     Tile {
         Text("Juegos de hoy", style = MaterialTheme.typography.titleSmall)
@@ -325,7 +351,9 @@ private fun HealthTile(h: dev.catalogo.data.Desk.Health?, today: List<dev.catalo
                 Text("${g.time.ifBlank { SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(g.at)) }} ${g.game}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(word, style = MaterialTheme.typography.labelMedium, color = color)
             }
-            if (g.label != "perfecto" && g.summary.isNotBlank()) Muted(g.summary, Modifier.padding(start = 24.dp), maxLines = 2)
+            // The detail lives in «Avisos»; it is only repeated here when no notice covers this game.
+            val covered = notices.any { it.game.startsWith("${g.game} ${g.time}".trim()) }
+            if (g.label != "perfecto" && g.summary.isNotBlank() && !covered) Muted(g.summary, Modifier.padding(start = 24.dp), maxLines = 1)
         }
     }
 }

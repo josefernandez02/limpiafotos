@@ -36,6 +36,8 @@ class Desk(private val resolver: ContentResolver) {
     data class Status(
         val text: String, val next: String, val paused: Boolean, val queue: Map<String, Int>, val incidents: Int = 0,
         val lastIncident: String = "", val health: Health? = null, val today: List<GameDay> = emptyList(),
+        /** The user is using the PC: the program waits (and goes on by itself) until they stop. */
+        val usingPc: Boolean = false,
     )
 
     /** One game today: hours played out of hours it had, and the reasons the rest were lost. */
@@ -67,7 +69,8 @@ class Desk(private val resolver: ContentResolver) {
         val o = call(link, "GET", "/estado", null)
         val queue = (o["cola"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
-            o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject))
+            o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject),
+            o.str("usando_pc") == "true")
     }
 
     fun incidents(link: PcLink): List<Incident> =
@@ -120,7 +123,7 @@ class Desk(private val resolver: ContentResolver) {
         call(link, "DELETE", "/articulos/${enc(ref)}", null)
     }
 
-    /** "iniciar", "pausar", "reanudar" or "detener". */
+    /** "iniciar", "pausar", "reanudar", "detener" or "seguir" (stop waiting for the user to leave the PC). */
     fun control(link: PcLink, action: String): Status {
         call(link, "POST", "/control", buildJsonObject { put("accion", action) }.toString())
         return status(link)

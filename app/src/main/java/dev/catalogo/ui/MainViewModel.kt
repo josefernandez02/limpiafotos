@@ -317,10 +317,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = "Fuera de la cola"
     }
 
-    /** «iniciar», «pausar» or «reanudar» the PC program. */
+    /** «iniciar», «pausar», «reanudar», «detener» or «seguir» (go on now) on the PC program. */
     fun pcControl(action: String) = run {
         val s = app.drafts.control(action)
-        _message.value = if (s.paused) "PC en pausa" else "PC ${s.text}"
+        _message.value = when {
+            action == "detener" -> "PC detenido"
+            action == "seguir" -> "Sigo ya"
+            s.paused -> "PC en pausa"
+            else -> "PC ${s.text}"
+        }
     }
 
     /** Checks the PC answers with this key before saving it. */
