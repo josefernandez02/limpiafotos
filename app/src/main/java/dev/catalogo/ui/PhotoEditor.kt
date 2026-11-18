@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -39,6 +40,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
@@ -47,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -66,8 +69,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ClipOp
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.withTransform
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.geometry.Size as GSize
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -84,6 +85,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -196,7 +198,7 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
             })
         },
         bottomBar = {
-            BottomActions {
+            Panel {
                 val sel = selected
                 if (saving) {
                     LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -208,7 +210,10 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                         if (on) {
                           Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             val e = list?.getOrNull(i)?.edit
-                            Muted(e?.let { CropHistory.describe(it, System.currentTimeMillis()) } ?: "Sin recortar", maxLines = 1)
+                            Text(
+                                e?.let { CropHistory.describe(it, System.currentTimeMillis()) } ?: "Sin recortar",
+                                style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                            )
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Tool(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Antes", i > 0) { move(i, i - 1) }
                                 Tool(Icons.AutoMirrored.Filled.KeyboardArrowRight, "Después", i < (list?.size ?: 0) - 1) { move(i, i + 1) }
@@ -221,7 +226,7 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                             }
                           }
                         } else {
-                            Muted("Toca una foto para moverla, recortarla o quitarla")
+                            Text("Toca una foto para moverla, recortarla o quitarla", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -241,10 +246,10 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item(key = "auto-cover", span = { GridItemSpan(maxLineSpan) }) {
-                OutlinedButton(
+                FilledTonalButton(
                     onClick = autoCover,
                     enabled = !autoWorking && !saving,
-                    modifier = Modifier.fillMaxWidth().height(40.dp),
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
                 ) { OneLine(if (autoWorking) "Encuadrando…" else "Encuadrar la portada automáticamente") }
             }
             itemsIndexed(list, key = { _, s -> s.key }) { i, slot ->
@@ -449,6 +454,7 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
             }
             val b = boxOf(f, geo)
             val bw = b[2] - b[0]
+            drawFramed(img, f, b[0], b[1], bw)      // inside the box: exactly what will be saved, mirrored backdrop included (no black strips)
             val dim = Color.Black.copy(alpha = 0.55f)
             drawRect(dim, Offset(0f, 0f), GSize(size.width, b[1].coerceAtLeast(0f)))
             drawRect(dim, Offset(0f, b[3]), GSize(size.width, (size.height - b[3]).coerceAtLeast(0f)))
@@ -561,6 +567,12 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
     }
 
     var enlarged by remember { mutableStateOf<Float?>(null) }        // the preview (its ratio) being looked at in big
+    val big = enlarged
+    val fr = framing
+    if (big != null && img != null && fr != null) {
+        PreviewScreen(slot.source, img, fr, big, onPick = { enlarged = it }, onClose = { enlarged = null })
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -571,8 +583,19 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             })
         },
         bottomBar = {
-            if (img != null) {
-                BottomActions {
+            if (img != null && fr != null) {
+                // everything that adjusts the photo lives in one panel: straighten, the four views, the three shortcuts
+                Panel {
+                    StraightenRow(fr.rotation) {
+                        touched = true; manual = true; note = ""
+                        framing = CoverFrame.settle(fr.copy(rotation = it).placement(), img.width, img.height).framing()
+                    }
+                    Text("Vistas previas · toca una para verla en grande", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+                        for ((ratio, name) in PREVIEW_NAMES) {
+                            FramePreview(img, fr, Color(0xFF2A2C2F), ratio, name, 72.dp, Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).clickable { enlarged = ratio })
+                        }
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = { auto(false) },
@@ -581,9 +604,9 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         OutlinedButton(
                             onClick = {
-                                val c = garment?.let { g -> framing?.let { CoverFrame.centered(g, img.width, it.placement())?.framing() } }
-                                    ?: framing?.copy(dx = 0f, dy = 0f)
-                                if (c != null && c.covers(img.width, img.height)) { touched = true; manual = true; framing = c; note = "" }
+                                val c = garment?.let { g -> CoverFrame.centered(g, img.width, fr.placement())?.framing() }
+                                    ?: fr.copy(dx = 0f, dy = 0f)
+                                if (c.covers(img.width, img.height)) { touched = true; manual = true; framing = c; note = "" }
                                 else note = "No se puede centrar sin salir de la foto"
                             },
                             modifier = Modifier.weight(1f).height(44.dp),
@@ -598,104 +621,109 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            val f = framing
             val g = garment
-            val m = if (isCover && f != null && g != null && img != null) remember(f, g, img) { CoverFrame.margins(g, img.width, f.placement(), Crop.OUT_W) } else null
-            // the work area takes everything the rest leaves
+            val m = if (isCover && fr != null && g != null && img != null) remember(fr, g, img) { CoverFrame.margins(g, img.width, fr.placement(), Crop.OUT_W) } else null
+            // the work area takes everything the panel leaves
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                if (img == null || f == null) return@Box
-                CropArea(img, f, isCover, m) { framing = it; touched = true; manual = true; note = "" }
+                if (img == null || fr == null) return@Box
+                CropArea(img, fr, isCover, m) { framing = it; touched = true; manual = true; note = "" }
             }
-            if (img != null && f != null) {
-                // one quiet line under the photo: the margins (cover) and, only if there is one, a warning
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-                    if (m != null) MarginChip(m)
-                    if (note.isNotBlank()) {
-                        Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 2, modifier = Modifier.weight(1f, fill = m == null).padding(start = if (m != null) 10.dp else 0.dp))
-                    }
-                }
-                StraightenRow(f.rotation) {
-                    touched = true; manual = true; note = ""
-                    framing = CoverFrame.settle(f.copy(rotation = it).placement(), img.width, img.height).framing()
-                }
-                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
-                    for ((ratio, label) in CoverFrame.PREVIEWS) {
-                        val name = when (ratio) { 0.75f -> "Ficha"; 0.8f -> "Móvil"; 1f -> "Cuadro"; else -> "PC" }
-                        FramePreview(img, f, Color(0xFF2A2C2F), ratio, name, 84.dp, label, Modifier.clickable { enlarged = ratio })
-                    }
-                }
+            if (m != null) MarginChip(m, Modifier.padding(top = 8.dp))
+            if (note.isNotBlank()) {
+                Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             }
+            Box(Modifier.height(8.dp))
         }
     }
+}
 
-    val big = enlarged
-    val fr = framing
-    if (big != null && img != null && fr != null) PreviewDialog(img, fr, big, onPick = { enlarged = it }, onClose = { enlarged = null })
+/** The controls' base: a rounded sheet that runs under the system bar, with even spacing between its rows. */
+@Composable
+private fun Panel(content: @Composable ColumnScope.() -> Unit) {
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) {
+        BottomActions(content)
+    }
 }
 
 private val PREVIEW_NAMES = listOf(0.75f to "Ficha 3:4", 0.8f to "Móvil 4:5", 2f / 3f to "PC 2:3", 1f to "Cuadro 1:1")
 
 /**
- * One preview in big, same proportions as the real thing: what Vinted would show in that container. «Relleno» tints what is not
- * photo but mirrored backdrop; two fingers zoom to look at an edge, a double tap goes back.
+ * One preview in big, same proportions as the real thing: what Vinted would show in that container. It is drawn from a bigger copy
+ * of the photo than the editor's, so it is as sharp as the photo allows. «Resaltar relleno» tints what is not photo but mirrored
+ * backdrop; two fingers zoom to look at an edge, a double tap goes back.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun PreviewDialog(img: ImageBitmap, f: Framing, ratio: Float, onPick: (Float) -> Unit, onClose: () -> Unit) {
+private fun PreviewScreen(source: Uri, quick: ImageBitmap, f: Framing, ratio: Float, onPick: (Float) -> Unit, onClose: () -> Unit) {
+    BackHandler(onBack = onClose)
+    val context = LocalContext.current
+    val sharp by produceState<ImageBitmap?>(null, source) {
+        value = withContext(Dispatchers.IO) { runCatching { loadPhoto(context, source, 3000) }.getOrNull() }
+    }
+    val img = sharp ?: quick
     var showFill by remember { mutableStateOf(false) }
     var zoom by remember { mutableStateOf(1f) }
     var pan by remember { mutableStateOf(Offset.Zero) }
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(
-            Modifier.fillMaxSize().background(Color(0xE6000000)).statusBarsPadding().navigationBarsPadding().padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(PREVIEW_NAMES.firstOrNull { it.first == ratio }?.second.orEmpty(), color = Color.White, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                TextButton(onClick = onClose) { Text("Cerrar") }
-            }
-            BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val w = minOf(maxWidth, maxHeight * ratio)
-                Box(
-                    Modifier.width(w).aspectRatio(ratio).clip(RoundedCornerShape(8.dp))
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, dragged, scaleBy, _ ->
-                                zoom = (zoom * scaleBy).coerceIn(1f, 5f)
-                                pan = if (zoom <= 1.01f) Offset.Zero else pan + dragged
-                            }
-                        }
-                        .pointerInput(Unit) { detectTapGestures(onDoubleTap = { zoom = 1f; pan = Offset.Zero }) }
-                        .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
-                ) {
-                    Canvas(Modifier.fillMaxSize().background(Color(0xFF2A2C2F))) {
-                        val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
-                        val fh = fw / Crop.RATIO
-                        val left = (size.width - fw) / 2f
-                        val top = (size.height - fh) / 2f
-                        drawFramed(img, f, left, top, fw)
-                        if (showFill) {
-                            // everything of the frame the photo does not reach: the part that is mirrored backdrop
-                            val iw = f.scale * fw
-                            val ih = iw * img.height / img.width
-                            val cx = left + fw / 2 + f.dx * fw
-                            val cy = top + fh / 2 + f.dy * fw
-                            withTransform({
-                                rotate(f.rotation, Offset(cx, cy))
-                                clipRect(cx - iw / 2, cy - ih / 2, cx + iw / 2, cy + ih / 2, ClipOp.Difference)
-                                rotate(-f.rotation, Offset(cx, cy))
-                            }) { drawRect(Color(0xCCFF2D9A), Offset(left, top), GSize(fw, fh)) }
-                        }
+    Scaffold(
+        topBar = { Bar(PREVIEW_NAMES.firstOrNull { it.first == ratio }?.second.orEmpty().replace(" ", " · "), onBack = onClose) },
+        bottomBar = {
+            Panel {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for ((r, name) in PREVIEW_NAMES) {
+                        FilterChip(
+                            selected = r == ratio,
+                            onClick = { zoom = 1f; pan = Offset.Zero; onPick(r) },
+                            label = { Text(name.substringBefore(' '), maxLines = 1, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth()) },
+                            modifier = Modifier.weight(1f),
+                        )
                     }
                 }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                for ((r, name) in PREVIEW_NAMES) {
-                    FilterChip(selected = r == ratio, onClick = { zoom = 1f; pan = Offset.Zero; onPick(r) }, label = { Text(name.substringBefore(' '), maxLines = 1) })
+                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { showFill = !showFill }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Resaltar relleno", style = MaterialTheme.typography.bodyLarge)
+                        Text("Tiñe lo que es fondo espejado y no foto", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Switch(checked = showFill, onCheckedChange = { showFill = it })
                 }
+                Text("Pellizca para ampliar · doble toque para volver", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             }
-            Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                FilterChip(selected = showFill, onClick = { showFill = !showFill }, label = { Text("Resaltar relleno") })
-                Text("  Dos dedos para ampliar · doble toque para volver", color = Color(0xFFB0B3B8), style = MaterialTheme.typography.labelSmall)
+        },
+    ) { padding ->
+        BoxWithConstraints(Modifier.padding(padding).fillMaxSize().padding(16.dp), contentAlignment = Alignment.Center) {
+            val w = minOf(maxWidth, maxHeight * ratio)
+            Box(
+                Modifier.width(w).aspectRatio(ratio).clip(RoundedCornerShape(12.dp))
+                    .pointerInput(Unit) {
+                        detectTransformGestures { _, dragged, scaleBy, _ ->
+                            val z = (zoom * scaleBy).coerceIn(1f, 5f)
+                            val mx = size.width * (z - 1f) / 2f
+                            val my = size.height * (z - 1f) / 2f
+                            zoom = z
+                            pan = Offset((pan.x + dragged.x).coerceIn(-mx, mx), (pan.y + dragged.y).coerceIn(-my, my))
+                        }
+                    }
+                    .pointerInput(Unit) { detectTapGestures(onDoubleTap = { zoom = 1f; pan = Offset.Zero }) }
+                    .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
+            ) {
+                Canvas(Modifier.fillMaxSize().background(Color(0xFF2A2C2F))) {
+                    val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
+                    val fh = fw / Crop.RATIO
+                    val left = (size.width - fw) / 2f
+                    val top = (size.height - fh) / 2f
+                    drawFramed(img, f, left, top, fw)
+                    if (showFill) {
+                        // everything of the frame the photo does not reach: the part that is mirrored backdrop
+                        val iw = f.scale * fw
+                        val ih = iw * img.height / img.width
+                        val cx = left + fw / 2 + f.dx * fw
+                        val cy = top + fh / 2 + f.dy * fw
+                        withTransform({
+                            rotate(f.rotation, Offset(cx, cy))
+                            clipRect(cx - iw / 2, cy - ih / 2, cx + iw / 2, cy + ih / 2, ClipOp.Difference)
+                            rotate(-f.rotation, Offset(cx, cy))
+                        }) { drawRect(Color(0xCCFF2D9A), Offset(left, top), GSize(fw, fh)) }
+                    }
+                }
             }
         }
     }
@@ -735,9 +763,9 @@ private fun StraightenRow(rotation: Float, onChange: (Float) -> Unit) {
     }
 }
 
-/** The space between the garment and the cover's edges, in pixels of the saved cover: above · below, left · right. */
+/** The space between the garment and the cover's edges, in pixels of the saved cover: up, down, left, right. */
 @Composable
-private fun MarginChip(m: IntArray) {
+private fun MarginChip(m: IntArray, modifier: Modifier = Modifier) {
     val sb = CoverFrame.safeBox()
     val needX = sb[0] * Crop.OUT_W * 0.8f       // what the narrowest preview leaves the garment, with a little tolerance
     val needY = sb[1] * Crop.OUT_W * 0.8f
@@ -747,11 +775,15 @@ private fun MarginChip(m: IntArray) {
         kotlin.math.abs(m[0] - m[1]) > 12 || kotlin.math.abs(m[2] - m[3]) > 12 -> Color(0xFFFFC857)   // not centred
         else -> Color(0xFF8EE0B0)
     }
-    Text(
-        "↕ ${m[0]} · ${m[1]}      ↔ ${m[2]} · ${m[3]}",
-        color = tone, fontSize = 12.sp,
-        modifier = Modifier.background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
-    )
+    Row(
+        modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Box(Modifier.size(8.dp).clip(CircleShape).background(tone))
+        Text("↑ ${m[0]}   ↓ ${m[1]}", color = tone, fontSize = 13.sp)
+        Text("← ${m[2]}   → ${m[3]}", color = tone, fontSize = 13.sp)
+    }
 }
 
 /**
@@ -759,7 +791,7 @@ private fun MarginChip(m: IntArray) {
  * as Vinted does in its grids. If the garment shows complete in all three, it is safe on any phone.
  */
 @Composable
-private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, height: Dp, labelBand: Float = 0f, modifier: Modifier = Modifier) {
+private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, height: Dp, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.height(height).aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
             val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
@@ -767,9 +799,8 @@ private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, 
             val left = (size.width - fw) / 2f
             val top = (size.height - fh) / 2f
             drawFramed(img, f, left, top, fw)
-            if (labelBand > 0f) drawRect(Color(0xFF3F9FAF).copy(alpha = 0.85f), Offset(0f, size.height * (1f - labelBand)), GSize(size.width, size.height * labelBand))   // «Destacado» band
         }
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 4.dp, bottom = 2.dp))
     }
 }
 
