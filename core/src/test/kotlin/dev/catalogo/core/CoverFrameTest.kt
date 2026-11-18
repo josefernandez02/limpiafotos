@@ -347,4 +347,28 @@ class CoverFrameTest {
         val big = assertNotNull(CoverFrame.margins(m, 3000, c.copy(scale = c.scale * 1.2f), 1536))
         assertTrue(big[0] < after[0] && big[2] < after[2])
     }
+
+    @Test
+    fun `settle leaves a hair-thin strip alone and grows the photo only as much as needed`() {
+        val thin = Placement(0.99f, 0f, 0f, 0f)
+        assertTrue(CoverFrame.isCovered(thin, 3000, 4000))
+        assertEquals(thin, CoverFrame.settle(thin, 3000, 4000))
+        val gap = Placement(0.9f, 0f, 0f, 0f)
+        assertTrue(!CoverFrame.isCovered(gap, 3000, 4000))
+        val grown = CoverFrame.settle(gap, 3000, 4000)
+        assertTrue(CoverFrame.isCovered(grown, 3000, 4000), "depth ${CoverFrame.fillDepth(grown, 3000, 4000)}")
+        assertTrue(grown.scale > 0.9f && grown.scale < 1f, "scale ${grown.scale}")
+        assertEquals(0f, grown.dx, 0.001f)
+    }
+
+    @Test
+    fun `a centred garment never grows more than two percent beyond the safe size`() {
+        for (shiftY in intArrayOf(0, 6, 12, 18)) {
+            val m = jumper(120, 140, shiftY = shiftY)
+            val p = assertNotNull(CoverFrame.place(m, 3000, 3500))
+            val b = box(m)
+            val gw = (b[2] - b[0] + 1) * (3000f / m.w) * p.scale / 3000
+            assertTrue(gw <= CoverFrame.SAFE_W * 1.021f, "shiftY $shiftY: ${gw / CoverFrame.SAFE_W}")
+        }
+    }
 }

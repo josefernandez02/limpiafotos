@@ -68,7 +68,8 @@ object CoverFrame {
     private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor…
     private const val DEPTH_MAX = 0.09f  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
-    private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)   // how much bigger than the safe size the garment may get to avoid any fill
+    private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
+    private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
     private const val GRID_X = 24        // frame points checked for what the fill would show
     private const val GRID_Y = 32
     private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
@@ -160,7 +161,8 @@ object CoverFrame {
         }
         // Symmetry first: the garment stays exactly in the middle (the same space above and below, left and right) whenever
         // that costs nothing the eye notices: a few % bigger, or a thin strip of plain mirrored backdrop at one edge.
-        for (limit in floatArrayOf(0f, DEPTH_TINY, DEPTH_OK)) for (g in GROWTHS) {
+        // The garment never grows more than [CENTRED_GROWTH]: the more it grows, the less breathing room it has in the narrow previews.
+        for (limit in floatArrayOf(0f, DEPTH_TINY)) for (g in CENTRED_GROWTHS) {
             val p = at(g, 0, 0)
             val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
                        else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
@@ -193,6 +195,26 @@ object CoverFrame {
             if (uncoveredShare(q, imageW, imageH) == 0f) return q
         }
         return Placement(coverScale(imageW, imageH, p.rotation), 0f, 0f, p.rotation, p.tight)
+    }
+
+    /** True when the photo covers the frame, or leaves at most a strip of mirrored backdrop too thin to be noticed ([DEPTH_TINY]). */
+    fun isCovered(p: Placement, imageW: Int, imageH: Int): Boolean = fillDepth(p, imageW, imageH) <= DEPTH_TINY
+
+    /**
+     * Like [noFill], but a strip of mirrored backdrop that thin is left alone: the garment is made bigger only as much as needed
+     * to get under that depth (never more than ~12 %), so it stays centred and keeps the room it has in the narrow previews.
+     * When the photo is too far from covering the frame, the photo grows until it does (as [noFill]).
+     */
+    fun settle(p: Placement, imageW: Int, imageH: Int): Placement {
+        if (isCovered(p, imageW, imageH)) return p
+        var s = p.scale
+        repeat(12) {
+            s *= 1.01f
+            val k = s / p.scale
+            val q = p.copy(scale = s, dx = p.dx * k, dy = p.dy * k)
+            if (isCovered(q, imageW, imageH)) return q
+        }
+        return noFill(p, imageW, imageH)
     }
 
     /** Share of the frame the photo does not reach with this placement (0 = it covers everything). */

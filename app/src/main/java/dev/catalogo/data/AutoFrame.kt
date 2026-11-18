@@ -59,7 +59,7 @@ object AutoFrame {
                 }
             }
             note(bmp, model, floor, byModel, byFloor, agree, p, how)
-            Result(CoverFrame.noFill(p, bmp.width, bmp.height).toFraming(), how, p.tight, if (how == "IA") model else floor)   // never an invented backdrop
+            Result(CoverFrame.settle(p, bmp.width, bmp.height).toFraming(), how, p.tight, if (how == "IA") model else floor)   // at most a hair-thin strip of backdrop
         } finally {
             bmp.recycle()
         }

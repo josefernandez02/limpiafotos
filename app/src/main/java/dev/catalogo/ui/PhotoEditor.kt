@@ -70,7 +70,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CoverFrame
@@ -315,7 +317,7 @@ private class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val
 
 private fun Framing.placement() = Placement(scale, dx, dy, rotation)
 private fun Placement.framing() = Framing(scale, dx, dy, rotation)
-private fun Framing.covers(w: Int, h: Int) = CoverFrame.uncoveredShare(placement(), w, h) == 0f
+private fun Framing.covers(w: Int, h: Int) = CoverFrame.isCovered(placement(), w, h)   // or only a hair-thin strip of backdrop
 
 /** The crop box (left, top, right, bottom, in screen pixels) of a framing: the 3:4 frame, with the photo fixed under it. */
 private fun boxOf(f: Framing, g: Geo): FloatArray {
@@ -370,14 +372,14 @@ private fun dragged(f: Framing, grip: Grip, mx: Float, my: Float, g: Geo): Frami
 
 /** The photo stays still; the 3:4 box is dragged by its corners (size) and its inside (position), never beyond the photo. */
 @Composable
-private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, onChange: (Framing) -> Unit) {
+private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntArray?, onChange: (Framing) -> Unit) {
     val density = LocalDensity.current
     val current by rememberUpdatedState(f)
     val paint = remember { android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val areaW = with(density) { maxWidth.toPx() }
         val areaH = with(density) { maxHeight.toPx() }
-        val geo = Geo(areaW / 2f, areaH / 2f, minOf(areaW / img.width, areaH / img.height) * 0.9f, img.width, img.height)
+        val geo = Geo(areaW / 2f, areaH / 2f, minOf(areaW / img.width, areaH / img.height) * 0.97f, img.width, img.height)
         val slop = with(density) { 40.dp.toPx() }
         var grip by remember { mutableStateOf(Grip.NONE) }
         Canvas(
@@ -417,11 +419,12 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, onChange: (Fr
             drawRect(dim, Offset(0f, b[3]), GSize(size.width, (size.height - b[3]).coerceAtLeast(0f)))
             drawRect(dim, Offset(0f, b[1]), GSize(b[0].coerceAtLeast(0f), b[3] - b[1]))
             drawRect(dim, Offset(b[2], b[1]), GSize((size.width - b[2]).coerceAtLeast(0f), b[3] - b[1]))
-            // thirds
-            val faint = Color.White.copy(alpha = 0.35f)
-            for (k in 1..2) {
-                drawLine(faint, Offset(b[0] + bw * k / 3, b[1]), Offset(b[0] + bw * k / 3, b[3]), 1.dp.toPx())
-                drawLine(faint, Offset(b[0], b[1] + (b[3] - b[1]) * k / 3), Offset(b[2], b[1] + (b[3] - b[1]) * k / 3), 1.dp.toPx())
+            if (!guide) {       // thirds, for ordinary photos (the cover has its own guides, below)
+                val faint = Color.White.copy(alpha = 0.35f)
+                for (k in 1..2) {
+                    drawLine(faint, Offset(b[0] + bw * k / 3, b[1]), Offset(b[0] + bw * k / 3, b[3]), 1.dp.toPx())
+                    drawLine(faint, Offset(b[0], b[1] + (b[3] - b[1]) * k / 3), Offset(b[2], b[1] + (b[3] - b[1]) * k / 3), 1.dp.toPx())
+                }
             }
             if (guide) {
                 // the margin the garment should touch, so every cover has the same space around it
@@ -431,6 +434,16 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, onChange: (Fr
                     topLeft = Offset(b[0] + sb[0] * bw, b[1] + sb[1] * bw),
                     size = GSize((sb[2] - sb[0]) * bw, (sb[3] - sb[1]) * bw),
                     style = Stroke(width = 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(18f, 12f))),
+                )
+            }
+            if (guide && garment != null) {
+                // where the garment is: the space between this box and the frame is what the numbers above measure
+                val k = bw / Crop.OUT_W
+                drawRect(
+                    color = Color(0xFF4DD0E1).copy(alpha = 0.9f),
+                    topLeft = Offset(b[0] + garment[2] * k, b[1] + garment[0] * k),
+                    size = GSize(bw - (garment[2] + garment[3]) * k, (b[3] - b[1]) - (garment[0] + garment[1]) * k),
+                    style = Stroke(width = 1.dp.toPx()),
                 )
             }
             drawRect(Color.White, Offset(b[0], b[1]), GSize(bw, b[3] - b[1]), style = Stroke(width = 1.5.dp.toPx()))
@@ -476,9 +489,11 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             if (fr != null) {
                 framing = fr
                 manual = false
-                note = (if (r.tight) "La prenda ocupa casi toda la foto y puede quedar justa en alguna vista: mejor una foto algo más abierta."
-                        else "Encuadre automático (${r.how})") +
-                    if (kotlin.math.abs(fr.rotation) >= 0.5f) ", enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°" else ""
+                note = when {
+                    r.tight -> "Prenda muy grande en la foto: puede quedar justa. Mejor una foto más abierta."
+                    kotlin.math.abs(fr.rotation) >= 0.5f -> "Enderezada ${"%.1f".format(java.util.Locale.ROOT, kotlin.math.abs(fr.rotation))}°"
+                    else -> ""
+                }
             } else {
                 note = "No localicé la prenda: ajústala a mano"
             }
@@ -491,85 +506,92 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                 framing = Crop.cover(img.width, img.height)
                 if (isCover && slot.edit == null) auto(true)
             } else if (!cur.covers(img.width, img.height)) {
-                framing = CoverFrame.noFill(cur.placement(), img.width, img.height).framing()      // an old crop with made-up edges is tidied
+                framing = CoverFrame.settle(cur.placement(), img.width, img.height).framing()      // an old crop with made-up edges is tidied
             }
             // an already framed cover: the silhouette is only looked for to measure the space around the garment
             if (isCover && !(cur == null && slot.edit == null)) garment = AutoFrame.analyze(context, slot.source).mask
         }
     }
 
+    val apply: () -> Unit = {
+        val f = framing
+        if (f != null && !working) {
+            working = true
+            scope.launch {
+                val bytes = runCatching { vm.renderCrop(slot.source, f) }
+                working = false
+                bytes.onSuccess { onDone(it, f, if (manual) CropHistory.MANUAL else CropHistory.AUTO) }.onFailure { vm.say("No se pudo recortar la foto") }
+            }
+        }
+    }
+
     Scaffold(
-        topBar = { Bar("Recortar", onBack = onCancel) },
+        topBar = {
+            Bar("Recortar", onBack = onCancel, actions = {
+                FilledTonalButton(onClick = apply, enabled = framing != null && !working, modifier = Modifier.padding(end = 8.dp)) {
+                    Text(if (working) "Aplicando…" else "Aplicar")
+                }
+            })
+        },
         bottomBar = {
-            BottomActions {
-                if (img != null) {
+            if (img != null) {
+                BottomActions {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(
                             onClick = { auto(false) },
                             enabled = !analyzing,
-                            modifier = Modifier.weight(1f).height(48.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         OutlinedButton(
                             onClick = {
                                 val c = garment?.let { g -> framing?.let { CoverFrame.centered(g, img.width, it.placement())?.framing() } }
                                     ?: framing?.copy(dx = 0f, dy = 0f)
-                                if (c != null && c.covers(img.width, img.height)) { touched = true; manual = true; framing = c }
+                                if (c != null && c.covers(img.width, img.height)) { touched = true; manual = true; framing = c; note = "" }
                                 else note = "No se puede centrar sin salir de la foto"
                             },
-                            modifier = Modifier.weight(1f).height(48.dp),
+                            modifier = Modifier.weight(1f).height(44.dp),
                         ) { OneLine("Centrar") }
                         OutlinedButton(
                             onClick = { touched = true; manual = true; framing = Crop.cover(img.width, img.height); note = "" },
-                            modifier = Modifier.weight(1f).height(48.dp),
-                        ) { OneLine("Restablecer") }
+                            modifier = Modifier.weight(1f).height(44.dp),
+                        ) { OneLine("Original") }
                     }
                 }
-                BigButton(if (working) "Aplicando…" else "Aplicar", enabled = framing != null && !working, onClick = {
-                    val f = framing ?: return@BigButton
-                    working = true
-                    scope.launch {
-                        val bytes = runCatching { vm.renderCrop(slot.source, f) }
-                        working = false
-                        bytes.onSuccess { onDone(it, f, if (manual) CropHistory.MANUAL else CropHistory.AUTO) }.onFailure { vm.say("No se pudo recortar la foto") }
-                    }
-                })
             }
         },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val f = framing
-                if (img == null || f == null) return@Box
-                CropArea(img, f, isCover) { framing = it; touched = true; manual = true }
-            }
+        Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             val f = framing
+            val g = garment
+            val m = if (isCover && f != null && g != null && img != null) remember(f, g, img) { CoverFrame.margins(g, img.width, f.placement(), Crop.OUT_W) } else null
+            // the work area takes everything the rest leaves
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                if (img == null || f == null) return@Box
+                CropArea(img, f, isCover, m) { framing = it; touched = true; manual = true; note = "" }
+                if (m != null) MarginChip(m, Modifier.align(Alignment.TopCenter))
+            }
             if (img != null && f != null) {
-                Muted("Arrastra las esquinas para el tamaño y el centro para mover", Modifier.padding(top = 6.dp))
-                slot.edit?.let { Muted(CropHistory.describe(it, System.currentTimeMillis()), Modifier.padding(top = 2.dp)) }
-                if (note.isNotBlank()) Muted(note, Modifier.padding(top = 2.dp))
-                val g = garment
-                if (isCover && g != null) {
-                    val m = remember(f, g, img) { CoverFrame.margins(g, img.width, f.placement(), Crop.OUT_W) }
-                    if (m != null) {
-                        Muted("Margen de la prenda (px, portada ${Crop.OUT_W}×${Crop.OUT_W * 4 / 3}): arriba ${m[0]} · abajo ${m[1]} · izq. ${m[2]} · der. ${m[3]}", Modifier.padding(top = 2.dp))
-                        Muted("Diferencia arriba-abajo ${kotlin.math.abs(m[0] - m[1])} px · izq.-der. ${kotlin.math.abs(m[2] - m[3])} px", Modifier.padding(top = 1.dp))
-                    }
+                // one quiet line: a warning if there is one, else when the photo was last cropped
+                val status = note.ifBlank { slot.edit?.let { CropHistory.describe(it, System.currentTimeMillis()) }.orEmpty() }
+                if (status.isNotBlank()) {
+                    Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, modifier = Modifier.padding(top = 4.dp))
                 }
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Muted("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", Modifier.width(88.dp))
+                    Text("Giro ${"%.1f".format(java.util.Locale.ROOT, f.rotation)}°", style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(72.dp))
                     Slider(
                         value = f.rotation.coerceIn(-15f, 15f),
                         onValueChange = {
-                            touched = true; manual = true
-                            framing = CoverFrame.noFill(f.copy(rotation = it).placement(), img.width, img.height).framing()
+                            touched = true; manual = true; note = ""
+                            framing = CoverFrame.settle(f.copy(rotation = it).placement(), img.width, img.height).framing()
                         },
                         valueRange = -15f..15f, modifier = Modifier.weight(1f),
                     )
                 }
-                Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.Bottom) {
                     for ((ratio, label) in CoverFrame.PREVIEWS) {
-                        val name = when (ratio) { 0.75f -> "Ficha 3:4"; 0.8f -> "Móvil 4:5"; 1f -> "Cuadrado"; else -> "PC 2:3" }
-                        FramePreview(img, f, Color(0xFF2A2C2F), ratio, name, Modifier.weight(1f), label)
+                        val name = when (ratio) { 0.75f -> "Ficha"; 0.8f -> "Móvil"; 1f -> "Cuadro"; else -> "PC" }
+                        FramePreview(img, f, Color(0xFF2A2C2F), ratio, name, 84.dp, label)
                     }
                 }
             }
@@ -577,14 +599,33 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
     }
 }
 
+/** The space between the garment and the cover's edges, in pixels of the saved cover: above · below, left · right. */
+@Composable
+private fun MarginChip(m: IntArray, modifier: Modifier) {
+    val sb = CoverFrame.safeBox()
+    val needX = sb[0] * Crop.OUT_W * 0.8f       // what the narrowest preview leaves the garment, with a little tolerance
+    val needY = sb[1] * Crop.OUT_W * 0.8f
+    val tone = when {
+        m.any { it < 0 } -> Color(0xFFFF6B6B)                                                  // the garment is cut
+        m[2] < needX || m[3] < needX || m[0] < needY || m[1] < needY -> Color(0xFFFFC857)      // too close to an edge for some preview
+        kotlin.math.abs(m[0] - m[1]) > 12 || kotlin.math.abs(m[2] - m[3]) > 12 -> Color(0xFFFFC857)   // not centred
+        else -> Color(0xFF8EE0B0)
+    }
+    Text(
+        "↕ ${m[0]} · ${m[1]}      ↔ ${m[2]} · ${m[3]}",
+        color = tone, fontSize = 12.sp,
+        modifier = modifier.padding(top = 6.dp).background(Color.Black.copy(alpha = 0.65f), RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
 /**
  * How the framed photo looks in a container of another shape: the 3:4 image fills it and what falls outside is cut,
  * as Vinted does in its grids. If the garment shows complete in all three, it is safe on any phone.
  */
 @Composable
-private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, modifier: Modifier, labelBand: Float = 0f) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Canvas(Modifier.fillMaxWidth().aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
+private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, height: Dp, labelBand: Float = 0f) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Canvas(Modifier.height(height).aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
             val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
             val fh = fw / Crop.RATIO
             val left = (size.width - fw) / 2f
@@ -592,7 +633,7 @@ private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, 
             drawFramed(img, f, left, top, fw)
             if (labelBand > 0f) drawRect(Color(0xFF3F9FAF).copy(alpha = 0.85f), Offset(0f, size.height * (1f - labelBand)), GSize(size.width, size.height * labelBand))   // «Destacado» band
         }
-        Muted(label, Modifier.padding(top = 2.dp), maxLines = 1)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, modifier = Modifier.padding(top = 2.dp))
     }
 }
 
