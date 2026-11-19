@@ -628,7 +628,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                 if (img == null || fr == null) return@Box
                 CropArea(img, fr, isCover, m) { framing = it; touched = true; manual = true; note = "" }
             }
-            if (m != null) MarginChip(m, Modifier.padding(top = 8.dp))
+            val off = if (m != null && g != null && img != null && fr != null) remember(fr, g, img) { CoverFrame.offCentre(g, img.width, img.height, fr.placement(), Crop.OUT_W) } else 0
+            if (m != null) MarginChip(m, off, Modifier.padding(top = 8.dp))
             if (note.isNotBlank()) {
                 Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
             }
@@ -765,14 +766,14 @@ private fun StraightenRow(rotation: Float, onChange: (Float) -> Unit) {
 
 /** The space between the garment and the cover's edges, in pixels of the saved cover: up, down, left, right. */
 @Composable
-private fun MarginChip(m: IntArray, modifier: Modifier = Modifier) {
+private fun MarginChip(m: IntArray, offCentre: Int, modifier: Modifier = Modifier) {
     val sb = CoverFrame.safeBox()
     val needX = sb[0] * Crop.OUT_W * 0.8f       // what the narrowest preview leaves the garment, with a little tolerance
     val needY = sb[1] * Crop.OUT_W * 0.8f
     val tone = when {
         m.any { it < 0 } -> Color(0xFFFF6B6B)                                                  // the garment is cut
         m[2] < needX || m[3] < needX || m[0] < needY || m[1] < needY -> Color(0xFFFFC857)      // too close to an edge for some preview
-        kotlin.math.abs(m[0] - m[1]) > 12 || kotlin.math.abs(m[2] - m[3]) > 12 -> Color(0xFFFFC857)   // not centred
+        offCentre > 12 -> Color(0xFFFFC857)      // «Centrar» would place it better (unequal margins alone are not that: a folded garment is centred by its body)
         else -> Color(0xFF8EE0B0)
     }
     Row(

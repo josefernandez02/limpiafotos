@@ -434,6 +434,22 @@ class CoverFrameTest {
     }
 
     @Test
+    fun `a garment that fills the photo and sits off-centre in it is still centred as far as a thin strip of floor allows`() {
+        // the real case: trousers taking 90% of the photo's height, a little low, with more floor on the right than on the left
+        val w = 96
+        val h = 128
+        val on = BooleanArray(w * h)
+        for (y in 6..120) for (x in 21..70) on[y * w + x] = true
+        val m = Mask(w, h, on)
+        val p = assertNotNull(CoverFrame.place(m, 1659, 2212))
+        val mg = assertNotNull(CoverFrame.margins(m, 1659, p, 1536))
+        assertTrue(abs(mg[2] - mg[3]) <= 12, "left ${mg[2]} right ${mg[3]}")
+        assertTrue(abs(mg[0] - mg[1]) <= 12, "up ${mg[0]} down ${mg[1]}")
+        assertTrue(CoverFrame.fillDepth(p, 1659, 2212) <= 0.056f, "fill ${CoverFrame.fillDepth(p, 1659, 2212)}")
+        assertEquals(0, CoverFrame.offCentre(m, 1659, 2212, p, 1536), "the indicator must not call it off-centre")
+    }
+
+    @Test
     fun `the fill depth is zero when the photo covers the frame and grows as it is moved away`() {
         val cover = Placement(CoverFrame.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
         assertEquals(0f, CoverFrame.fillDepth(cover, 3000, 4000), 0.001f)

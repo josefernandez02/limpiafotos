@@ -249,7 +249,31 @@ object CoverFrame {
             val p = at(g, kx, ky)
             if (fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)) return p to 0f
         }
-        return Placement(coverScale(imageW, imageH, tilt), 0f, 0f, tilt) to 1f
+        // The garment does not fit in the photo at the safe size: the photo just covers the frame. It is still centred as far as
+        // a thin strip of plain floor allows (the photo's own margin is rarely the same on both sides), never deeper than [DEPTH_OK].
+        val cover = coverScale(imageW, imageH, tilt)
+        val goalX = -bcx * cover / imageW + pull((vcx - bcx) * cover / imageW, bw * cover / imageW)
+        val goalY = -bcy * cover / imageW - LIFT * FRAME_H
+        val shares = floatArrayOf(1f, 0.75f, 0.5f, 0.25f)
+        val tries = shares.flatMap { tx -> shares.map { ty -> tx to ty } }.sortedByDescending { it.first + it.second }
+        for (clean in booleanArrayOf(true, false)) for ((tx, ty) in tries) {
+            val p = Placement(cover, goalX * tx, goalY * ty, tilt)
+            val depth = fillDepth(p, imageW, imageH)
+            if (depth > DEPTH_OK) continue
+            if (depth == 0f || (fillIsBackdrop(near, p, imageW, imageH) && (!clean || dirt == null || fillIsBackdrop(dirt, p, imageW, imageH)))) return p to 1f
+        }
+        return Placement(cover, 0f, 0f, tilt) to 1f
+    }
+
+    /**
+     * How far, in pixels of a frame [outW] wide, [p] is from the placement «Centrar» would give it, or 0 when that placement
+     * would leave the photo (the garment is then as centred as this photo allows). It is what the editor's indicator calls
+     * «not centred»: unequal margins are not, because a folded garment is centred by its body, not by its fold.
+     */
+    fun offCentre(mask: Mask, imageW: Int, imageH: Int, p: Placement, outW: Int): Int {
+        val c = centered(mask, imageW, p) ?: return 0
+        if (!isCovered(c, imageW, imageH, fillLimit(c.rotation))) return 0
+        return (max(abs(c.dx - p.dx), abs(c.dy - p.dy)) * outW).roundToInt()
     }
 
     /**
