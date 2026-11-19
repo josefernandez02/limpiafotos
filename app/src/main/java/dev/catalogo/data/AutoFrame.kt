@@ -38,8 +38,8 @@ object AutoFrame {
         try {
             val model = runCatching { modelMask(bmp) }.getOrNull()
             val floor = runCatching { backdropMask(bmp, model?.w, model?.h) }.getOrNull()
-            val byModel = model?.let { CoverFrame.place(it, bmp.width, bmp.height) }
-            val byFloor = floor?.let { CoverFrame.place(it, bmp.width, bmp.height) }
+            val byModel = model?.let { CoverFrame.place(it, bmp.width, bmp.height, floor) }
+            val byFloor = floor?.let { CoverFrame.place(it, bmp.width, bmp.height, floor) }
             // Two independent opinions. When they agree, the model's smoother edge wins; when they do not (the model
             // loses a sleeve or a pattern, or the floor is tricky), the one that gave a believable silhouette is used.
             val agree = model != null && floor != null && CoverFrame.agreement(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= AGREE

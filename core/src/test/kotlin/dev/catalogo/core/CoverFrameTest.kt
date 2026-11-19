@@ -549,4 +549,38 @@ class CoverFrameTest {
             assertEquals(p, CoverFrame.settle(p, 3000, 4000, CoverFrame.FILL_MAX))          // the planned fill is kept as it is
         }
     }
+
+    /** Trousers in a 931x1129 photo (a 4:5 shot: the 3:4 frame is taller), rows [r0]..[r1]; [clutter] adds a shadow's tip touching the top edge. */
+    private fun trousersAndShadow(r0: Int, r1: Int): Pair<Mask, Mask> {
+        val w = 105; val h = 128
+        val garment = BooleanArray(w * h); val all = BooleanArray(w * h)
+        for (y in r0..r1) for (x in 30..74) { garment[y * w + x] = true; all[y * w + x] = true }
+        for (y in 0..6) for (x in 4..5) all[y * w + x] = true
+        return Mask(w, h, garment) to Mask(w, h, all)
+    }
+
+    @Test
+    fun `a strip that would double a shadow at the photo edge is not left, the garment stays centred and grows a little`() {
+        for ((r0, r1) in listOf(14 to 112, 14 to 114)) {
+            val (m, clutter) = trousersAndShadow(r0, r1)
+            val plain = assertNotNull(CoverFrame.place(m, 931, 1129))
+            val p = assertNotNull(CoverFrame.place(m, 931, 1129, clutter))
+            val g = assertNotNull(CoverFrame.margins(m, 931, p, 932))
+            assertTrue(p.scale > plain.scale && p.scale <= plain.scale * 1.13f, "scale ${plain.scale} -> ${p.scale}")
+            assertTrue(CoverFrame.fillDepth(p, 931, 1129) <= 0.021f, "depth ${CoverFrame.fillDepth(p, 931, 1129)}")
+            assertTrue(abs(g[0] - g[1]) <= 6 && abs(g[2] - g[3]) <= 6, "centred: ${g.toList()}")
+        }
+    }
+
+    @Test
+    fun `when growing does not clear the shadow the framing is the plain one, not moved aside`() {
+        val (m, clutter) = trousersAndShadow(12, 112)
+        assertEquals(CoverFrame.place(m, 931, 1129), CoverFrame.place(m, 931, 1129, clutter))
+    }
+
+    @Test
+    fun `without anything at the photo edge the clutter changes nothing`() {
+        val (m, _) = trousersAndShadow(14, 112)
+        assertEquals(CoverFrame.place(m, 931, 1129), CoverFrame.place(m, 931, 1129, m))
+    }
 }

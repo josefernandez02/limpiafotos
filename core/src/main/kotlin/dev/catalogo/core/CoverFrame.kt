@@ -77,23 +77,32 @@ object CoverFrame {
     fun fillLimit(rotation: Float): Float = if (rotation != 0f) TURNED_FILL_MAX else FILL_MAX
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
     private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
+    private val DIRT_GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f, 1.08f, 1.10f, 1.12f)   // how much a centred garment may grow to keep a strip from doubling something at the photo's edge
     private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
     private const val GRID_X = 24        // frame points checked for what the fill would show
     private const val GRID_Y = 32
+    private const val FINE_X = 96        // …and the finer grid for what a mirrored strip would show
+    private const val FINE_Y = 128
     private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
     private const val OPEN = 4            // cells (of a 128-cell grid) the opening uses to tell floor stains from the garment
     private const val TRIM = 0.002f      // share of the silhouette ignored at each border (stray specks)
 
-    /** The garment's silhouette → where to put the photo; null if the silhouette is not believable. */
-    fun place(mask: Mask, imageW: Int, imageH: Int): Placement? {
+    /**
+     * The garment's silhouette → where to put the photo; null if the silhouette is not believable.
+     * [clutter] (same grid): everything in the photo that is not plain floor, the garment included. A mirrored strip doubles whatever
+     * touches the photo's edge (a shadow or an object becomes a diamond), so where the edge has something, the garment stays centred
+     * and grows a little (never more than [DIRT_GROWTHS]) until the strip that is left shows only plain floor.
+     */
+    fun place(mask: Mask, imageW: Int, imageH: Int, clutter: Mask? = null): Placement? {
         val clean = largestParts(mask) ?: return null
         val area = clean.count().toFloat() / (clean.w * clean.h)
         if (area < MIN_AREA || area > MAX_AREA) return null
         if (borderShare(clean) > MAX_BORDER) return null      // the garment fills the photo: nothing to frame by
         val near = dilated(clean, 2)
-        val turned = plan(clean, near, imageW, imageH, tilt(clean)) ?: return null
+        val dirt = clutter?.takeIf { it.w == clean.w && it.h == clean.h }?.let { dilated(it, 1) }
+        val turned = plan(clean, near, dirt, imageW, imageH, tilt(clean)) ?: return null
         // when the garment cannot be framed without going beyond the photo, do not also turn it: leave the shot as it is
-        val (p, blend) = if (turned.second > 0.5f && turned.first.rotation != 0f) plan(clean, near, imageW, imageH, 0f) ?: return null else turned
+        val (p, blend) = if (turned.second > 0.5f && turned.first.rotation != 0f) plan(clean, near, dirt, imageW, imageH, 0f) ?: return null else turned
         return p.copy(tight = blend > 0.5f)             // tight: the garment fills the photo, it may show cut
     }
 
@@ -150,7 +159,7 @@ object CoverFrame {
      * as it is. Depth, not area, is what the eye notices: a tall garment in a photo with little margin needs a thin strip on
      * every side, which the mirrored floor hides well.
      */
-    private fun plan(clean: Mask, near: Mask, imageW: Int, imageH: Int, tilt: Float): Pair<Placement, Float>? {
+    private fun plan(clean: Mask, near: Mask, dirt: Mask?, imageW: Int, imageH: Int, tilt: Float): Pair<Placement, Float>? {
         val grid = rotated(clean, tilt)
         val box = bounds(grid) ?: return null
         val k = imageW.toFloat() / clean.w                      // image pixels per mask cell
@@ -173,11 +182,24 @@ object CoverFrame {
         // mirrored over a few % of the cover is far less noticeable than a garment with more air above than below).
         // The garment never grows more than [CENTRED_GROWTHS]: the more it grows, the less breathing room it has in the narrow previews.
         val centredLimits = if (tilt != 0f) floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX, TURNED_FILL_MAX) else floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX)
+        var dirty: Placement? = null      // the first centred framing whose strip would double something that is not floor
         for (limit in centredLimits) for (g in CENTRED_GROWTHS) {
             val p = at(g, 0, 0)
             val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
                        else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
-            if (fine) return p to 0f
+            if (!fine) continue
+            if (dirt == null || fillDepth(p, imageW, imageH) == 0f || fillIsBackdrop(dirt, p, imageW, imageH)) return p to 0f
+            if (dirty == null) dirty = p
+        }
+        // Something other than floor at the photo's edge: the strip it would double is avoided by growing the garment a little more
+        // (a few % cover a shadow's tip; never more than [DIRT_GROWTHS]), still centred, and only a thin strip of plain floor is left.
+        if (dirt != null && dirty != null) {
+            for (limit in floatArrayOf(0f, DEPTH_TINY)) for (g in DIRT_GROWTHS) {
+                val p = at(g, 0, 0)
+                val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(dirt, p, imageW, imageH)
+                if (fine) return p to 0f
+            }
+            return dirty to 0f      // not even that gets rid of it: the strip stays (as before), the garment is not moved off-centre for it
         }
         // Only when that is not possible is the garment moved off-centre (inside the room the safe box leaves it).
         for (g in GROWTHS) for ((kx, ky) in moves) {
@@ -253,14 +275,14 @@ object CoverFrame {
     }
 
     /** For a grid of points over the frame, where each falls in the photo (0..1 across and down; outside = not reached). */
-    private inline fun forEachFramePoint(p: Placement, imageW: Int, imageH: Int, f: (Float, Float) -> Unit) {
+    private inline fun forEachFramePoint(p: Placement, imageW: Int, imageH: Int, nx: Int = GRID_X, ny: Int = GRID_Y, f: (Float, Float) -> Unit) {
         val rad = p.rotation * PI / 180.0
         val c = cos(rad).toFloat()
         val s = sin(rad).toFloat()
         val ph = p.scale * imageH / imageW
-        for (j in 0..GRID_Y) for (i in 0..GRID_X) {
-            val px = i.toFloat() / GRID_X - 0.5f - p.dx
-            val py = j.toFloat() / GRID_Y * FRAME_H - FRAME_H / 2 - p.dy
+        for (j in 0..ny) for (i in 0..nx) {
+            val px = i.toFloat() / nx - 0.5f - p.dx
+            val py = j.toFloat() / ny * FRAME_H - FRAME_H / 2 - p.dy
             f((c * px + s * py) / p.scale + 0.5f, (-s * px + c * py) / ph + 0.5f)
         }
     }
@@ -278,7 +300,8 @@ object CoverFrame {
     /** True when every frame point the photo does not reach would show, once mirrored, backdrop and no garment. */
     private fun fillIsBackdrop(near: Mask, p: Placement, imageW: Int, imageH: Int): Boolean {
         var clean = true
-        forEachFramePoint(p, imageW, imageH) { u, v ->
+        // finer than the other checks: what a strip would double can be a sliver of a couple of cells (a shadow's tip at the edge)
+        forEachFramePoint(p, imageW, imageH, FINE_X, FINE_Y) { u, v ->
             if (!clean || (u in 0f..1f && v in 0f..1f)) return@forEachFramePoint
             val x = (mirrored(u) * near.w).toInt().coerceIn(0, near.w - 1)
             val y = (mirrored(v) * near.h).toInt().coerceIn(0, near.h - 1)
