@@ -77,6 +77,7 @@ object CoverFrame {
     fun fillLimit(rotation: Float): Float = if (rotation != 0f) TURNED_FILL_MAX else FILL_MAX
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
     private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
+    private val VISUAL_FIRST = booleanArrayOf(true, false)    // each centred try: first by the garment's visual middle, then by the middle of its box
     private val DIRT_GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f, 1.08f, 1.10f, 1.12f)   // how much a centred garment may grow to keep a strip from doubling something at the photo's edge
     private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
     private const val GRID_X = 24        // frame points checked for what the fill would show
@@ -86,6 +87,31 @@ object CoverFrame {
     private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
     private const val OPEN = 4            // cells (of a 128-cell grid) the opening uses to tell floor stains from the garment
     private const val TRIM = 0.002f      // share of the silhouette ignored at each border (stray specks)
+    private const val PULL_SHARE = 0.75f // how much of the way to the visual middle the garment is moved: the corner of a fold must not end up against the edge
+    private const val PULL_MAX = 0.03f   // …and never more than this (frame widths) off the middle of its box
+
+    /**
+     * Where the garment looks centred, in cells of [grid] from its left edge: the middle of its rows on average, which is the
+     * same amount of floor on its left and on its right. The middle of its two extremes is not that for a folded garment: a
+     * corner of the fold at the bottom left pulls the box to the left, while the waist and the pocket (what the eye takes in) sit to the right.
+     */
+    private fun visualMiddle(grid: Mask, box: Box): Float {
+        var sum = 0f
+        var rows = 0
+        for (y in box.y0..box.y1) {
+            var lo = -1
+            var hi = -1
+            for (x in box.x0..box.x1) if (grid.on[y * grid.w + x]) { if (lo < 0) lo = x; hi = x }
+            if (lo >= 0) { sum += (lo + hi + 1) / 2f; rows++ }
+        }
+        return if (rows == 0) (box.x0 + box.x1 + 1) / 2f else sum / rows
+    }
+
+    /** How far (frame widths) the garment may be moved off the middle of its box to look centred: only into the room the safe box leaves it, so it is never cut or put against the edge of a narrow preview. */
+    private fun pullLimit(boxW: Float): Float = min(PULL_MAX, max(0f, (SAFE_W - boxW) / 2))
+
+    /** The move (frame widths) that puts a garment whose box is [boxW] wide and whose visual middle is [off] frame widths right of the box's middle where it looks centred. */
+    private fun pull(off: Float, boxW: Float): Float = (-off * PULL_SHARE).coerceIn(-pullLimit(boxW), pullLimit(boxW))
 
     /**
      * The garment's silhouette → where to put the photo; null if the silhouette is not believable.
@@ -135,7 +161,17 @@ object CoverFrame {
     fun centered(mask: Mask, imageW: Int, p: Placement): Placement? {
         val g = garmentBox(mask, imageW, p.rotation) ?: return null
         val u = p.scale / imageW
-        return p.copy(dx = -(g[0] + g[2]) / 2 * u, dy = -(g[1] + g[3]) / 2 * u)
+        val mid = (g[0] + g[2]) / 2
+        val off = (visualMiddleX(mask, imageW, p.rotation, mid) - mid) * u
+        return p.copy(dx = -mid * u + pull(off, (g[2] - g[0]) * u), dy = -(g[1] + g[3]) / 2 * u)
+    }
+
+    /** [visualMiddle] in photo pixels from the photo's centre ([fallback] without a silhouette). */
+    private fun visualMiddleX(mask: Mask, imageW: Int, deg: Float, fallback: Float): Float {
+        val clean = largestParts(mask) ?: return fallback
+        val grid = rotated(clean, deg)
+        val box = bounds(grid) ?: return fallback
+        return (visualMiddle(grid, box) - grid.w / 2f) * (imageW.toFloat() / clean.w)
     }
 
     /** The box every preview shows (x0, y0, x1, y1 in frame widths from the frame's top-left), for the editor's guide. */
@@ -170,11 +206,14 @@ object CoverFrame {
         val bcy = ((box.y0 + box.y1 + 1) / 2f - grid.h / 2f) * k
         val ideal = min(SAFE_W * imageW / bw, SAFE_H * FRAME_H * imageW / bh).coerceIn(0.3f, 6f)
         val moves = (-2..2).flatMap { kx -> (-2..2).map { ky -> kx to ky } }.sortedBy { abs(it.first) + abs(it.second) }
-        fun at(g: Float, kx: Int, ky: Int): Placement {
+        val vcx = (visualMiddle(grid, box) - grid.w / 2f) * k    // where the garment looks centred (photo pixels from the photo's centre)
+        // [visual]: the garment centred by the same floor on its left and right (see [visualMiddle]) instead of by the middle of its box.
+        fun at(g: Float, kx: Int, ky: Int, visual: Boolean = false): Placement {
             val s = ideal * g
             val roomX = max(0f, (SAFE_W - bw * s / imageW) / 2) + PAD * 0.7f
             val roomY = max(0f, (SAFE_H * FRAME_H - bh * s / imageW) / 2) + PAD * 0.7f
-            return Placement(s, -bcx * s / imageW + kx / 2f * roomX, -bcy * s / imageW - LIFT * FRAME_H + ky / 2f * roomY, tilt)
+            val moved = if (visual) pull((vcx - bcx) * s / imageW, bw * s / imageW) else 0f
+            return Placement(s, -bcx * s / imageW + moved + kx / 2f * roomX, -bcy * s / imageW - LIFT * FRAME_H + ky / 2f * roomY, tilt)
         }
         // Symmetry first: the garment stays exactly in the middle (the same space above and below, left and right) whenever
         // that costs nothing the eye notices: a few % bigger, or a strip of plain mirrored backdrop at one edge (the thinnest
@@ -183,8 +222,8 @@ object CoverFrame {
         // The garment never grows more than [CENTRED_GROWTHS]: the more it grows, the less breathing room it has in the narrow previews.
         val centredLimits = if (tilt != 0f) floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX, TURNED_FILL_MAX) else floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX)
         var dirty: Placement? = null      // the first centred framing whose strip would double something that is not floor
-        for (limit in centredLimits) for (g in CENTRED_GROWTHS) {
-            val p = at(g, 0, 0)
+        for (limit in centredLimits) for (g in CENTRED_GROWTHS) for (visual in VISUAL_FIRST) {
+            val p = at(g, 0, 0, visual)
             val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
                        else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
             if (!fine) continue
@@ -194,8 +233,8 @@ object CoverFrame {
         // Something other than floor at the photo's edge: the strip it would double is avoided by growing the garment a little more
         // (a few % cover a shadow's tip; never more than [DIRT_GROWTHS]), still centred, and only a thin strip of plain floor is left.
         if (dirt != null && dirty != null) {
-            for (limit in floatArrayOf(0f, DEPTH_TINY)) for (g in DIRT_GROWTHS) {
-                val p = at(g, 0, 0)
+            for (limit in floatArrayOf(0f, DEPTH_TINY)) for (g in DIRT_GROWTHS) for (visual in VISUAL_FIRST) {
+                val p = at(g, 0, 0, visual)
                 val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(dirt, p, imageW, imageH)
                 if (fine) return p to 0f
             }

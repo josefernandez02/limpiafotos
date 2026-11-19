@@ -211,7 +211,44 @@ class CoverFrameTest {
         assertTrue(p.rotation in 5f..11f, "its bottom edge runs uphill to the right: it has to be turned clockwise, not ${p.rotation}")
         val mg = assertNotNull(CoverFrame.margins(m, 480, CoverFrame.settle(p, 480, 640, CoverFrame.fillLimit(p.rotation)), 1000))
         assertTrue(abs(mg[0] - mg[1]) <= 25, "same space above and below: ${mg.toList()}")
-        assertTrue(abs(mg[2] - mg[3]) <= 25, "same space left and right: ${mg.toList()}")
+        // folded jeans are wider at the bottom left (the corner of the fold) than at the waist, so the middle of their box is not
+        // where they look centred: they are moved a little to the left, but never past the safe box (the fold is not cut or put against the edge)
+        assertTrue(mg[2] < mg[3] && mg[3] - mg[2] <= 70, "a little more floor on the right than on the left: ${mg.toList()}")
+        assertTrue(mg[2] >= CoverFrame.safeBox()[0] * 1000 - 1, "the fold keeps its air: ${mg.toList()}")
+    }
+
+    /** Jeans folded in half as seen from above: the waist is narrow and to the right, the folded legs reach further left. */
+    private fun waistRightLegsLeft(): Mask {
+        val w = 160
+        val h = 220
+        val on = BooleanArray(w * h)
+        for (y in 45..174) {
+            val lo = 60 - (y - 45) * 30 / 130
+            for (x in lo..110) on[y * w + x] = true
+        }
+        return Mask(w, h, on)
+    }
+
+    @Test
+    fun `a garment that is wider at one corner is centred by its visual middle, not by the extremes of its box`() {
+        val m = waistRightLegsLeft()
+        val p = assertNotNull(CoverFrame.place(m, 1600, 2200))
+        val mg = assertNotNull(CoverFrame.margins(m, 1600, p, 1000))
+        assertTrue(mg[2] < mg[3], "moved to the left of the middle of its box: ${mg.toList()}")
+        assertTrue(mg[3] - mg[2] <= 2 * 30 + 2, "by a little (3 % of the frame's width at most): ${mg.toList()}")
+        assertTrue(mg[2] >= CoverFrame.safeBox()[0] * 1000 - 1, "inside the safe box: ${mg.toList()}")
+        assertTrue(abs(mg[0] - mg[1]) <= 25, "same space above and below: ${mg.toList()}")
+        // the editor's «centre» agrees with the automatic framing
+        val c = assertNotNull(CoverFrame.centered(m, 1600, p.copy(dx = 0.2f, dy = 0.2f)))
+        assertEquals(p.dx, c.dx, 0.01f)
+    }
+
+    @Test
+    fun `a symmetric garment keeps the middle of its box`() {
+        val m = jumper(120, 140, shiftX = 9, shiftY = 6)
+        val p = assertNotNull(CoverFrame.place(m, 3000, 3500))
+        val mg = assertNotNull(CoverFrame.margins(m, 3000, p, 1000))
+        assertTrue(abs(mg[2] - mg[3]) <= 3, "same space left and right: ${mg.toList()}")
     }
 
     @Test
