@@ -357,7 +357,7 @@ private class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val
 
 private fun Framing.placement() = Placement(scale, dx, dy, rotation)
 private fun Placement.framing() = Framing(scale, dx, dy, rotation)
-private fun Framing.covers(w: Int, h: Int) = CoverFrame.isCovered(placement(), w, h, CoverFrame.FILL_MAX)   // or only a strip of mirrored backdrop, which the box already shows
+private fun Framing.covers(w: Int, h: Int) = CoverFrame.isCovered(placement(), w, h, CoverFrame.fillLimit(rotation))   // or only a strip of mirrored backdrop, which the box already shows
 
 /** The crop box (left, top, right, bottom, in screen pixels) of a framing: the 3:4 frame, with the photo fixed under it. */
 private fun boxOf(f: Framing, g: Geo): FloatArray {
@@ -547,7 +547,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                 framing = Crop.cover(img.width, img.height)
                 if (isCover && slot.edit == null) auto(true)
             } else if (!cur.covers(img.width, img.height)) {
-                framing = CoverFrame.settle(cur.placement(), img.width, img.height, CoverFrame.FILL_MAX).framing()      // an old crop with made-up edges is tidied
+                framing = CoverFrame.settle(cur.placement(), img.width, img.height, CoverFrame.fillLimit(cur.rotation)).framing()      // an old crop with made-up edges is tidied
             }
             // an already framed cover: the silhouette is only looked for to measure the space around the garment
             if (isCover && !(cur == null && slot.edit == null)) garment = AutoFrame.analyze(context, slot.source).mask

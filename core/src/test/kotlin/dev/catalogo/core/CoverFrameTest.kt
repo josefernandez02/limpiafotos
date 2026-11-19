@@ -70,6 +70,168 @@ class CoverFrameTest {
         }
     }
 
+    /** A folded pair of jeans seen from above: a squarish body with a thicker, bulging left side (the fold). */
+    private fun folded(w: Int, h: Int): Mask {
+        val on = BooleanArray(w * h)
+        for (y in 0 until h) for (x in 0 until w) {
+            val body = x in 40..110 && y in 30..110
+            val bulge = x in 28..40 && y in 70..110 || x in 34..40 && y in 45..70
+            on[y * w + x] = body || bulge
+        }
+        return Mask(w, h, on)
+    }
+
+    @Test
+    fun `a lopsided folded garment is straightened by its outline and stays centred`() {
+        for (deg in listOf(-9f, -6f, 8f)) {
+            val tilted = CoverFrame.rotated(folded(150, 140), deg)
+            val p = assertNotNull(CoverFrame.place(tilted, 3000, 3000), "tilt $deg")
+            assertEquals(-deg, p.rotation, 1.5f, "tilt $deg")
+            val mg = assertNotNull(CoverFrame.margins(tilted, 3000, p, 1000))        // top, bottom, left, right in px of a 1000-wide frame
+            assertTrue(abs(mg[0] - mg[1]) <= 25, "tilt $deg: same space above and below: ${mg.toList()}")
+            assertTrue(abs(mg[2] - mg[3]) <= 25, "tilt $deg: same space left and right: ${mg.toList()}")
+        }
+    }
+
+    /**
+     * The silhouette of a folded pair of light jeans on a grey floor (3:4 photo, 96x128 cells), row by row from row [foldedJeansTop],
+     * as the runs of garment cells («from-to»). The fold makes it a lopsided shape that leans: its bottom edge runs uphill to the right.
+     */
+    private val foldedJeansTop = 18
+    private val foldedJeans = listOf(
+        "27-30",
+        "26-32",
+        "26-61",
+        "25-69",
+        "25-70",
+        "24-70",
+        "24-70",
+        "24-70",
+        "24-71",
+        "24-71",
+        "22-71",
+        "20-71",
+        "20-71",
+        "20-72",
+        "20-72",
+        "21-72",
+        "21-72",
+        "21-72",
+        "21-72",
+        "21-73",
+        "21-73",
+        "21-73",
+        "21-73",
+        "21-74",
+        "21-74",
+        "21-74",
+        "21-74",
+        "21-74",
+        "21-74",
+        "21-75",
+        "21-75",
+        "21-75",
+        "21-75",
+        "21-75",
+        "21-75",
+        "20-76",
+        "20-76",
+        "20-76",
+        "20-76",
+        "20-76",
+        "19-76",
+        "19-77",
+        "19-77",
+        "19-77",
+        "19-77",
+        "19-77",
+        "18-77",
+        "18-77",
+        "18-78",
+        "18-78",
+        "18-78",
+        "18-78",
+        "17-78",
+        "17-78",
+        "17-79",
+        "17-79",
+        "17-79",
+        "17-79",
+        "16-79",
+        "16-79",
+        "16-80",
+        "16-80",
+        "15-80",
+        "15-80",
+        "15-80",
+        "14-80",
+        "14-80",
+        "14-81",
+        "14-81",
+        "13-81",
+        "13-81",
+        "13-81",
+        "12-81",
+        "12-81",
+        "12-82",
+        "11-82",
+        "11-82",
+        "11-82",
+        "11-82",
+        "11-82",
+        "11-83",
+        "11-83",
+        "11-83",
+        "12-82",
+        "12-80",
+        "13-76",
+        "13-67",
+        "14-58",
+        "15-50",
+        "16-41",
+        "17-33",
+        "18-25"
+    )
+
+    private fun foldedJeansMask(): Mask {
+        val on = BooleanArray(96 * 128)
+        foldedJeans.forEachIndexed { i, row ->
+            for (run in row.split(",").filter { it.isNotEmpty() }) {
+                val (x0, x1) = run.split("-").map { it.toInt() }
+                for (x in x0..x1) on[(foldedJeansTop + i) * 96 + x] = true
+            }
+        }
+        return Mask(96, 128, on)
+    }
+
+    @Test
+    fun `a real folded pair of jeans is straightened by its outline, not left leaning, and stays centred`() {
+        val m = foldedJeansMask()
+        val p = assertNotNull(CoverFrame.place(m, 480, 640))
+        assertTrue(p.rotation in 5f..11f, "its bottom edge runs uphill to the right: it has to be turned clockwise, not ${p.rotation}")
+        val mg = assertNotNull(CoverFrame.margins(m, 480, CoverFrame.settle(p, 480, 640, CoverFrame.fillLimit(p.rotation)), 1000))
+        assertTrue(abs(mg[0] - mg[1]) <= 25, "same space above and below: ${mg.toList()}")
+        assertTrue(abs(mg[2] - mg[3]) <= 25, "same space left and right: ${mg.toList()}")
+    }
+
+    @Test
+    fun `a folded garment whose edges are already straight is not turned`() {
+        assertEquals(0f, CoverFrame.tilt(folded(150, 140)), 0.01f)
+    }
+
+    @Test
+    fun `trousers with a splayed leg are not turned just to look more symmetric`() {
+        val w = 120
+        val h = 160
+        val on = BooleanArray(w * h)
+        for (y in 20..140) for (x in 0 until w) {
+            val waist = y < 44
+            val flare = (y - 44).coerceAtLeast(0) / 12                     // the right leg opens outwards, the left one does not
+            on[y * w + x] = if (waist) x in 38..82 else (x in 38..58 || x in 64..(82 + flare))
+        }
+        assertEquals(0f, CoverFrame.tilt(Mask(w, h, on)), 0.01f)
+    }
+
     @Test
     fun `a round or lopsided shape is left as it is`() {
         val n = 120
@@ -318,6 +480,7 @@ class CoverFrameTest {
             val m = CoverFrame.dilated(Mask(96, 128, on), grow)
             val p = assertNotNull(CoverFrame.place(m, 480, 640), "grow $grow")
             assertTrue(!p.tight, "grow $grow must not be left as it is")
+            assertEquals(0f, p.rotation, 0.01f, "grow $grow: trousers photographed straight are not turned")
             assertTrue(CoverFrame.fillDepth(p, 480, 640) <= 0.091f, "grow $grow depth ${CoverFrame.fillDepth(p, 480, 640)}")
         }
     }

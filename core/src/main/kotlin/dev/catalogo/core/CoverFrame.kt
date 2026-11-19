@@ -60,7 +60,10 @@ object CoverFrame {
     val SAFE_W: Float = safe[2] - safe[0]                        // the garment never takes more than this of the frame's width…
     val SAFE_H: Float = (safe[3] - safe[1]) / FRAME_H            // …or of its height (as a share of it)
     val LIFT: Float = (FRAME_H / 2 - (safe[1] + safe[3]) / 2) / FRAME_H   // garment centre a little above the middle: labels cover the bottom
-    const val MAX_TILT = 10f             // degrees it will ever straighten
+    const val MAX_TILT = 12f             // degrees it will ever straighten
+    private const val MIN_TURN = 1.5f    // it never turns less than this: a degree or so is measuring noise, and would only make a straight garment crooked…
+    private const val MIN_GAIN = 1.25f   // …nor unless the turn makes the outline this many times straighter than it is…
+    private const val MAX_DISAGREE = 3f  // …nor when the two ways of reading the outline differ by more than this many degrees
     const val MIN_AREA = 0.08f           // silhouettes smaller or bigger than this share of the photo are not trusted
     const val MAX_AREA = 0.92f
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
@@ -68,6 +71,10 @@ object CoverFrame {
     private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor…
     const val FILL_MAX = 0.09f       // (public: the editor lets a hand-made framing reach this far too)
     private const val DEPTH_MAX = FILL_MAX  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
+    const val TURNED_FILL_MAX = 0.14f   // a photo that had to be turned to put the garment straight leaves its corners bare: this much mirrored floor is accepted there, so the garment can stay centred
+
+    /** The deepest strip of mirrored backdrop a framing turned by [rotation] degrees may show (the app's auto framing and its editor agree on it). */
+    fun fillLimit(rotation: Float): Float = if (rotation != 0f) TURNED_FILL_MAX else FILL_MAX
     private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
     private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
     private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
@@ -165,7 +172,8 @@ object CoverFrame {
         // that does it; a garment lying low in a photo whose frame already reaches the photo's bottom needs one, and a floor
         // mirrored over a few % of the cover is far less noticeable than a garment with more air above than below).
         // The garment never grows more than [CENTRED_GROWTHS]: the more it grows, the less breathing room it has in the narrow previews.
-        for (limit in floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX)) for (g in CENTRED_GROWTHS) {
+        val centredLimits = if (tilt != 0f) floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX, TURNED_FILL_MAX) else floatArrayOf(0f, DEPTH_TINY, DEPTH_OK, DEPTH_MAX)
+        for (limit in centredLimits) for (g in CENTRED_GROWTHS) {
             val p = at(g, 0, 0)
             val fine = if (limit == 0f) uncoveredShare(p, imageW, imageH) == 0f
                        else fillDepth(p, imageW, imageH) <= limit && fillIsBackdrop(near, p, imageW, imageH)
@@ -449,27 +457,88 @@ object CoverFrame {
         return if (either == 0) 0f else both.toFloat() / either
     }
 
+    /** The cells on the silhouette's outline (a photo's edge is not the garment's edge), as their centres. */
+    private fun outlinePoints(m: Mask): Pair<FloatArray, FloatArray> {
+        val xs = ArrayList<Float>()
+        val ys = ArrayList<Float>()
+        fun on(x: Int, y: Int) = x < 0 || y < 0 || x >= m.w || y >= m.h || m.on[y * m.w + x]
+        for (y in 0 until m.h) for (x in 0 until m.w) {
+            if (!m.on[y * m.w + x]) continue
+            if (!on(x - 1, y) || !on(x + 1, y) || !on(x, y - 1) || !on(x, y + 1)) { xs.add(x + 0.5f); ys.add(y + 0.5f) }
+        }
+        return xs.toFloatArray() to ys.toFloatArray()
+    }
+
     /**
-     * The turn (degrees, clockwise) that makes the garment most symmetric, searched within ±[MAX_TILT].
-     * Cautious: it only turns when the gain is clear and the garment really is symmetric once turned;
-     * for round or lopsided shapes the answer is 0 (leave the photo as it is).
+     * How well the outline lines up with a pair of perpendicular axes turned by [deg]: the outline cells are projected on each
+     * axis, and cells of one straight edge fall in the same bin, so the sum of squares of the bin counts is big when edges are
+     * straight along that direction. The two axes count the same (geometric mean), so a single long edge that happens to
+     * be slanted, like the splayed leg of a pair of trousers, does not pass for the garment's own «straight».
+     */
+    private fun straightness(xs: FloatArray, ys: FloatArray, deg: Float): Double {
+        val rad = deg * PI / 180.0
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        var product = 1.0
+        for (axis in 0..1) {
+            val rho = FloatArray(xs.size) { if (axis == 0) xs[it] * c + ys[it] * s else -xs[it] * s + ys[it] * c }
+            val lo = rho.min()
+            val bins = IntArray(ceil(rho.max() - lo).toInt() + 2)
+            for (r in rho) bins[(r - lo).toInt()]++
+            var sum = 0.0
+            for (n in bins) sum += n.toDouble() * n
+            product *= sum
+        }
+        return Math.sqrt(product)
+    }
+
+    /** Area of the smallest rectangle, with sides along the axes turned by [deg], that holds the whole outline. */
+    private fun boxArea(xs: FloatArray, ys: FloatArray, deg: Float): Double {
+        val rad = deg * PI / 180.0
+        val c = cos(rad).toFloat()
+        val s = sin(rad).toFloat()
+        var x0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
+        for (i in xs.indices) {
+            val u = xs[i] * c + ys[i] * s
+            val v = -xs[i] * s + ys[i] * c
+            x0 = min(x0, u); x1 = max(x1, u); y0 = min(y0, v); y1 = max(y1, v)
+        }
+        return (x1 - x0 + 1.0) * (y1 - y0 + 1.0)
+    }
+
+    /**
+     * The turn (degrees, clockwise) that puts the garment's own outline straight, searched within ±[MAX_TILT].
+     * It looks at the silhouette only, never at what is printed or sewn on it (a label, a pocket), and not at how
+     * symmetric it is: a folded garment is lopsided, and a pair of trousers with one leg splayed is not symmetric
+     * either, yet both have a clear «straight». Two independent readings of the outline have to agree before it turns:
+     *  - the turn at which most of the outline runs in straight edges along the photo's axes (waistband, hems and sides
+     *    of trousers, folds of a folded garment, hem and sides of a jumper), and
+     *  - the turn at which the smallest rectangle that holds the garment is the tightest.
+     * Cautious: a garment whose edges are already straight, one whose edges are not clear (round or lopsided shapes), or
+     * one on which the two readings disagree is left as it is.
      */
     fun tilt(m: Mask): Float {
-        val here = symmetry(m)
-        var best = 0f
-        var bestScore = here
-        fun tryAngle(a: Float) {
-            val score = symmetry(rotated(m, a)) - 0.0005f * abs(a)
-            if (score > bestScore) { bestScore = score; best = a }
+        val (xs, ys) = outlinePoints(m)
+        if (xs.size < 12) return 0f
+        val here = straightness(xs, ys, 0f)
+        val boxHere = boxArea(xs, ys, 0f)
+        if (here <= 0.0) return 0f
+        var edges = 0f
+        var edgesScore = here
+        var box = 0f
+        var boxScore = boxHere
+        var c = -MAX_TILT
+        while (c <= MAX_TILT + 1e-3f) {
+            val e = straightness(xs, ys, -c) * (1.0 - 0.0005 * abs(c))      // between equals, the smaller turn
+            if (e > edgesScore) { edgesScore = e; edges = c }
+            val b = boxArea(xs, ys, -c) * (1.0 + 0.0005 * abs(c))
+            if (b < boxScore) { boxScore = b; box = c }
+            c += 0.25f
         }
-        var a = -MAX_TILT
-        while (a <= MAX_TILT + 1e-3f) { if (abs(a) > 1e-3f) tryAngle(a); a += 1f }
-        val coarse = best
-        if (coarse != 0f) {
-            var f = coarse - 0.75f
-            while (f <= coarse + 0.75f + 1e-3f) { tryAngle(f); f += 0.25f }
-        }
-        return if (best != 0f && bestScore - here >= 0.012f && bestScore >= 0.85f) (best * 4).roundToInt() / 4f else 0f
+        if (edges == 0f || edgesScore / here < MIN_GAIN) return 0f
+        if (abs(edges - box) > MAX_DISAGREE) return 0f
+        val turn = ((edges + box) / 2 * 4).roundToInt() / 4f
+        return if (abs(turn) >= MIN_TURN) turn else 0f
     }
 }
 
