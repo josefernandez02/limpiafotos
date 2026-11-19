@@ -41,7 +41,7 @@ class Gemini(private val resolver: ContentResolver) {
      * facts. If the reading fails (quota, timeout) the listing is still written
      * without it rather than leaving the article stuck.
      */
-    suspend fun suggest(key: String, listing: Listing, accounts: List<Ai.Account>, photos: List<Uri>): Answer =
+    suspend fun suggest(key: String, listing: Listing, accounts: List<Ai.Account>, photos: List<Uri>, avoid: dev.catalogo.core.Relist? = null): Answer =
         withContext(Dispatchers.IO) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
             val started = System.currentTimeMillis()
@@ -57,7 +57,7 @@ class Gemini(private val resolver: ContentResolver) {
             }
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it, MAX_SIDE) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
-            val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading) }
+            val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading, avoid) }
             val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
             val s = Ai.parse(text, listing, accounts, reading)
             AppLog.i("ia", "anuncio con $model en $seconds s: categoría=${s.category} materiales=${s.materials} talla=${s.sizeLabel} dudas=${s.doubts}")

@@ -290,6 +290,21 @@ class Repo(context: Context) {
         return consent
     }
 
+    /**
+     * Lists it again with new photos: the old ones go (the original files in the gallery need the user's allowance, as in a
+     * sale) and the article keeps everything else. See [Catalog.relist].
+     */
+    suspend fun relist(number: Int): List<Uri> {
+        val consent = deleteLocalForParent(number)
+        store.update { s -> s.copy(parent = Catalog.relist(s.parent!!, number)) }
+        return consent
+    }
+
+    /** The AI wrote a title and hashtags that differ from the old listing's. */
+    suspend fun finishRelist(number: Int) {
+        store.update { s -> s.copy(parent = Catalog.finishRelist(s.parent!!, number)) }
+    }
+
     /** Removed by mistake: delete it everywhere without recording a sale. */
     suspend fun deleteArticle(number: Int): List<Uri> {
         val consent = deleteLocalForParent(number)

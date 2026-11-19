@@ -548,6 +548,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- child ----------
 
+    /** «Resubir»: new photos, new title and hashtags; the rest of the article stays. */
+    fun relist(number: Int) = run {
+        askToDelete(app.drafts.relist(number))
+        _message.value = "Resubir: haz fotos nuevas. La IA cambiará el título y los hashtags al preparar el borrador. Borra el anuncio antiguo en Vinted"
+        refresh()
+    }
+
     fun deleteArticle(number: Int) = run {
         askToDelete(repo.deleteArticle(number))
         back()

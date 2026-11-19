@@ -249,6 +249,7 @@ private fun ArticleRow(
                     Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 18.sp))
                     Ledger.lot(p, a.lotId)?.let { Pill(it.name) }
                     if (a.soldInVinted()) Pill("Vendido en Vinted", strong = true)
+                    if (a.relist != null) Pill("Resubir")
                 }
                 Text(
                     title ?: "Sin datos",
@@ -282,6 +283,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     val article = Catalog.article(p, number)
     var selling by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
+    var relisting by remember { mutableStateOf(false) }
     var soldBy by remember(article?.vinted) {
         mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.self.id)
     }
@@ -298,11 +300,18 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
         bottomBar = {
             if (article != null && !article.released) {
                 BottomActions {
-                    OutlinedButton(
-                        onClick = { selling = true },
-                        modifier = Modifier.fillMaxWidth().height(54.dp),
-                        shape = RoundedCornerShape(18.dp),
-                    ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = { relisting = true },
+                            modifier = Modifier.weight(1f).height(54.dp),
+                            shape = RoundedCornerShape(18.dp),
+                        ) { Text("Resubir") }
+                        OutlinedButton(
+                            onClick = { selling = true },
+                            modifier = Modifier.weight(1f).height(54.dp),
+                            shape = RoundedCornerShape(18.dp),
+                        ) { Text("Vendido", color = MaterialTheme.colorScheme.error) }
+                    }
                 }
             }
         },
@@ -323,6 +332,14 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 Text(Sku.number(number, p.digits), style = Mono.copy(fontSize = 34.sp))
                 Ledger.lot(p, article.lotId)?.let { Pill(it.name) }
                 Ledger.costOf(p, article)?.let { Pill("Coste ${Money.format(it)}") }
+            }
+
+            if (article.relist != null) {
+                Tile {
+                    Text("Resubida en curso", style = MaterialTheme.typography.titleMedium)
+                    Muted("Haz las fotos nuevas y prepara el borrador: la IA cambiará el título y los hashtags (hasta entonces no se envía nada). El resto de datos se queda; puedes editarlos.")
+                    Muted("Recuerda borrar el anuncio antiguo en Vinted.")
+                }
             }
 
             article.vinted.entries.firstOrNull { it.value.status == "sold" }?.let { (deviceId, item) ->
@@ -370,6 +387,18 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             ListingPreview(p, article, onEdit = { vm.go(Screen.Editor(number)) })
             Spacer(Modifier.height(8.dp))
         }
+    }
+
+    if (relisting) {
+        Confirm(
+            title = "Resubir ${Sku.number(number, p.digits)}",
+            text = "Se borran sus fotos (Android te pedirá permiso para las de la galería) y vuelve a «Por subir». Se conserva el resto de datos. " +
+                "Con las fotos nuevas, la IA escribirá otro título y otros hashtags, y no se envía hasta que cambien. El anuncio antiguo de Vinted lo borras tú.",
+            confirm = "Resubir",
+            destructive = true,
+            onConfirm = { relisting = false; vm.relist(number) },
+            onDismiss = { relisting = false },
+        )
     }
 
     if (deleting) {

@@ -120,7 +120,26 @@ object Ai {
            Sin marca: Vintage Y2K Low Rise Flared Jeans Dark Blue · Vintage 90s Biker Leather Jacket Black""",
     )
 
-    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null): String {
+    /**
+     * The part of the prompt for a re-listed article: the titles and hashtags it had, which the new ones must not repeat
+     * (see [Relisting] for how much they must differ). Empty for a first listing.
+     */
+    fun relistingPrompt(avoid: Relist?, accounts: List<Account>): String {
+        if (avoid == null) return ""
+        val titles = accounts.mapNotNull { a -> avoid.titles[a.id]?.let { "${a.prefix}: $it" } }
+        return buildString {
+            append("\nREPUBLICACION (la prenda se vuelve a subir con fotos nuevas; el anuncio no puede ser el mismo)\n")
+            if (titles.isNotEmpty()) append("- Títulos usados antes:\n").append(titles.joinToString("\n") { "  $it" }).append('\n')
+            append("- Cada título nuevo lleva al menos ${Relisting.MIN_WORDS} palabras que no estaban en el anterior de su cuenta: sinónimos (Jeans / Denim, Pants / Trousers), otra palabra de corte, diseño o estilo que sea cierta, otro matiz de color. ")
+            append("Mismas reglas de arriba: orden de la cuenta, palabras que de verdad se buscan, nada inventado. Cambiar solo el orden no vale.\n")
+            if (avoid.hashtags.isNotEmpty()) {
+                append("- Hashtags usados antes: ").append(avoid.hashtags.joinToString(", ")).append('\n')
+                append("- Los nuevos incluyen al menos ${Relisting.MIN_TAGS} que no estén en esa lista (otras búsquedas ciertas: sinónimos, el otro idioma, estilo, época o un detalle visible). Conserva los esenciales (marca, prenda) y mantén de 10 a 12.\n")
+            }
+        }
+    }
+
+    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null, avoid: Relist? = null): String {
         val type = Garments.type(listing.type)
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
@@ -213,7 +232,10 @@ object Ai {
 
             CATEGORIAS
             ${categoriesFor(listing.gender, listing.type).joinToString("\n")}
-        """.trimIndent()
+        """.trimIndent().let { text ->
+            // (added after trimming: its lines have no indentation of their own)
+            if (avoid == null) text else text.replace(Regex("\n[ \t]*DATOS_DEL_USUARIO\n")) { relistingPrompt(avoid, accounts) + "\nDATOS_DEL_USUARIO\n" }
+        }
     }
 
     /**
@@ -307,12 +329,13 @@ object Ai {
         model: String = "",
         thinking: Boolean = true,
         reading: Reading? = null,
+        avoid: Relist? = null,
     ): String = buildJsonObject {
         putJsonArray("contents") {
             addJsonObject {
                 put("role", "user")
                 putJsonArray("parts") {
-                    addJsonObject { put("text", prompt(listing, accounts, reading)) }
+                    addJsonObject { put("text", prompt(listing, accounts, reading, avoid)) }
                     for (p in photos.take(PHOTOS)) {
                         addJsonObject { putJsonObject("inlineData") { put("mimeType", "image/jpeg"); put("data", p) } }
                     }

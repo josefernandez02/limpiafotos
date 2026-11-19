@@ -81,6 +81,33 @@ object Catalog {
         return replace(s, a.copy(listing = applied, ai = suggestion.result(applied, model, seconds)))
     }
 
+    /**
+     * Lists [number] again, with new photos: everything the user filled in stays (listing, price, cost, lot, accounts);
+     * what the old publication left behind goes: the AI's answer, the photo choice, the draft on the PC and this phone's
+     * «subido» and wardrobe marks. The titles and hashtags it had are kept apart, as what the new ones must not repeat.
+     */
+    fun relist(s: ParentState, number: Int): ParentState {
+        val a = article(s, number) ?: return s
+        if (a.released) return s
+        val me = s.self
+        // What it was published with is what the AI wrote (a draft is never sent without it); without AI data there is nothing to avoid.
+        val avoid = a.relist ?: Relist(
+            titles = a.ai?.titles.orEmpty().mapValues { Ai.distinctWords(it.value) }.filterValues { it.isNotBlank() },
+            hashtags = a.ai?.hashtags.orEmpty(),
+        )
+        return replace(s, a.copy(
+            ai = null, photos = emptyList(), desk = null,
+            uploaded = a.uploaded - me.id, vinted = a.vinted - me.id,
+            round = a.round + 1, relist = avoid,
+        ))
+    }
+
+    /** The AI wrote titles and hashtags that differ: the re-listing no longer waits for them. */
+    fun finishRelist(s: ParentState, number: Int): ParentState {
+        val a = article(s, number) ?: return s
+        return if (a.relist == null) s else replace(s, a.copy(relist = null))
+    }
+
     /** AI data of [number] while it still matches the listing (null when stale or absent). */
     fun freshAi(s: ParentState, number: Int): AiResult? {
         val a = article(s, number) ?: return null

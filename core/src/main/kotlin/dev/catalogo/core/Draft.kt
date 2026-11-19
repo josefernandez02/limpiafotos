@@ -36,9 +36,10 @@ object Draft {
         val brandChecked: Boolean = false,
     )
 
-    /** Unique for this article's life: the number plus when it was created (numbers are reused). */
+    /** Unique for this article's life: the number plus when it was created (numbers are reused), and which listing it is (re-listed ones are new to the PC). */
     fun ref(device: Device, article: Article, digits: Int): String =
-        Sku.format(device.prefix, article.number, digits) + "-" + article.createdAt.toString(36)
+        Sku.format(device.prefix, article.number, digits) + "-" + article.createdAt.toString(36) +
+            if (article.round > 0) "r${article.round}" else ""
 
     fun condition(c: Condition): String = when (c) {
         Condition.NEW_TAGS -> "nuevo_con_etiquetas"
@@ -60,6 +61,7 @@ object Draft {
         // Always written by hand now (also old «Sin marca» articles: «Vintage Dressing», «Vintage»…).
         if (listing != null && listing.brand.isBlank()) problems += "Falta la marca (escríbela en Editar)"
         if (ai == null) problems += "Falta generar el anuncio con IA"
+        if (article.relist != null) problems += "Al resubir, el título y los hashtags tienen que cambiar (los escribe la IA al preparar el borrador)"
         if (listing == null || ai == null) return Built(ref, null, problems, emptyList())
 
         val text = Catalog.listingText(p, article.number, device)

@@ -17,6 +17,7 @@ import dev.catalogo.core.CatalogException
 import dev.catalogo.core.Desk as DeskState
 import dev.catalogo.core.Draft
 import dev.catalogo.core.Listing
+import dev.catalogo.core.Relisting
 import dev.catalogo.core.Sku
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -183,8 +184,22 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             val photos = aiPhotos(p, a)
             if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
             try {
-                val answer = repo.gemini.suggest(key, a.listing ?: Listing(), Catalog.aiAccounts(p), photos)
+                val accounts = Catalog.aiAccounts(p)
+                var answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist)
+                // A re-listed article must not go up with the old title or hashtags: the AI is asked again (twice at most), then it waits for the user.
+                var repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
+                var tries = 0
+                while (repeated.isNotEmpty() && tries < RELIST_RETRIES) {
+                    tries++
+                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: repite ${repeated.joinToString(" y ")}; intento $tries")
+                    answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist)
+                    repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
+                }
+                if (repeated.isNotEmpty()) {
+                    return set(number, DeskState.REVIEW, "La IA ha repetido ${repeated.joinToString(" y ")} de la publicación anterior. Vuelve a intentarlo")
+                }
                 repo.applyAi(number, answer.suggestion, answer.model, answer.seconds)
+                if (a.relist != null) repo.finishRelist(number)
             } catch (e: AiException) {
                 return set(number, DeskState.REVIEW, e.message ?: "La IA no ha respondido")
             } catch (e: CatalogException) {
@@ -428,6 +443,17 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         }.onFailure { AppLog.w("cola", "${d.ref} pendiente de avisar al PC: ${it.message}") }
     }
 
+    /**
+     * «Resubir»: the article goes back to «Por subir» with its data and without its photos; the title and hashtags
+     * will be written again. An article the PC has is first taken off it (its old link is not played any more); if the
+     * PC cannot hear that, nothing changes. Returns the originals the user must allow to delete.
+     */
+    suspend fun relist(number: Int): List<android.net.Uri> {
+        if (current(number)?.desk != null) setStage(number, dev.catalogo.core.Stage.TO_UPLOAD)
+        AppLog.i("cola", "$number resubido")
+        return repo.relist(number)
+    }
+
     /** «Generar y preparar borrador». */
     suspend fun prepareNow(number: Int, mode: String? = null) {
         val p = repo.state.parent ?: return
@@ -497,6 +523,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         private const val POLL_IDLE_MS = 30_000L
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
+        /** Extra AI answers asked for when a re-listed article's new title or hashtags still repeat the old ones. */
+        private const val RELIST_RETRIES = 2
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
 
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */

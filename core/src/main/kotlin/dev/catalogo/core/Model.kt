@@ -38,6 +38,16 @@ data class VintedItem(
 )
 
 /**
+ * What a re-listed article must not repeat: the titles (per device id) and hashtags it was published with.
+ * Kept until the AI has written new ones that differ enough ([Relisting]); nothing is sent to the PC before.
+ */
+@Serializable
+data class Relist(
+    val titles: Map<String, String> = emptyMap(),
+    val hashtags: List<String> = emptyList(),
+)
+
+/**
  * One catalogued article, identified by its number (shared by every device).
  * Once [released], it stays here until every device in [pendingRelease] has
  * confirmed deleting its album; only then the number becomes free again.
@@ -66,6 +76,10 @@ data class Article(
     val desk: Desk? = null,
     /** Photos the AI looks at, in order (the PC always gets the whole album); empty = all of them. */
     val photos: List<String> = emptyList(),
+    /** How many times it was listed again (new photos, new title and hashtags); part of its code on the PC. */
+    val round: Int = 0,
+    /** Set while a re-listing waits for its new title and hashtags. */
+    val relist: Relist? = null,
 ) {
     /** Chosen accounts; articles from before the choice existed use where they went. */
     val targets: Set<String> get() = accounts.ifEmpty { uploaded + delivered.filterValues { it > 0 }.keys }
