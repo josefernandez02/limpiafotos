@@ -54,6 +54,7 @@ import java.util.Locale
 fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val pc by vm.pc.collectAsStateWithLifecycle()
     val incidents by vm.incidents.collectAsStateWithLifecycle()
+    val offers by vm.offers.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val articles = p.articles.filter { !it.released }
     // Pending notices are always open by default: a missed like must never hide behind a tap. The user can hide them.
@@ -76,6 +77,7 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
+            offers?.let { o -> item(key = "ofertas") { OffersPanel(vm, o) } }
             pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today, incidents) } }
             if (incidents.isNotEmpty()) {
                 item(key = "h-inc") {
@@ -277,6 +279,59 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
             onConfirm = { vm.pcControl("detener") },
             onDismiss = { stopping = false },
             destructive = true,
+        )
+    }
+}
+
+
+/** Automatic offers: the switch is yours (the PC never turns it on by itself), with today's numbers and the latest. */
+@Composable
+private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.Desk.Offers) {
+    var confirmOn by remember { mutableStateOf(false) }
+    var showLast by rememberSaveable { mutableStateOf(false) }
+    Tile {
+        Text(if (o.on) "Ofertas encendidas" else "Ofertas en pausa", style = MaterialTheme.typography.titleMedium)
+        Muted(
+            "Hoy ${o.today} enviadas" + (if (o.errorsToday > 0) " · ${o.errorsToday} con fallo" else "") +
+                " · ${o.total} en total · ${o.players} jugadores apuntados" +
+                (if (o.pendingNames > 0) " · ${o.pendingNames} nombres por leer" else ""),
+            Modifier.padding(top = 2.dp),
+        )
+        if (o.on && o.reason.isNotBlank()) Muted(o.reason, Modifier.padding(top = 2.dp))
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(
+                onClick = { if (o.on) vm.offersControl("pausar") else confirmOn = true },
+                modifier = Modifier.weight(1f).height(48.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) { OneLine(if (o.on) "Pausar ofertas" else "Encender ofertas") }
+            if (o.on) {
+                OutlinedButton(
+                    onClick = { vm.offersControl("ahora") },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) { OneLine("Mandar ya") }
+            }
+        }
+        if (o.last.isNotEmpty()) {
+            TextButton(onClick = { showLast = !showLast }) { Text(if (showLast) "Ocultar últimas" else "Ver últimas") }
+            if (showLast) o.last.forEach { e ->
+                val what = when (e.result) {
+                    "ofertada" -> "${e.price.toInt()} € → ${e.offer.toInt()} €"
+                    "error" -> "fallo: ${e.reason}"
+                    "sin_oferta" -> "sin oferta"
+                    else -> e.result
+                }
+                Muted("${e.user} · ${e.title.take(28)} · $what", Modifier.padding(top = 2.dp), maxLines = 2)
+            }
+        }
+    }
+    if (confirmOn) {
+        Confirm(
+            title = "¿Encender las ofertas?",
+            text = "Con el PC libre, mandará un mensaje y una oferta a quien marque como favorito un artículo tuyo, salvo a quienes juegan a los juegos.",
+            confirm = "Encender",
+            onConfirm = { vm.offersControl("encender") },
+            onDismiss = { confirmOn = false },
         )
     }
 }

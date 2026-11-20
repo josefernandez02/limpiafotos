@@ -251,6 +251,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** The PC program as last seen (null status = not configured or not reached). */
     val pc = app.drafts.pc
     val incidents = app.drafts.incidents
+    val offers = app.drafts.offers
 
     fun incidentReviewed(id: String) = run { app.drafts.reviewed(id) }
 
@@ -325,6 +326,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             action == "seguir" -> "Sigo ya"
             s.paused -> "PC en pausa"
             else -> "PC ${s.text}"
+        }
+    }
+
+    /** «encender», «pausar» or «ahora» for the automatic offers. */
+    fun offersControl(action: String) = run {
+        val o = app.drafts.offersControl(action)
+        _message.value = when (action) {
+            "ahora" -> "Ofertas: una ronda en cuanto haya hueco"
+            else -> if (o.on) "Ofertas encendidas" else "Ofertas en pausa"
         }
     }
 

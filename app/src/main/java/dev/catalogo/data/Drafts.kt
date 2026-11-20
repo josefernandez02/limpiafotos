@@ -50,6 +50,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private val mutex = Mutex()
     private val _pc = MutableStateFlow(Pc())
     val pc: StateFlow<Pc> = _pc.asStateFlow()
+    private val _offers = MutableStateFlow<Desk.Offers?>(null)
+    val offers: StateFlow<Desk.Offers?> = _offers.asStateFlow()
     private val _incidents = MutableStateFlow<List<Desk.Incident>>(emptyList())
     val incidents: StateFlow<List<Desk.Incident>> = _incidents.asStateFlow()
 
@@ -319,6 +321,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             downSince = 0L
             downAlerted = false
             _pc.value = Pc(status, null, System.currentTimeMillis())
+            // An older PC program has no offers: that is not an error.
+            runCatching { repo.desk.offers(link) }.onSuccess { _offers.value = it }
             runCatching { checkIncidents(link, status.incidents, status.lastIncident) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
                 logSent = System.currentTimeMillis()
@@ -510,6 +514,13 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val status = withContext(Dispatchers.IO) { repo.desk.control(link, action) }   // never on the UI thread
         _pc.value = Pc(status, null, System.currentTimeMillis())
         return status
+    }
+
+    suspend fun offersControl(action: String): Desk.Offers {
+        val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
+        val o = withContext(Dispatchers.IO) { repo.desk.offersControl(link, action) }
+        _offers.value = o
+        return o
     }
 
     suspend fun test(link: dev.catalogo.core.PcLink): Desk.Status = withContext(Dispatchers.IO) { repo.desk.status(link) }

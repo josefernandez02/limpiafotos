@@ -63,6 +63,14 @@ class Desk(private val resolver: ContentResolver) {
         val isWarning get() = level == "aviso" || level == "grave"
     }
 
+    /** Automatic offers to people who favourite an article: switch, today's numbers and the latest ones. */
+    data class Offers(
+        val on: Boolean, val canNow: Boolean, val reason: String, val today: Int, val errorsToday: Int, val total: Int,
+        val players: Int, val pendingNames: Int, val last: List<OfferEntry>,
+    )
+
+    data class OfferEntry(val at: Long, val user: String, val title: String, val result: String, val price: Double, val offer: Double, val reason: String)
+
     private val json = Json { ignoreUnknownKeys = true }
 
     fun status(link: PcLink): Status {
@@ -71,6 +79,24 @@ class Desk(private val resolver: ContentResolver) {
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
             o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject),
             o.str("usando_pc") == "true")
+    }
+
+    fun offers(link: PcLink): Offers = call(link, "GET", "/ofertas", null).offers()
+
+    /** "encender", "pausar" or "ahora" (a round as soon as there is a free gap). */
+    fun offersControl(link: PcLink, action: String): Offers =
+        call(link, "POST", "/ofertas", buildJsonObject { put("accion", action) }.toString()).offers()
+
+    private fun JsonObject.offers(): Offers {
+        fun n(k: String) = str(k).toIntOrNull() ?: 0
+        return Offers(str("modo") == "encendidas", str("puede_ahora") == "true", str("motivo"), n("hoy_ofertadas"),
+            n("hoy_errores"), n("total_ofertadas"), n("jugadores"), n("nombres_pendientes"),
+            (this["ultimas"] as? JsonArray).orEmpty().mapNotNull { e ->
+                (e as? JsonObject)?.let {
+                    OfferEntry(((it.str("ts").toDoubleOrNull() ?: 0.0) * 1000).toLong(), it.str("usuario"), it.str("titulo"),
+                        it.str("resultado"), it.str("precio").toDoubleOrNull() ?: 0.0, it.str("oferta").toDoubleOrNull() ?: 0.0, it.str("motivo"))
+                }
+            })
     }
 
     fun incidents(link: PcLink): List<Incident> =
