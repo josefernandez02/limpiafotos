@@ -65,8 +65,8 @@ class Desk(private val resolver: ContentResolver) {
 
     /** Automatic offers to people who favourite an article: switch, today's numbers and the latest ones. */
     data class Offers(
-        val on: Boolean, val canNow: Boolean, val reason: String, val today: Int, val errorsToday: Int, val total: Int,
-        val players: Int, val pendingNames: Int, val last: List<OfferEntry>,
+        val working: Boolean, val waiting: String, val today: Int, val errorsToday: Int, val total: Int,
+        val lastRunAt: Long, val lastRunSent: Int, val lastRunWhy: String, val last: List<OfferEntry>,
     )
 
     data class OfferEntry(val at: Long, val user: String, val title: String, val result: String, val price: Double, val offer: Double, val reason: String)
@@ -83,14 +83,16 @@ class Desk(private val resolver: ContentResolver) {
 
     fun offers(link: PcLink): Offers = call(link, "GET", "/ofertas", null).offers()
 
-    /** "encender", "pausar" or "ahora" (a round as soon as there is a free gap). */
+    /** "mandar" (go through the likes until reaching what was already offered) or "parar". */
     fun offersControl(link: PcLink, action: String): Offers =
         call(link, "POST", "/ofertas", buildJsonObject { put("accion", action) }.toString()).offers()
 
     private fun JsonObject.offers(): Offers {
         fun n(k: String) = str(k).toIntOrNull() ?: 0
-        return Offers(str("modo") == "encendidas", str("puede_ahora") == "true", str("motivo"), n("hoy_ofertadas"),
-            n("hoy_errores"), n("total_ofertadas"), n("jugadores"), n("nombres_pendientes"),
+        val lastRun = this["ultima"] as? JsonObject
+        return Offers(str("modo") == "trabajando", str("esperando"), n("hoy_ofertadas"),
+            n("hoy_errores"), n("total_ofertadas"),
+            ((lastRun?.str("ts")?.toDoubleOrNull() ?: 0.0) * 1000).toLong(), lastRun?.str("ofertadas")?.toIntOrNull() ?: 0, lastRun?.str("motivo").orEmpty(),
             (this["ultimas"] as? JsonArray).orEmpty().mapNotNull { e ->
                 (e as? JsonObject)?.let {
                     OfferEntry(((it.str("ts").toDoubleOrNull() ?: 0.0) * 1000).toLong(), it.str("usuario"), it.str("titulo"),

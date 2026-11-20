@@ -329,13 +329,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** «encender», «pausar» or «ahora» for the automatic offers. */
+    /** «mandar» or «parar» for the automatic offers. */
     fun offersControl(action: String) = run {
-        val o = app.drafts.offersControl(action)
-        _message.value = when (action) {
-            "ahora" -> "Ofertas: una ronda en cuanto haya hueco"
-            else -> if (o.on) "Ofertas encendidas" else "Ofertas en pausa"
-        }
+        app.drafts.offersControl(action)
+        _message.value = if (action == "mandar") "Ofertas: en cuanto haya hueco empiezo" else "Ofertas paradas"
     }
 
     /** Checks the PC answers with this key before saving it. */

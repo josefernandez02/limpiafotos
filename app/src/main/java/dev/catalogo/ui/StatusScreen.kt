@@ -284,34 +284,30 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 }
 
 
-/** Automatic offers: the switch is yours (the PC never turns it on by itself), with today's numbers and the latest. */
+/** Automatic offers: one button. It goes through the likes until it reaches what was already offered, then stops. */
 @Composable
 private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.Desk.Offers) {
-    var confirmOn by remember { mutableStateOf(false) }
     var showLast by rememberSaveable { mutableStateOf(false) }
     Tile {
-        Text(if (o.on) "Ofertas encendidas" else "Ofertas en pausa", style = MaterialTheme.typography.titleMedium)
+        Text(if (o.working) "Ofertas: trabajando" else "Ofertas", style = MaterialTheme.typography.titleMedium)
         Muted(
-            "Hoy ${o.today} enviadas" + (if (o.errorsToday > 0) " · ${o.errorsToday} con fallo" else "") +
-                " · ${o.total} en total · ${o.players} jugadores apuntados" +
-                (if (o.pendingNames > 0) " · ${o.pendingNames} nombres por leer" else ""),
+            "Hoy ${o.today} enviadas" + (if (o.errorsToday > 0) " · ${o.errorsToday} con fallo" else "") + " · ${o.total} en total",
             Modifier.padding(top = 2.dp),
         )
-        if (o.on && o.reason.isNotBlank()) Muted(o.reason, Modifier.padding(top = 2.dp))
-        Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilledTonalButton(
-                onClick = { if (o.on) vm.offersControl("pausar") else confirmOn = true },
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) { OneLine(if (o.on) "Pausar ofertas" else "Encender ofertas") }
-            if (o.on) {
-                OutlinedButton(
-                    onClick = { vm.offersControl("ahora") },
-                    modifier = Modifier.weight(1f).height(48.dp),
-                    shape = RoundedCornerShape(16.dp),
-                ) { OneLine("Mandar ya") }
-            }
+        if (o.working) {
+            Muted(o.waiting.ifBlank { "Recorriendo los favoritos hasta llegar a lo ya ofertado" }, Modifier.padding(top = 2.dp))
+        } else if (o.lastRunAt > 0) {
+            Muted(
+                "Última vez " + SimpleDateFormat("dd/MM HH:mm", Locale.ROOT).format(Date(o.lastRunAt)) +
+                    ": ${o.lastRunSent} enviadas · ${o.lastRunWhy}",
+                Modifier.padding(top = 2.dp), maxLines = 3,
+            )
         }
+        FilledTonalButton(
+            onClick = { vm.offersControl(if (o.working) "parar" else "mandar") },
+            modifier = Modifier.fillMaxWidth().padding(top = 12.dp).height(48.dp),
+            shape = RoundedCornerShape(16.dp),
+        ) { OneLine(if (o.working) "Parar" else "Mandar ofertas") }
         if (o.last.isNotEmpty()) {
             TextButton(onClick = { showLast = !showLast }) { Text(if (showLast) "Ocultar últimas" else "Ver últimas") }
             if (showLast) o.last.forEach { e ->
@@ -324,15 +320,6 @@ private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.Desk.Offers) {
                 Muted("${e.user} · ${e.title.take(28)} · $what", Modifier.padding(top = 2.dp), maxLines = 2)
             }
         }
-    }
-    if (confirmOn) {
-        Confirm(
-            title = "¿Encender las ofertas?",
-            text = "Con el PC libre, mandará un mensaje y una oferta a quien marque como favorito un artículo tuyo, salvo a quienes juegan a los juegos.",
-            confirm = "Encender",
-            onConfirm = { vm.offersControl("encender") },
-            onDismiss = { confirmOn = false },
-        )
     }
 }
 
