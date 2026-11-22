@@ -269,6 +269,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private fun checkDown(now: Long) {
         val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
         if (downAlerted || downSince == 0L || now - downSince < DOWN_ALERT_MS || hour !in 9..23) return
+        // The last thing the PC said was «parado» (stopped or closed on purpose): not answering is expected, not an outage.
+        if (_pc.value.status?.text == "parado") return
         downAlerted = true
         DraftsService.alert(
             context, 9_002, "No llego al PC",
