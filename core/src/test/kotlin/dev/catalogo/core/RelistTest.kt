@@ -145,4 +145,28 @@ class RelistTest {
         assertTrue("DATOS_DEL_USUARIO" in again && again.indexOf("REPUBLICACION") < again.lastIndexOf("DATOS_DEL_USUARIO"))
         assertEquals(first.length < again.length, true)
     }
+
+    @Test
+    fun `an edit fixes the title and hashtags that still repeat and leaves the rest alone`() {
+        val accounts = listOf(Ai.Account("p", "SH", 0), Ai.Account("c1", "SA", 1))
+        val oldTags = listOf("levis", "levis511", "jeans", "vaqueros", "slimjeans", "y2k", "vintage", "denim", "levisvintage", "blackjeans")
+        val avoid = Relist(mapOf("p" to "Levi's 511 Slim Fit Jeans Vintage Y2K Classic Black", "c1" to "Vintage Y2K Levis 511 Slim Jeans Denim Black"), oldTags)
+        val current = AiSuggestion(
+            null, emptyList(), null, null, emptyList(), null,
+            titles = mapOf("p" to "Levi's 511 Slim Fit Jeans Vintage Y2K Classic Black", "c1" to "Vintage Y2K Levis 511 Slim Leg Denim Trousers Black"),
+            findings = emptyList(), hashtags = oldTags + "pantalonesnegros",
+        )
+        assertEquals(listOf("p"), RelistFix.stale(avoid, current.titles))
+        val edit = RelistFix.parse(
+            """{"titulos":{"SH":"Levi's 511 Slim Leg Denim Original Retro Y2K Washed Black","SA":"Igual"},"hashtags":["pantalonesslim","levis511slim","blackdenim","jeans"]}""", accounts)
+        val fixed = RelistFix.merge(avoid, current, edit, accounts)
+        assertTrue(Relisting.titleChanged(avoid.titles["p"]!!, fixed.titles["p"]!!))
+        assertEquals(current.titles["c1"], fixed.titles["c1"])
+        assertTrue(Relisting.hashtagsChanged(avoid.hashtags, fixed.hashtags), fixed.hashtags.toString())
+        assertTrue(fixed.hashtags.size <= RelistFix.MAX_TAGS)
+        assertEquals(emptyList(), Relisting.repeated(avoid, fixed.titles, fixed.hashtags))
+        val untouched = RelistFix.merge(avoid, current, RelistFix.parse("no es json", accounts), accounts)
+        assertEquals(current.titles, untouched.titles)
+        assertEquals(current.hashtags, untouched.hashtags)
+    }
 }

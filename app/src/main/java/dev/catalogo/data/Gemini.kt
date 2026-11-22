@@ -66,6 +66,20 @@ class Gemini(private val resolver: ContentResolver) {
         }
 
     /**
+     * A re-listed article whose answer still repeats the old title or hashtags: a short text-only call that edits just
+     * those (see [dev.catalogo.core.RelistFix]) and merges the result into [current].
+     */
+    suspend fun fixRepeated(key: String, avoid: dev.catalogo.core.Relist, current: dev.catalogo.core.AiSuggestion, accounts: List<Ai.Account>): dev.catalogo.core.AiSuggestion =
+        withContext(Dispatchers.IO) {
+            val fresh = current.hashtags.count { t -> t.lowercase() !in avoid.hashtags.map { it.lowercase() }.toSet() }
+            val needTags = if (avoid.hashtags.isNotEmpty()) (dev.catalogo.core.Relisting.MIN_TAGS - fresh).coerceAtLeast(0) else 0
+            val (text, model) = generate(key, lite = true) { _, _ -> dev.catalogo.core.RelistFix.request(avoid, current, accounts, needTags) }
+            val edit = dev.catalogo.core.RelistFix.parse(text, accounts)
+            AppLog.i("ia", "arreglo de repetidos con $model: títulos=${edit.titles.values} hashtags=${edit.hashtags}")
+            dev.catalogo.core.RelistFix.merge(avoid, current, edit, accounts)
+        }
+
+    /**
      * One generateContent with the best model that answers; returns (answer text, model).
      * [lite]: Flash-Lite first. The reading goes there and the listing to Flash, so each
      * call spends the free quota of a different model.

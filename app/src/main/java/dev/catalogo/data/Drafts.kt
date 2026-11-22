@@ -203,6 +203,22 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                         rejected = dev.catalogo.core.Relist(answer.suggestion.titles, answer.suggestion.hashtags))
                     repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
                 }
+                // The same prompt gives the same answer: a short edit of just the repeated title / hashtags settles it.
+                if (repeated.isNotEmpty()) {
+                    val fixed = try {
+                        repo.gemini.fixRepeated(key, a.relist!!, answer.suggestion, accounts)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        AppLog.w("ia", "no se pudo arreglar lo repetido: ${e.message}")
+                        null
+                    }
+                    if (fixed != null) {
+                        answer = answer.copy(suggestion = fixed)
+                        repeated = Relisting.repeated(a.relist!!, fixed.titles, fixed.hashtags)
+                        AppLog.i("ia", "tras el arreglo: ${if (repeated.isEmpty()) "ya no repite" else "repite ${repeated.joinToString(" y ")}"}")
+                    }
+                }
                 // Only the hashtags still fall short: the title is what makes the listing different, so two new tags are enough at the end.
                 if (repeated == listOf("hashtags")) {
                     val before = a.relist!!.hashtags.map { it.lowercase() }.toSet()
@@ -550,7 +566,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
         /** Extra AI answers asked for when a re-listed article's new title or hashtags still repeat the old ones. */
-        private const val RELIST_RETRIES = 3
+        private const val RELIST_RETRIES = 1
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
 
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
