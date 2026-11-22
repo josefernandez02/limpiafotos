@@ -193,8 +193,14 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 var tries = 0
                 while (repeated.isNotEmpty() && tries < RELIST_RETRIES) {
                     tries++
-                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: repite ${repeated.joinToString(" y ")}; intento $tries")
-                    answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist)
+                    val old = a.relist!!
+                    val tags = answer.suggestion.hashtags
+                    val newTags = tags.count { t -> t.lowercase() !in old.hashtags.map { it.lowercase() }.toSet() }
+                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: repite ${repeated.joinToString(" y ")}; intento $tries · " +
+                        "títulos antes=${old.titles.values} ahora=${answer.suggestion.titles.values} · hashtags nuevos $newTags de ${tags.size}")
+                    // Same prompt, same answer: the retry says what was refused and asks with more variety.
+                    answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist,
+                        rejected = dev.catalogo.core.Relist(answer.suggestion.titles, answer.suggestion.hashtags))
                     repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
                 }
                 if (repeated.isNotEmpty()) {

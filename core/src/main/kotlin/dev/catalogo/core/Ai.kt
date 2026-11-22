@@ -124,7 +124,7 @@ object Ai {
      * The part of the prompt for a re-listed article: the titles and hashtags it had, which the new ones must not repeat
      * (see [Relisting] for how much they must differ). Empty for a first listing.
      */
-    fun relistingPrompt(avoid: Relist?, accounts: List<Account>): String {
+    fun relistingPrompt(avoid: Relist?, accounts: List<Account>, rejected: Relist? = null): String {
         if (avoid == null) return ""
         val titles = accounts.mapNotNull { a -> avoid.titles[a.id]?.let { "${a.prefix}: $it" } }
         return buildString {
@@ -136,10 +136,16 @@ object Ai {
                 append("- Hashtags usados antes: ").append(avoid.hashtags.joinToString(", ")).append('\n')
                 append("- Los nuevos incluyen al menos ${Relisting.MIN_TAGS} que no estén en esa lista (otras búsquedas ciertas: sinónimos, el otro idioma, estilo, época o un detalle visible). Conserva los esenciales (marca, prenda) y mantén de 10 a 12.\n")
             }
+            if (rejected != null) {
+                // A retry: the same prompt gives the same answer, so the model is told what it already wrote and was refused.
+                append("- RECHAZADO: tu respuesta anterior seguía casi igual que la publicada. No la repitas; cambia más, sin inventar nada:\n")
+                for (a in accounts) rejected.titles[a.id]?.takeIf { it.isNotBlank() }?.let { append("  título rechazado ${a.prefix}: ").append(it).append('\n') }
+                if (rejected.hashtags.isNotEmpty()) append("  hashtags rechazados: ").append(rejected.hashtags.joinToString(", ")).append('\n')
+            }
         }
     }
 
-    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null, avoid: Relist? = null): String {
+    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null, avoid: Relist? = null, rejected: Relist? = null): String {
         val type = Garments.type(listing.type)
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
@@ -234,7 +240,7 @@ object Ai {
             ${categoriesFor(listing.gender, listing.type).joinToString("\n")}
         """.trimIndent().let { text ->
             // (added after trimming: its lines have no indentation of their own)
-            if (avoid == null) text else text.replace(Regex("\n[ \t]*DATOS_DEL_USUARIO\n")) { relistingPrompt(avoid, accounts) + "\nDATOS_DEL_USUARIO\n" }
+            if (avoid == null) text else text.replace(Regex("\n[ \t]*DATOS_DEL_USUARIO\n")) { relistingPrompt(avoid, accounts, rejected) + "\nDATOS_DEL_USUARIO\n" }
         }
     }
 
@@ -330,12 +336,13 @@ object Ai {
         thinking: Boolean = true,
         reading: Reading? = null,
         avoid: Relist? = null,
+        rejected: Relist? = null,
     ): String = buildJsonObject {
         putJsonArray("contents") {
             addJsonObject {
                 put("role", "user")
                 putJsonArray("parts") {
-                    addJsonObject { put("text", prompt(listing, accounts, reading, avoid)) }
+                    addJsonObject { put("text", prompt(listing, accounts, reading, avoid, rejected)) }
                     for (p in photos.take(PHOTOS)) {
                         addJsonObject { putJsonObject("inlineData") { put("mimeType", "image/jpeg"); put("data", p) } }
                     }
@@ -345,7 +352,7 @@ object Ai {
         putJsonObject("generationConfig") {
             put("responseMimeType", "application/json")
             put("responseSchema", schema(accounts))
-            put("temperature", 0.5)
+            put("temperature", if (rejected != null) 0.9 else 0.5)   // after a refused answer, more variety
             if (thinking) thinkingConfig(model)?.let { put("thinkingConfig", it) }
         }
     }.toString()

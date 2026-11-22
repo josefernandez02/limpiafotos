@@ -191,4 +191,15 @@ class AiTest {
         val blocked = """{"promptFeedback":{"blockReason":"SAFETY"}}"""
         assertTrue(runCatching { Ai.answerText(blocked) }.exceptionOrNull()!!.message!!.contains("SAFETY"))
     }
+
+    @Test
+    fun `a retry after a refused answer says what was refused and asks with more variety`() {
+        val avoid = Relist(mapOf("p" to "Levi's 501 Jeans Blue"), listOf("levis", "jeans"))
+        val rejected = Relist(mapOf("p" to "Levi's 501 Jeans Blue Vintage"), listOf("levis", "denim"))
+        val first = Ai.request(levis, accounts, listOf("A"), avoid = avoid)
+        val retry = Ai.request(levis, accounts, listOf("A"), avoid = avoid, rejected = rejected)
+        assertFalse("RECHAZADO" in first)
+        assertTrue("RECHAZADO" in retry && "Levi's 501 Jeans Blue Vintage" in retry && "denim" in retry)
+        assertTrue("\"temperature\":0.5" in first && "\"temperature\":0.9" in retry)
+    }
 }
