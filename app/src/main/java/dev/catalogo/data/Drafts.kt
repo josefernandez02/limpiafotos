@@ -203,6 +203,13 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                         rejected = dev.catalogo.core.Relist(answer.suggestion.titles, answer.suggestion.hashtags))
                     repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
                 }
+                // Only the hashtags still fall short: the title is what makes the listing different, so two new tags are enough at the end.
+                if (repeated == listOf("hashtags")) {
+                    val before = a.relist!!.hashtags.map { it.lowercase() }.toSet()
+                    val fresh = answer.suggestion.hashtags.count { it.lowercase() !in before }
+                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: hashtags nuevos $fresh de ${answer.suggestion.hashtags.size} tras los reintentos")
+                    if (fresh >= 2) repeated = emptyList()
+                }
                 if (repeated.isNotEmpty()) {
                     return set(number, DeskState.REVIEW, "La IA ha repetido ${repeated.joinToString(" y ")} de la publicación anterior. Vuelve a intentarlo")
                 }
@@ -543,7 +550,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
         /** Extra AI answers asked for when a re-listed article's new title or hashtags still repeat the old ones. */
-        private const val RELIST_RETRIES = 2
+        private const val RELIST_RETRIES = 3
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
 
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
