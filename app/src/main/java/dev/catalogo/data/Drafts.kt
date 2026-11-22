@@ -454,10 +454,10 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * will be written again. An article the PC has is first taken off it (its old link is not played any more); if the
      * PC cannot hear that, nothing changes. Returns the originals the user must allow to delete.
      */
-    suspend fun relist(number: Int): List<android.net.Uri> {
+    suspend fun relist(number: Int, keepPhotos: Boolean = false): List<android.net.Uri> {
         if (current(number)?.desk != null) setStage(number, dev.catalogo.core.Stage.TO_UPLOAD)
-        AppLog.i("cola", "$number resubido")
-        return repo.relist(number)
+        AppLog.i("cola", "$number resubido" + if (keepPhotos) " (con las fotos que ya tenía)" else "")
+        return repo.relist(number, keepPhotos)
     }
 
     /** «Generar y preparar borrador». */

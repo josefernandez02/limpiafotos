@@ -390,14 +390,32 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
     }
 
     if (relisting) {
-        Confirm(
-            title = "Resubir ${Sku.number(number, p.digits)}",
-            text = "Se borran sus fotos (Android te pedirá permiso para las de la galería) y vuelve a «Por subir». Se conserva el resto de datos. " +
-                "Con las fotos nuevas, la IA escribirá otro título y otros hashtags, y no se envía hasta que cambien. El anuncio antiguo de Vinted lo borras tú.",
-            confirm = "Resubir",
-            destructive = true,
-            onConfirm = { relisting = false; vm.relist(number) },
-            onDismiss = { relisting = false },
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { relisting = false },
+            title = { Text("Resubir ${Sku.number(number, p.digits)}") },
+            text = {
+                Column {
+                    Text(
+                        "Se borran sus fotos (Android te pedirá permiso para las de la galería) y vuelve a «Por subir». Se conserva el resto de datos. " +
+                            "Con las fotos nuevas, la IA escribirá otro título y otros hashtags, y no se envía hasta que cambien. El anuncio antiguo de Vinted lo borras tú.",
+                    )
+                    Text(
+                        "¿Ya hiciste las fotos nuevas sin pulsar Resubir? Esta opción hace lo mismo pero NO borra nada: se quedan las fotos que tiene ahora.",
+                        modifier = Modifier.padding(top = 12.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    TextButton(onClick = { relisting = false; vm.relist(number, keepPhotos = true) }) {
+                        Text("Resubir con las fotos que ya tiene")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { relisting = false; vm.relist(number) }) {
+                    Text("Resubir", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { relisting = false }) { Text("Cancelar") } },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         )
     }
 

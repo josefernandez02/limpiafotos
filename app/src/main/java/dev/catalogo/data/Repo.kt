@@ -294,8 +294,9 @@ class Repo(context: Context) {
      * Lists it again with new photos: the old ones go (the original files in the gallery need the user's allowance, as in a
      * sale) and the article keeps everything else. See [Catalog.relist].
      */
-    suspend fun relist(number: Int): List<Uri> {
-        val consent = deleteLocalForParent(number)
+    suspend fun relist(number: Int, keepPhotos: Boolean = false): List<Uri> {
+        // keepPhotos: the new photos were already taken (without pressing «Resubir»): they stay, only the state changes.
+        val consent = if (keepPhotos) emptyList() else deleteLocalForParent(number)
         store.update { s -> s.copy(parent = Catalog.relist(s.parent!!, number)) }
         return consent
     }
