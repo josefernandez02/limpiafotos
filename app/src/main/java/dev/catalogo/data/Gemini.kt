@@ -48,7 +48,7 @@ class Gemini(private val resolver: ContentResolver) {
             val started = System.currentTimeMillis()
             val reading = runCatching {
                 val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
-                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
+                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true, waits = longArrayOf()) { m, t -> Reader.request(big, m, t) }.first)
             }.onSuccess { r ->
                 AppLog.i("ia", "lectura: composición=${r?.composition} hecho_en=${r?.origin} talla=${r?.sizeLabel} modelo=${r?.model}")
             }.getOrElse { e ->
@@ -84,42 +84,58 @@ class Gemini(private val resolver: ContentResolver) {
      * [lite]: Flash-Lite first. The reading goes there and the listing to Flash, so each
      * call spends the free quota of a different model.
      */
-    private fun generate(key: String, lite: Boolean = false, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
+    private suspend fun generate(key: String, lite: Boolean = false, waits: LongArray = BUSY_WAITS_S, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
         var last: AiException? = null
-        val all = models(key)
-        val order = if (lite) all.filter { it.contains("lite") } + all.filterNot { it.contains("lite") } else all
-        for (model in order) {
-            var thinking = true
-            while (true) {
-                val (code, text) = try {
-                    post("$BASE/models/$model:generateContent", key, body(model, thinking))
-                } catch (e: SocketTimeoutException) {
-                    last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
-                    break // try the next, lighter model
-                } catch (e: UnknownHostException) {
-                    throw IOException("Sin internet", e)
-                } catch (e: IOException) {
-                    throw IOException("Se ha cortado la conexión con Gemini", e)
-                }
-                AppLog.i("ia", "$model -> $code")
-                when {
-                    code == 200 -> return Ai.answerText(text) to model
-                    code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
-                        throw AiException("La clave de Gemini no es válida")
-                    // A model that does not accept the reasoning setting: same model without it.
-                    code == 400 && thinking && "thinking" in text.lowercase() -> {
-                        thinking = false
-                        continue
+        var round = 0
+        while (true) {
+            val all = models(key)
+            val order = if (lite) all.filter { it.contains("lite") } + all.filterNot { it.contains("lite") } else all
+            var overloaded = false
+            for (model in order) {
+                var thinking = true
+                while (true) {
+                    val (code, text) = try {
+                        post("$BASE/models/$model:generateContent", key, body(model, thinking))
+                    } catch (e: SocketTimeoutException) {
+                        last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
+                        break // try the next, lighter model
+                    } catch (e: UnknownHostException) {
+                        throw IOException("Sin internet", e)
+                    } catch (e: IOException) {
+                        throw IOException("Se ha cortado la conexión con Gemini", e)
                     }
-                    // Out of free quota, overloaded or gone: next model.
-                    code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
-                    code == 404 || code >= 500 -> last = AiException("Gemini no responde ahora, prueba en un rato")
-                    else -> throw AiException("Gemini ha dado un error ($code)")
+                    AppLog.i("ia", "$model -> $code")
+                    when {
+                        code == 200 -> return Ai.answerText(text) to model
+                        code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
+                            throw AiException("La clave de Gemini no es válida")
+                        // A model that does not accept the reasoning setting: same model without it.
+                        code == 400 && thinking && "thinking" in text.lowercase() -> {
+                            thinking = false
+                            continue
+                        }
+                        // Out of free quota: next model.
+                        code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
+                        // Gone: never asked again (the list is kept for the whole session).
+                        code == 404 -> {
+                            models = models?.filterNot { it == model }
+                            last = AiException("Gemini no responde ahora, prueba en un rato")
+                        }
+                        // Overloaded on Google's side: it passes in seconds, so the whole list is tried again after a wait.
+                        code >= 500 -> {
+                            overloaded = true
+                            last = AiException("Gemini no responde ahora, prueba en un rato")
+                        }
+                        else -> throw AiException("Gemini ha dado un error ($code)")
+                    }
+                    break
                 }
-                break
             }
+            if (!overloaded || round >= waits.size) throw last ?: AiException("No hay modelos de Gemini disponibles")
+            AppLog.i("ia", "Gemini saturado: espero ${waits[round]} s y vuelvo a probar (${round + 1}/${waits.size})")
+            kotlinx.coroutines.delay(waits[round] * 1000L)
+            round++
         }
-        throw last ?: AiException("No hay modelos de Gemini disponibles")
     }
 
     /** Best Flash, then best Flash-Lite, then the rest; newest version first. */
@@ -197,6 +213,8 @@ class Gemini(private val resolver: ContentResolver) {
         /** Past this the model is stuck: the next, lighter one is tried. */
         private const val ANSWER_TIMEOUT = 75_000
         /** "gemini-2.5-flash", "gemini-3-flash-lite"…; no previews, image, audio or dated variants. */
+        /** Waits between full rounds of the model list while Google answers «overloaded» (503). */
+        private val BUSY_WAITS_S = longArrayOf(8, 20, 45)
         private val STABLE = Regex("gemini-(\\d+(?:\\.\\d+)?)-flash(?:-lite)?")
         private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
     }

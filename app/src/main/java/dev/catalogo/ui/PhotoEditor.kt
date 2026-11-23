@@ -348,7 +348,7 @@ private fun SlotImage(slot: Slot, modifier: Modifier) {
     }
 }
 
-private enum class Grip { NONE, MOVE, TL, TR, BL, BR }
+private enum class Grip { NONE, MOVE, TL, TR, BL, BR, T, B, L, R }
 
 /** Where the photo sits on screen: [d] screen pixels per image pixel, its centre at ([cx], [cy]); the crop box moves over it. */
 private class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val imgH: Int) {
@@ -374,12 +374,18 @@ private fun framingOf(l: Float, t: Float, r: Float, b: Float, rotation: Float, g
 }
 
 private fun gripAt(at: Offset, b: FloatArray, slop: Float): Grip {
+    val edge = minOf(slop * 0.6f, (b[2] - b[0]) * 0.2f, (b[3] - b[1]) * 0.2f)
     fun near(x: Float, y: Float) = kotlin.math.abs(at.x - x) <= slop && kotlin.math.abs(at.y - y) <= slop
     return when {
         near(b[0], b[1]) -> Grip.TL
         near(b[2], b[1]) -> Grip.TR
         near(b[0], b[3]) -> Grip.BL
         near(b[2], b[3]) -> Grip.BR
+        // a side: only that side grows (the box keeps 3:4, so the other axis follows around its middle)
+        at.y in b[1]..b[3] && kotlin.math.abs(at.x - b[0]) <= edge -> Grip.L
+        at.y in b[1]..b[3] && kotlin.math.abs(at.x - b[2]) <= edge -> Grip.R
+        at.x in b[0]..b[2] && kotlin.math.abs(at.y - b[1]) <= edge -> Grip.T
+        at.x in b[0]..b[2] && kotlin.math.abs(at.y - b[3]) <= edge -> Grip.B
         at.x in b[0]..b[2] && at.y in b[1]..b[3] -> Grip.MOVE
         else -> Grip.NONE
     }
@@ -397,9 +403,22 @@ private fun dragged(f: Framing, grip: Grip, mx: Float, my: Float, g: Geo): Frami
         Grip.TL -> (-mx - my * Crop.RATIO) / 2
         else -> 0f
     }
-    val w = (w0 + grow).coerceAtLeast(g.minW)
+    val h0 = bt - t
+    val w = when (grip) {
+        Grip.T -> (h0 - my) * Crop.RATIO
+        Grip.B -> (h0 + my) * Crop.RATIO
+        Grip.L -> w0 - mx
+        Grip.R -> w0 + mx
+        else -> w0 + grow
+    }.coerceAtLeast(g.minW)
     val h = w / Crop.RATIO
+    val midX = (l + r) / 2
+    val midY = (t + bt) / 2
     when (grip) {
+        Grip.T -> { t = bt - h; l = midX - w / 2; r = midX + w / 2 }
+        Grip.B -> { bt = t + h; l = midX - w / 2; r = midX + w / 2 }
+        Grip.L -> { l = r - w; t = midY - h / 2; bt = midY + h / 2 }
+        Grip.R -> { r = l + w; t = midY - h / 2; bt = midY + h / 2 }
         Grip.MOVE -> { l += mx; r += mx; t += my; bt += my }
         Grip.BR -> { r = l + w; bt = t + h }
         Grip.BL -> { l = r - w; bt = t + h }
@@ -410,7 +429,7 @@ private fun dragged(f: Framing, grip: Grip, mx: Float, my: Float, g: Geo): Frami
     return framingOf(l, t, r, bt, f.rotation, g)
 }
 
-/** The photo stays still; the 3:4 box is dragged by its corners (size) and its inside (position), never beyond the photo. */
+/** The photo stays still; the 3:4 box is dragged by its corners or sides (size) and its inside (position), never beyond the photo. */
 @Composable
 private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntArray?, onChange: (Framing) -> Unit) {
     val density = LocalDensity.current
@@ -495,6 +514,14 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
                 drawLine(Color.White, Offset(x, y - sy * th / 2), Offset(x, y + sy * len), th)
             }
             corner(b[0], b[1], 1f, 1f); corner(b[2], b[1], -1f, 1f); corner(b[0], b[3], 1f, -1f); corner(b[2], b[3], -1f, -1f)
+            // a short bar in the middle of each side: they can be dragged on their own
+            val bar = 14.dp.toPx()
+            val mx = (b[0] + b[2]) / 2
+            val my = (b[1] + b[3]) / 2
+            drawLine(Color.White, Offset(mx - bar, b[1]), Offset(mx + bar, b[1]), th)
+            drawLine(Color.White, Offset(mx - bar, b[3]), Offset(mx + bar, b[3]), th)
+            drawLine(Color.White, Offset(b[0], my - bar), Offset(b[0], my + bar), th)
+            drawLine(Color.White, Offset(b[2], my - bar), Offset(b[2], my + bar), th)
         }
     }
 }
