@@ -91,6 +91,7 @@ class Gemini(private val resolver: ContentResolver) {
             val all = models(key)
             val order = if (lite) all.filter { it.contains("lite") } + all.filterNot { it.contains("lite") } else all
             var overloaded = false
+            var rateWait = 0L          // per-minute limit: Google says how long to wait
             for (model in order) {
                 var thinking = true
                 while (true) {
@@ -114,8 +115,14 @@ class Gemini(private val resolver: ContentResolver) {
                             thinking = false
                             continue
                         }
-                        // Out of free quota: next model.
-                        code == 429 -> last = AiException("Se ha acabado el uso gratis de hoy. Prueba mañana.")
+                        // Out of quota: the day's (nothing to wait for) or the minute's (wait what Google asks); next model meanwhile.
+                        code == 429 -> {
+                            val daily = "PerDay" in text
+                            val secs = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
+                            AppLog.i("ia", "$model 429: ${if (daily) "cuota del día" else "límite por minuto"}${secs?.let { ", Google pide esperar ${it.toInt()} s" } ?: ""}")
+                            if (!daily) rateWait = maxOf(rateWait, Math.ceil(secs ?: 20.0).toLong().coerceIn(5L, 70L))
+                            last = AiException(if (daily) "Se ha acabado el uso gratis de hoy. Prueba mañana." else "Gemini está al límite de uso por minuto, prueba en un rato")
+                        }
                         // Gone: never asked again (the list is kept for the whole session).
                         code == 404 -> {
                             models = models?.filterNot { it == model }
@@ -131,9 +138,10 @@ class Gemini(private val resolver: ContentResolver) {
                     break
                 }
             }
-            if (!overloaded || round >= waits.size) throw last ?: AiException("No hay modelos de Gemini disponibles")
-            AppLog.i("ia", "Gemini saturado: espero ${waits[round]} s y vuelvo a probar (${round + 1}/${waits.size})")
-            kotlinx.coroutines.delay(waits[round] * 1000L)
+            if (!(overloaded || rateWait > 0) || round >= waits.size) throw last ?: AiException("No hay modelos de Gemini disponibles")
+            val wait = maxOf(rateWait, if (overloaded) waits[round] else 0L)
+            AppLog.i("ia", "Gemini ${if (overloaded) "saturado" else "al límite por minuto"}: espero $wait s y vuelvo a probar (${round + 1}/${waits.size})")
+            kotlinx.coroutines.delay(wait * 1000L)
             round++
         }
     }
