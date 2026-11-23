@@ -48,7 +48,7 @@ class Gemini(private val resolver: ContentResolver) {
             val started = System.currentTimeMillis()
             val reading = runCatching {
                 val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
-                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true, waits = longArrayOf()) { m, t -> Reader.request(big, m, t) }.first)
+                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
             }.onSuccess { r ->
                 AppLog.i("ia", "lectura: composición=${r?.composition} hecho_en=${r?.origin} talla=${r?.sizeLabel} modelo=${r?.model}")
             }.getOrElse { e ->
