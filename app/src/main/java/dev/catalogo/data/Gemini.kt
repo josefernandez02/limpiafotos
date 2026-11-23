@@ -6,10 +6,12 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import dev.catalogo.core.Ai
+import dev.catalogo.core.ModelPool
 import dev.catalogo.core.AiException
 import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Reader
+import dev.catalogo.core.Reading
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -34,6 +36,11 @@ class Gemini(private val resolver: ContentResolver) {
     data class Answer(val suggestion: AiSuggestion, val model: String, val seconds: Int)
 
     private var models: List<String>? = null
+    private val pool = ModelPool()
+    /** The reading of the last articles, by photo: asking again for the same photos does not read the labels again. */
+    private val readings = object : LinkedHashMap<List<String>, Reading>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<List<String>, Reading>?) = size > 8
+    }
 
     /**
      * Two calls, like a careful seller: first only reading ([Reader]: every chosen
@@ -41,14 +48,17 @@ class Gemini(private val resolver: ContentResolver) {
      * facts. If the reading fails (quota, timeout) the listing is still written
      * without it rather than leaving the article stuck.
      */
-    suspend fun suggest(key: String, listing: Listing, accounts: List<Ai.Account>, photos: List<Uri>, avoid: dev.catalogo.core.Relist? = null,
-        rejected: dev.catalogo.core.Relist? = null): Answer =
+    suspend fun suggest(key: String, listing: Listing, accounts: List<Ai.Account>, photos: List<Uri>, avoid: dev.catalogo.core.Relist? = null): Answer =
         withContext(Dispatchers.IO) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
             val started = System.currentTimeMillis()
+            val photoKey = photos.take(Reader.PHOTOS).map { it.toString() }
             val reading = runCatching {
-                val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
-                if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
+                readings[photoKey] ?: run {
+                    val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
+                    if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
+                        ?.also { readings[photoKey] = it }
+                }
             }.onSuccess { r ->
                 AppLog.i("ia", "lectura: composición=${r?.composition} hecho_en=${r?.origin} talla=${r?.sizeLabel} modelo=${r?.model}")
             }.getOrElse { e ->
@@ -58,7 +68,7 @@ class Gemini(private val resolver: ContentResolver) {
             }
             val images = photos.take(Ai.PHOTOS).mapNotNull { runCatching { jpeg(it, MAX_SIDE) }.getOrNull() }
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
-            val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading, avoid, rejected) }
+            val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading, avoid) }
             val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
             val s = Ai.parse(text, listing, accounts, reading)
             AppLog.i("ia", "anuncio con $model en $seconds s: categoría=${s.category} materiales=${s.materials} talla=${s.sizeLabel} dudas=${s.doubts}")
@@ -83,23 +93,40 @@ class Gemini(private val resolver: ContentResolver) {
      * One generateContent with the best model that answers; returns (answer text, model).
      * [lite]: Flash-Lite first. The reading goes there and the listing to Flash, so each
      * call spends the free quota of a different model.
+     *
+     * Each model is asked once per cooldown ([pool]): a 429 blocks it for what Google says (or until the day's quota
+     * renews), a 503 for a few seconds, a 404 for good. When none is ready it waits for the first to be, up to
+     * [MAX_WAIT_MS]; past that it says why. So a busy minute costs one request per model, not a sweep of the list.
      */
-    private suspend fun generate(key: String, lite: Boolean = false, waits: LongArray = BUSY_WAITS_S, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
-        var last: AiException? = null
-        var round = 0
+    private suspend fun generate(key: String, lite: Boolean = false, body: (model: String, thinking: Boolean) -> String): Pair<String, String> {
+        val deadline = System.currentTimeMillis() + MAX_WAIT_MS
         while (true) {
-            val all = models(key)
-            val order = if (lite) all.filter { it.contains("lite") } + all.filterNot { it.contains("lite") } else all
-            var overloaded = false
-            var rateWait = 0L          // per-minute limit: Google says how long to wait
-            for (model in order) {
-                var thinking = true
+            val listed = models(key)
+            val all = if (lite) listed.filter { it.contains("lite") } + listed.filterNot { it.contains("lite") } else listed
+            if (pool.usable(all).isEmpty()) throw AiException("No hay modelos de Gemini disponibles")
+            val ready = pool.ready(all)
+            if (ready.isEmpty()) {
+                val wait = pool.wait(all)
+                if (System.currentTimeMillis() + wait > deadline) {
+                    throw AiException(when (pool.why(all)) {
+                        ModelPool.Why.DAILY -> "Se ha acabado el uso gratis de hoy. Prueba mañana."
+                        ModelPool.Why.MINUTE -> "Gemini está al límite de uso por minuto, prueba en un rato"
+                        ModelPool.Why.BUSY -> "Gemini no responde ahora, prueba en un rato"
+                    })
+                }
+                AppLog.i("ia", "ningún modelo libre: espero ${wait / 1000 + 1} s")
+                kotlinx.coroutines.delay(wait + 500)
+                continue
+            }
+            for (model in ready) {
+                var thinking = pool.thinks(model)
                 while (true) {
                     val (code, text) = try {
                         post("$BASE/models/$model:generateContent", key, body(model, thinking))
                     } catch (e: SocketTimeoutException) {
-                        last = AiException("Gemini ha tardado demasiado. Vuelve a intentarlo.")
-                        break // try the next, lighter model
+                        AppLog.i("ia", "$model: sin respuesta a tiempo")
+                        pool.block(model, 10_000, ModelPool.Why.BUSY)
+                        break // next model
                     } catch (e: UnknownHostException) {
                         throw IOException("Sin internet", e)
                     } catch (e: IOException) {
@@ -110,39 +137,25 @@ class Gemini(private val resolver: ContentResolver) {
                         code == 200 -> return Ai.answerText(text) to model
                         code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
                             throw AiException("La clave de Gemini no es válida")
-                        // A model that does not accept the reasoning setting: same model without it.
+                        // A model that does not accept the reasoning setting: same model without it, and remembered.
                         code == 400 && thinking && "thinking" in text.lowercase() -> {
+                            pool.withoutThinking(model)
                             thinking = false
                             continue
                         }
-                        // Out of quota: the day's (nothing to wait for) or the minute's (wait what Google asks); next model meanwhile.
                         code == 429 -> {
                             val daily = "PerDay" in text
                             val secs = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
                             AppLog.i("ia", "$model 429: ${if (daily) "cuota del día" else "límite por minuto"}${secs?.let { ", Google pide esperar ${it.toInt()} s" } ?: ""}")
-                            if (!daily) rateWait = maxOf(rateWait, Math.ceil(secs ?: 20.0).toLong().coerceIn(5L, 70L))
-                            last = AiException(if (daily) "Se ha acabado el uso gratis de hoy. Prueba mañana." else "Gemini está al límite de uso por minuto, prueba en un rato")
+                            if (daily) pool.daily(model) else pool.block(model, (Math.ceil(secs ?: 20.0).toLong().coerceIn(5L, 70L)) * 1000, ModelPool.Why.MINUTE)
                         }
-                        // Gone: never asked again (the list is kept for the whole session).
-                        code == 404 -> {
-                            models = models?.filterNot { it == model }
-                            last = AiException("Gemini no responde ahora, prueba en un rato")
-                        }
-                        // Overloaded on Google's side: it passes in seconds, so the whole list is tried again after a wait.
-                        code >= 500 -> {
-                            overloaded = true
-                            last = AiException("Gemini no responde ahora, prueba en un rato")
-                        }
+                        code == 404 -> pool.missing(model)
+                        code >= 500 -> pool.block(model, 15_000, ModelPool.Why.BUSY)
                         else -> throw AiException("Gemini ha dado un error ($code)")
                     }
                     break
                 }
             }
-            if (!(overloaded || rateWait > 0) || round >= waits.size) throw last ?: AiException("No hay modelos de Gemini disponibles")
-            val wait = maxOf(rateWait, if (overloaded) waits[round] else 0L)
-            AppLog.i("ia", "Gemini ${if (overloaded) "saturado" else "al límite por minuto"}: espero $wait s y vuelvo a probar (${round + 1}/${waits.size})")
-            kotlinx.coroutines.delay(wait * 1000L)
-            round++
         }
     }
 
@@ -221,8 +234,8 @@ class Gemini(private val resolver: ContentResolver) {
         /** Past this the model is stuck: the next, lighter one is tried. */
         private const val ANSWER_TIMEOUT = 75_000
         /** "gemini-2.5-flash", "gemini-3-flash-lite"…; no previews, image, audio or dated variants. */
-        /** Waits between full rounds of the model list while Google answers «overloaded» (503). */
-        private val BUSY_WAITS_S = longArrayOf(8, 20, 45)
+        /** Longest it waits for a model to be free before saying it cannot. */
+        private const val MAX_WAIT_MS = 120_000L
         private val STABLE = Regex("gemini-(\\d+(?:\\.\\d+)?)-flash(?:-lite)?")
         private val FALLBACK = listOf("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite")
     }

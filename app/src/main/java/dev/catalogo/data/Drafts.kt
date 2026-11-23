@@ -188,22 +188,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             try {
                 val accounts = Catalog.aiAccounts(p)
                 var answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist)
-                // A re-listed article must not go up with the old title or hashtags: the AI is asked again (twice at most), then it waits for the user.
+                // A re-listed article must not go up with the old title or hashtags. Asking the AI again gives the same answer
+                // (the photos and the account rules decide it), so what repeats is edited with one short text-only call.
                 var repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
-                var tries = 0
-                while (repeated.isNotEmpty() && tries < RELIST_RETRIES) {
-                    tries++
-                    val old = a.relist!!
-                    val tags = answer.suggestion.hashtags
-                    val newTags = tags.count { t -> t.lowercase() !in old.hashtags.map { it.lowercase() }.toSet() }
-                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: repite ${repeated.joinToString(" y ")}; intento $tries · " +
-                        "títulos antes=${old.titles.values} ahora=${answer.suggestion.titles.values} · hashtags nuevos $newTags de ${tags.size}")
-                    // Same prompt, same answer: the retry says what was refused and asks with more variety.
-                    answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist,
-                        rejected = dev.catalogo.core.Relist(answer.suggestion.titles, answer.suggestion.hashtags))
-                    repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
-                }
-                // The same prompt gives the same answer: a short edit of just the repeated title / hashtags settles it.
                 if (repeated.isNotEmpty()) {
                     val fixed = try {
                         repo.gemini.fixRepeated(key, a.relist!!, answer.suggestion, accounts)
@@ -223,7 +210,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 if (repeated == listOf("hashtags")) {
                     val before = a.relist!!.hashtags.map { it.lowercase() }.toSet()
                     val fresh = answer.suggestion.hashtags.count { it.lowercase() !in before }
-                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: hashtags nuevos $fresh de ${answer.suggestion.hashtags.size} tras los reintentos")
+                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: hashtags nuevos $fresh de ${answer.suggestion.hashtags.size} tras el arreglo")
                     if (fresh >= 2) repeated = emptyList()
                 }
                 if (repeated.isNotEmpty()) {
@@ -565,8 +552,6 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         private const val POLL_IDLE_MS = 30_000L
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
-        /** Extra AI answers asked for when a re-listed article's new title or hashtags still repeat the old ones. */
-        private const val RELIST_RETRIES = 1
         private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
 
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
