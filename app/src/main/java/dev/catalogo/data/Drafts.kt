@@ -193,7 +193,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 var repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
                 if (repeated.isNotEmpty()) {
                     val fixed = try {
-                        repo.gemini.fixRepeated(key, a.relist!!, answer.suggestion, accounts)
+                        repo.gemini.fixRepeated(key, a.listing ?: Listing(), a.relist!!, answer.suggestion, accounts)
                     } catch (e: kotlinx.coroutines.CancellationException) {
                         throw e
                     } catch (e: Exception) {

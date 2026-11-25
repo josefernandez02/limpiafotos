@@ -28,11 +28,25 @@ object RelistFix {
     fun stale(avoid: Relist, titles: Map<String, String>): List<String> =
         avoid.titles.filter { (id, old) -> !Relisting.titleChanged(old, titles[id].orEmpty()) }.keys.toList()
 
-    fun prompt(avoid: Relist, current: AiSuggestion, accounts: List<Ai.Account>, needTags: Int): String = buildString {
+    /**
+     * What is true of the garment, so a rewrite cannot swap «Wool» for «Cashmere» or «Grey» for «Blue» to get new words
+     * (this call sees no photos). [TitleGuard] checks the same facts on the result.
+     */
+    private fun truth(f: TitleGuard.Facts): String = buildString {
+        append("\nDATOS VERDADEROS DE LA PRENDA (el anuncio nuevo no puede contradecirlos):\n")
+        Garments.type(f.typeId.orEmpty())?.let { append("  prenda: ").append(it.en.joinToString(" / ")).append('\n') }
+        append("  materiales: ").append(f.materials.joinToString(", ").ifEmpty { "ninguno confirmado (no pongas ningún material ni tejido)" }).append('\n')
+        append("  colores: ").append(f.colors.joinToString(", ").ifEmpty { "sin confirmar" }).append('\n')
+        append("  Material, color y prenda no se cambian por sinónimos «más bonitos»: Wool no es Cashmere ni Merino, Grey no es Blue, ")
+        append("un Sweater no es un Puffer ni un Hoodie. Si no hay un sinónimo real, usa época, estética, corte o un detalle visible que sea cierto.\n")
+    }
+
+    fun prompt(avoid: Relist, current: AiSuggestion, accounts: List<Ai.Account>, needTags: Int, facts: TitleGuard.Facts? = null): String = buildString {
         val stale = stale(avoid, current.titles)
         append("Eres redactor de anuncios de Vinted. Una prenda se vuelve a subir y el anuncio nuevo no puede parecerse al anterior.\n")
+        if (facts != null) append(truth(facts))
         if (stale.isNotEmpty()) {
-            append("\nTÍTULOS: reescribe cada título cambiando al menos ${Relisting.MIN_WORDS + 1} palabras por sinónimos o por otra palabra cierta que también se busque ")
+            append("\nTÍTULOS: reescribe cada título cambiando al menos ${Relisting.MIN_WORDS + 1} palabras por sinónimos REALES (misma prenda, mismo material, mismo color) o por otra palabra cierta que también se busque ")
             append("(Jeans / Denim, Pants / Trousers, Slim Fit / Slim Leg, Classic / Original, Vintage / Retro, Black / Washed Black). ")
             append("Mismo orden y estructura, sin repetir palabras, sin inventar datos nuevos, Title Case, máximo ${ListingWriter.TITLE_MAX} caracteres, sin talla, estado, precio ni emojis. ")
             append("Cada cuenta lleva un título distinto.\n")
@@ -50,11 +64,11 @@ object RelistFix {
         }
     }
 
-    fun request(avoid: Relist, current: AiSuggestion, accounts: List<Ai.Account>, needTags: Int): String = buildJsonObject {
+    fun request(avoid: Relist, current: AiSuggestion, accounts: List<Ai.Account>, needTags: Int, facts: TitleGuard.Facts? = null): String = buildJsonObject {
         putJsonArray("contents") {
             add(buildJsonObject {
                 put("role", "user")
-                putJsonArray("parts") { add(buildJsonObject { put("text", prompt(avoid, current, accounts, needTags)) }) }
+                putJsonArray("parts") { add(buildJsonObject { put("text", prompt(avoid, current, accounts, needTags, facts)) }) }
             })
         }
         putJsonObject("generationConfig") {
@@ -96,19 +110,20 @@ object RelistFix {
      * is different enough (and not equal to another account's); fresh hashtags are added and, to stay within 12,
      * the oldest repeated ones at the end go first.
      */
-    fun merge(avoid: Relist, current: AiSuggestion, edit: Edit, accounts: List<Ai.Account>): AiSuggestion {
+    fun merge(avoid: Relist, current: AiSuggestion, edit: Edit, accounts: List<Ai.Account>, facts: TitleGuard.Facts? = null): AiSuggestion {
         val titles = current.titles.toMutableMap()
         val used = titles.values.map { it.lowercase() }.toMutableSet()
         for (a in accounts) {
             val old = avoid.titles[a.id] ?: continue
             if (Relisting.titleChanged(old, titles[a.id].orEmpty())) continue
-            val new = edit.titles[a.prefix] ?: continue
+            // With [facts], a title with a false fabric, colour or garment is repaired or rejected like the AI's first answer.
+            val new = edit.titles[a.prefix]?.let { t -> if (facts == null) t else TitleGuard.fix(t, facts) } ?: continue
             if (Relisting.titleChanged(old, new) && used.add(new.lowercase())) titles[a.id] = new
         }
         var tags = current.hashtags
         if (avoid.hashtags.isNotEmpty() && !Relisting.hashtagsChanged(avoid.hashtags, tags)) {
             val seen = (avoid.hashtags + tags).map { it.lowercase() }.toSet()
-            val fresh = edit.hashtags.filter { it.lowercase() !in seen }
+            val fresh = edit.hashtags.filter { it.lowercase() !in seen && (facts == null || TitleGuard.hashtagTrue(it, facts)) }
             val old = avoid.hashtags.map { it.lowercase() }.toSet()
             val freshSet = fresh.map { it.lowercase() }.toSet()
             val result = (tags + fresh).toMutableList()

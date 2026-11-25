@@ -113,4 +113,32 @@ class TitleGuardTest {
         assertTrue("sinónimos REALES" in relist)
         assertTrue("Wool no se cambia por Cashmere" in relist)
     }
+
+    @Test
+    fun `the re-listing rewrite cannot bring a false word back`() {
+        val avoid = Relist(mapOf("p" to "Jeckerson Turtleneck Wool Sweater Vintage 90s Classic Knit Grey"), listOf("jeckerson", "wool"))
+        val current = AiSuggestion(
+            type = "sweater", keywords = emptyList(), gender = Gender.MEN, category = null, colors = listOf("Gris"), sizeLabel = null,
+            titles = mapOf("p" to avoid.titles.getValue("p")), findings = emptyList(), hashtags = listOf("jeckerson", "wool"),
+            materials = listOf("Lana", "Nailon"),
+        )
+        val facts = TitleGuard.facts(Listing(brand = "Jeckerson"), current)
+        val edit = RelistFix.Edit(
+            mapOf("SH" to "Jeckerson Mockneck Cashmere Jumper Retro Knit Heather"),
+            listOf("cashmere", "merino", "jumper", "knitwear", "mocknecksweater"),
+        )
+        val fixed = RelistFix.merge(avoid, current, edit, accounts, facts)
+        assertEquals("Jeckerson Mockneck Jumper Retro Knit Heather", fixed.titles["p"])
+        assertFalse("cashmere" in fixed.hashtags || "merino" in fixed.hashtags)
+        assertTrue("jumper" in fixed.hashtags && "knitwear" in fixed.hashtags)
+
+        val prompt = RelistFix.prompt(avoid, current, accounts, 2, facts)
+        assertTrue("materiales: Lana, Nailon" in prompt && "colores: Gris" in prompt, prompt)
+        assertTrue("Wool no es Cashmere" in prompt)
+        assertTrue("sinónimos REALES" in prompt)
+
+        // a rewrite about another garment is not used at all
+        val puffer = RelistFix.Edit(mapOf("SH" to "Jeckerson Puffer Jacket Vintage Grey"), emptyList())
+        assertEquals(avoid.titles["p"], RelistFix.merge(avoid, current, puffer, accounts, facts).titles["p"])
+    }
 }

@@ -36,6 +36,10 @@ object TitleGuard {
         return Facts(typeId, backed, colors, tokens(listing.brand) + tokens(listing.model), chosen)
     }
 
+    /** The facts of an article being re-listed: its type (the user's, else the AI's), and the AI's materials and colours. */
+    fun facts(listing: Listing, s: AiSuggestion): Facts =
+        facts(listing, listing.type.ifEmpty { s.type.orEmpty() }.ifEmpty { null }, s.materials, s.colors)
+
     /** The title without its false words, or null when it is about another garment (or nothing is left). */
     fun fix(title: String, f: Facts): String? {
         val words = title.split(' ').filter { it.isNotBlank() }
