@@ -130,8 +130,9 @@ object Ai {
         return buildString {
             append("\nREPUBLICACION (la prenda se vuelve a subir con fotos nuevas; el anuncio no puede ser el mismo)\n")
             if (titles.isNotEmpty()) append("- Títulos usados antes:\n").append(titles.joinToString("\n") { "  $it" }).append('\n')
-            append("- Cada título nuevo lleva al menos ${Relisting.MIN_WORDS} palabras que no estaban en el anterior de su cuenta: sinónimos (Jeans / Denim, Pants / Trousers), otra palabra de corte, diseño o estilo que sea cierta, otro matiz de color. ")
-            append("Mismas reglas de arriba: orden de la cuenta, palabras que de verdad se buscan, nada inventado. Cambiar solo el orden no vale.\n")
+            append("- Cada título nuevo lleva al menos ${Relisting.MIN_WORDS} palabras que no estaban en el anterior de su cuenta: sinónimos REALES de la misma prenda (Jeans / Denim Pants, Sweater / Jumper, Pants / Trousers), otra palabra de corte, diseño, época o estilo que sea cierta, otro matiz del MISMO color. ")
+            append("Mismas reglas de arriba: orden de la cuenta, palabras que de verdad se buscan, nada inventado, y la VERDAD manda: nunca cambies de material (Wool no se cambia por Cashmere, Merino ni nada «más bonito»), de color ni de prenda para conseguir palabras nuevas. ")
+            append("Si no te salen palabras nuevas verdaderas, usa época, estética, detalles visibles o el corte antes que un sinónimo falso. Cambiar solo el orden no vale.\n")
             if (avoid.hashtags.isNotEmpty()) {
                 append("- Hashtags usados antes: ").append(avoid.hashtags.joinToString(", ")).append('\n')
                 append("- Los nuevos incluyen al menos ${Relisting.MIN_TAGS} que no estén en esa lista (otras búsquedas ciertas: sinónimos, el otro idioma, estilo, época o un detalle visible). Conserva los esenciales (marca, prenda) y mantén de 10 a 12.\n")
@@ -176,6 +177,7 @@ object Ai {
               · Si no lo dice, decide tú dónde trae más visitas, y ponlo en UN solo sitio (título o hashtags, no los dos): lo que la gente escribe al buscar esa prenda va al título (Coogi, Made in USA, Made in Italy, Selvedge, Big E, Carhartt WIP…); lo que solo suma como etiqueta, a hashtags (madeincanada, madeinportugal…).
             - LECTURA_DE_ETIQUETAS (si viene) es lo que se ha leído con detalle en todas las fotos: créetelo antes que a tu impresión. La composición manda sobre los materiales y la talla de la etiqueta sobre cualquier estimación.
             - Describe solo lo que se ve en las fotos o dice el vendedor. Si algo no se ve con seguridad, déjalo vacío (null o lista vacía).
+            - Títulos y hashtags dicen solo cosas VERDADERAS de esta prenda (mira VERDAD en TÍTULOS): un material, color o prenda que no case con tus datos es publicidad engañosa y el comprador puede reclamar. Además se comprueba por código y lo que no cuadre se borra.
             - Devuelve solo el JSON pedido.
 
             2. OBSERVA ("hallazgos", rellénalo antes que nada)
@@ -192,7 +194,7 @@ object Ai {
               · Etiqueta de EDAD infantil (12 years, 14Y, 16 años): no es una talla adulta; estima por las medidas o null, y no la menciones en título ni hashtags.
               · Una etiqueta adulta legible manda sobre las medidas. Si no hay base razonable, null.
             - tipo_prenda: uno de TIPOS. Si viene, devuelve ese.
-            - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas.
+            - palabras: de PALABRAS, solo las que se vean claramente. No devuelvas épocas. Las de material (lana, cachemir, cuero, lino, pana, forro polar…) solo si ese material está en tus "materiales" o en la composición: un tejido no se adivina por la foto ni por lo suave que parezca.
             - sexo: "hombre" o "mujer". Si viene en DATOS_DEL_USUARIO, ese. Si no, el de LECTURA_DE_ETIQUETAS si lo trae. Si no, decide con etiquetas, modelo (Levi's 5xx hombre, 3xx/7xx mujer), formato de talla (W/L suele ser hombre; 24-31 o 34-44 mujer) y patrón (tiro alto y cadera marcada → mujer).
             - corte: en pantalones y vaqueros, uno de skinny, slim, tapered, straight, relaxed, baggy, bootcut, flare, wide, mom, boyfriend; el de LECTURA_DE_ETIQUETAS si lo trae (manda el número de modelo: Levi's 501/505/514 straight, 511 slim, 512 tapered, 510 skinny, 517 bootcut, 550 relaxed, 568/569/578 baggy). Si no, por la silueta: compara el bajo con la rodilla y el muslo. En otras prendas, null.
             - categoria: copia EXACTA de una línea de CATEGORIAS. Entre las que de verdad describen la prenda (suele haber varias), elige la que más visitas trae: la que los compradores miran para algo así. Ejemplos: jersey de punto con dibujo → De punto (mejor que Cuello redondo); camiseta con un estampado o gráfico grande → Camisetas estampadas, nunca lisas; camiseta de un color con un logo pequeño (bordado o no) → Camisetas lisas, no Otras camisetas; pantalón de chándal → Joggers o Chándales. Si dos dan las mismas visitas, la más exacta. Siempre la FINAL más concreta (la línea más larga que siga siendo cierta), coherente con tipo_prenda, el sexo y el corte (vaqueros straight → Vaqueros rectos; slim/tapered → Vaqueros ajustados o pitillo; bootcut/flare de mujer → Vaqueros de campana; sudadera con capucha → Sudaderas y sudaderas con capucha; con cremallera → Sudaderas con cremallera; jersey de punto → el de su cuello (Cuello redondo, Cuello de pico, Cuello alto) o De punto; camiseta de manga larga → Camisetas de manga larga). Debe empezar por el sexo elegido. Nunca construyas una categoría que no esté en la lista.
@@ -203,6 +205,11 @@ object Ai {
             4. TÍTULOS (en inglés, uno por cuenta dentro de "titulos")
             Vinted muestra la foto, no el título: el título sirve para salir en las búsquedas. Mete las palabras que la gente escribe, en un orden natural.
             - Sigue el orden y los ejemplos de la cuenta (CUENTAS). Si falta un dato (marca, modelo, época), sáltalo; nunca lo inventes.
+            - VERDAD (obligatorio): decide primero tipo_prenda, colores y materiales y escribe los títulos DESPUÉS, solo con ellos.
+              · Material o tejido (Wool, Cotton, Leather, Silk, Linen, Cashmere, Merino, Fleece, Velvet, Denim…): solo si está en tus "materiales" (o en la composición o las notas del vendedor). Son materiales distintos, nunca sinónimos: Wool ≠ Cashmere ≠ Merino ≠ Alpaca; Cotton ≠ Linen; Leather ≠ Suede. «Lana y nailon» no es cashmere. Mejor sin material que con uno falso.
+              · Color: solo los de "colores". Un gris no lleva Blue ni un negro Brown. Los matices (Heather, Charcoal, Light Blue, Navy…) solo dentro de ese mismo color.
+              · Prenda: la de tipo_prenda y sus sinónimos reales (Sweater = Jumper = Pullover; Jeans = Denim Pants; Pants = Trousers; Hoodie = Hooded Sweatshirt). Nunca otra prenda: un jersey no es Puffer, Hoodie ni Jacket; unos vaqueros no son Cargo; una camiseta no es una Shirt de botones; una chaqueta no es un Coat si no es abrigo.
+              · Corte, estilo y diseño: solo si se ven o los dice el vendedor, y sin contradecirse (Skinny y Baggy a la vez no).
             - Piensa como un revendedor que quiere visitas sin engañar: el título lleva las keywords que de verdad se buscan para ESA prenda, sin miedo pero sin relleno. Un título flaco pierde visitas: «Nike PSG Track Pants Sporty Black Pink» se queda corto; «Nike PSG Track Pants Vintage Y2K Sporty Football Black Pink» trae muchas más búsquedas.
             - Época: la de DATOS_DEL_USUARIO, una sola vez (Y2K o 2000s, nunca las dos). Si no viene, puedes poner UNA estética de época (Y2K, 90s, Retro) solo si el diseño la tiene claramente. "Vintage" si hay época o la prenda lo es o lo parece claramente.
             - Diseño visible que se busca: estampado grande (Graphic, Big Print, Big Logo, All Over Print), logo pequeño bordado (Embroidered Logo), punto con dibujo (Nordic, Fair Isle, Cable Knit, Coogi Style), fútbol o equipo (Football, Team, Club), deporte (Sporty, Track, Athletic)…
@@ -421,7 +428,7 @@ object Ai {
             .getOrNull() ?: throw AiException("Respuesta de la IA ilegible")
         val type = o["tipo_prenda"]?.str()?.takeIf { Garments.type(it) != null }
         val group = Garments.type(listing.type.ifEmpty { type.orEmpty() })?.group
-        val keywords = o.strings("palabras").distinct().filter { id ->
+        val candidateKeywords = o.strings("palabras").distinct().filter { id ->
             Garments.keyword(id)?.let { it.kind != KeywordKind.EPOCH && it.appliesTo(group) } == true
         }
         val gender = when (o["sexo"]?.str()?.lowercase()) {
@@ -438,6 +445,23 @@ object Ai {
         val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2).let { c ->
             if (c.size == 2 && SHADES.any { c[0] in it && c[1] in it }) c.take(1) else c
         }
+        // A composition label decides the materials (a 100% cotton pair of jeans is «Algodón», not «Vaquero»).
+        // Then what the seller wrote («es lana»): nothing to ask about it.
+        val read = reading?.materials.orEmpty().ifEmpty { Reader.materials(listOf(listing.aiNotes)) }
+        val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
+        // With type, materials and colours settled, everything the AI writes about the garment is checked against them
+        // (see [TitleGuard]): a wool and nylon jumper is never «Cashmere», a grey one never «Blue», a sweater never a «Puffer».
+        val facts = TitleGuard.facts(listing, listing.type.ifEmpty { type.orEmpty() }.ifEmpty { null }, materials, colors)
+        val keywords = candidateKeywords.filter { TitleGuard.keywordTrue(it, facts) }
+        val codes = accounts.map { Regex("^${Regex.escape(it.prefix.lowercase())}\\d+$") }
+        val hashtags = ListingWriter.clean(o.strings("hashtags")).filterNot { t -> codes.any { it.matches(t) } }
+            .filter { TitleGuard.hashtagTrue(it, facts) }
+        val titleObj = o["titulos"] as? JsonObject
+        val seen = HashSet<String>()
+        val titles = accounts.mapNotNull { a ->
+            titleObj?.get(a.prefix)?.str()?.let(::cleanTitle)?.let { TitleGuard.fix(it, facts) }
+                ?.takeIf { it.isNotEmpty() && seen.add(it.lowercase()) }?.let { a.id to it }
+        }.toMap()
         // What was read on a label wins over what the listing call estimated.
         val sizeLabel = (reading?.sizeLabel ?: (o["talla"] ?: o["talla_etiqueta"])?.str())?.trim()?.take(20)
             ?.takeIf { it.isNotEmpty() && listing.size.isBlank() }
@@ -445,18 +469,7 @@ object Ai {
             ?.takeUnless { it.equals("sin marca", ignoreCase = true) }
         val model = (reading?.model ?: o["modelo"]?.str())?.let(::cleanName)
             ?.takeIf { listing.model.isBlank() && !listing.noBrand && !listing.noModel }
-        val codes = accounts.map { Regex("^${Regex.escape(it.prefix.lowercase())}\\d+$") }
-        val hashtags = ListingWriter.clean(o.strings("hashtags")).filterNot { t -> codes.any { it.matches(t) } }
-        val titleObj = o["titulos"] as? JsonObject
-        val seen = HashSet<String>()
-        val titles = accounts.mapNotNull { a ->
-            titleObj?.get(a.prefix)?.str()?.let(::cleanTitle)?.takeIf { it.isNotEmpty() && seen.add(it.lowercase()) }?.let { a.id to it }
-        }.toMap()
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
-        // A composition label decides the materials (a 100% cotton pair of jeans is «Algodón», not «Vaquero»).
-        // Then what the seller wrote («es lana»): nothing to ask about it.
-        val read = reading?.materials.orEmpty().ifEmpty { Reader.materials(listOf(listing.aiNotes)) }
-        val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
         // Jeans: the cut decides the category. A model number is a fact (Levi's 511 → slim);
         // then the reading call's cut, then the listing call's.
         val modelFit = Fits.ofModel(listing.brand.ifBlank { brand.orEmpty() }, listing.model.ifBlank { model.orEmpty() })
