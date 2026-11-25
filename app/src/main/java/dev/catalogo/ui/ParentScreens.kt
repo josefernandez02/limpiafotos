@@ -167,7 +167,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
         LazyColumn(
             modifier = Modifier.padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "filters") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
@@ -225,7 +225,7 @@ private fun ArticleRow(
     val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
     Tile(modifier, onClick = onClick, onLongClick = onLongClick, selected = selected) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Cover(cover, size = 64.dp)
+            Cover(cover, size = 72.dp)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 18.sp))

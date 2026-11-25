@@ -73,7 +73,7 @@ fun Bar(title: String, onBack: (() -> Unit)? = null, actions: @Composable RowSco
 @Composable
 fun Header(title: String, subtitle: String? = null, actions: @Composable RowScope.() -> Unit = {}) {
     Row(
-        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 20.dp, bottom = 12.dp),
+        Modifier.fillMaxWidth().statusBarsPadding().padding(start = 20.dp, end = 8.dp, top = 24.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
@@ -125,7 +125,7 @@ fun Tile(
     selected: Boolean = false,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(22.dp)
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -138,7 +138,7 @@ fun Tile(
                     else -> it
                 }
             }
-            .padding(16.dp),
+            .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
         content = content,
     )
@@ -147,10 +147,11 @@ fun Tile(
 @Composable
 fun Section(title: String) {
     Text(
-        title.uppercase(),
-        style = MaterialTheme.typography.labelMedium,
+        title,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(start = 4.dp, top = 20.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 4.dp, top = 24.dp, bottom = 8.dp),
     )
 }
 
