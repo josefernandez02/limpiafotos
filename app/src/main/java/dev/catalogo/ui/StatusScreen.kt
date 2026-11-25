@@ -5,7 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -63,12 +67,11 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val urgent = incidents.any { it.level == "grave" && now - it.at < 3 * 3_600_000L }
     var alertsChoice by rememberSaveable { mutableStateOf<Boolean?>(null) }
     val showAlerts = alertsChoice ?: incidents.isNotEmpty()
-    var showPlayed by rememberSaveable { mutableStateOf(false) }
     var allAlerts by rememberSaveable { mutableStateOf(false) }
     val shownAlerts = if (allAlerts) incidents else incidents.take(ALERTS_SHOWN)
     val groups = listOf(Stage.REVIEW, Stage.WORKING, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED).associateWith { st ->
         articles.filter { Catalog.stage(p, it, p.self) == st }.sortedByDescending { it.desk?.at ?: 0 }
-            .let { if (st == Stage.PLAYED) it.take(10) else it }
+            .let { if (st == Stage.PLAYED) it.filter { a -> now - (a.desk?.at ?: 0) < 24 * 3_600_000L } else it }
     }.filterValues { it.isNotEmpty() }
 
     Scaffold(topBar = { Header("Estado") }, bottomBar = { MainTabs(vm, Screen.Status) }) { padding ->
@@ -129,16 +132,15 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
                                 Stage.WORKING -> "En curso"
                                 Stage.DRAFT -> "Borradores en Vinted"
                                 Stage.UPLOADED -> "Subidos, sin jugar"
-                                else -> "Jugados"
+                                else -> "Jugados en las últimas 24 h"
                             },
                             style = MaterialTheme.typography.titleSmall,
                             modifier = Modifier.weight(1f),
                         )
                         Muted("${list.size}")
-                        if (stage == Stage.PLAYED) TextButton(onClick = { showPlayed = !showPlayed }) { Text(if (showPlayed) "Ocultar" else "Ver") }
                     }
                 }
-                if (stage != Stage.PLAYED || showPlayed) item(key = "g-${stage.name}") {
+                item(key = "g-${stage.name}") {
                     Tile {
                         list.forEachIndexed { i, a ->
                             if (i > 0) HorizontalDivider(Modifier.padding(vertical = 8.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -199,32 +201,45 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
     LaunchedEffect(asking) { if (asking) { delay(12_000); asking = false } }
     val running = status != null && status.text != "parado"
     val waiting = running && status?.usingPc == true
+    val headline = when {
+        pc.error != null -> "Sin conexión"
+        status == null -> "Conectando…"
+        waiting -> "Esperando"
+        status.paused -> "En pausa"
+        status.text == "parado" -> "Parado"
+        else -> status.text.replaceFirstChar(Char::uppercase)
+    }
+    val tone = when {
+        pc.error != null -> MaterialTheme.colorScheme.error
+        status == null || status.paused || waiting || !running -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.primary
+    }
     Tile {
-        Text(
-            when {
-                pc.error != null -> "PC sin conexión"
-                status == null -> "Conectando con el PC"
-                waiting -> "Esperando a que dejes el PC"
-                status.paused -> "PC en pausa"
-                status.text == "parado" -> "PC parado"
-                else -> status.text.replaceFirstChar(Char::uppercase)
-            },
-            style = MaterialTheme.typography.titleLarge,
-        )
-        val sub = pc.error
-            ?: if (waiting) "Retoma lo que estaba haciendo en cuanto pares" else status?.next?.takeIf { it.isNotBlank() }
-        if (sub != null) Muted(sub, Modifier.padding(top = 2.dp))
-        if (pc.at > 0) {
-            Muted(
-                "Comprobado a las " + SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date(pc.at)),
-                Modifier.padding(top = 6.dp),
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                status?.name?.takeIf { it.isNotBlank() }?.let { "PC $it" } ?: "PC",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f),
             )
+            Box(Modifier.size(8.dp).clip(CircleShape).background(tone))
+            Spacer(Modifier.width(8.dp))
+            Text(headline, style = MaterialTheme.typography.titleMedium, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        status?.queue?.filterValues { it > 0 }?.takeIf { it.isNotEmpty() }?.let { q ->
-            val names = mapOf("pendiente" to "En cola", "en_curso" to "Creando", "borrador" to "Borradores",
-                "publicado" to "Sin jugar", "revisar" to "Revisar", "error" to "Error")
-            Muted(q.filterKeys { it in names }.entries.joinToString(GAP) { "${names[it.key]} ${it.value}" }, Modifier.padding(top = 2.dp))
+        val sub = when {
+            pc.error != null -> "Comprueba que está encendido y con el programa abierto"
+            waiting -> "Sigue solo cuando dejes de usarlo"
+            else -> status?.next?.takeIf { it.isNotBlank() }
         }
+        if (sub != null) Muted(sub, Modifier.padding(top = 2.dp), maxLines = 2)
+        val queue = status?.queue?.filterValues { it > 0 }?.takeIf { it.isNotEmpty() }?.let { q ->
+            val names = mapOf("pendiente" to "en cola", "en_curso" to "creando", "borrador" to "borradores",
+                "publicado" to "sin jugar", "revisar" to "a revisar", "error" to "con error")
+            q.filterKeys { it in names }.entries.joinToString(GAP) { "${it.value} ${names[it.key]}" }
+        }
+        val checked = if (pc.at > 0) "a las " + SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(pc.at)) else null
+        val foot = listOfNotNull(queue?.takeIf { it.isNotBlank() }, checked?.let { "visto $it" }).joinToString(GAP)
+        if (foot.isNotBlank()) Muted(foot, Modifier.padding(top = 4.dp), maxLines = 2)
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
                 onClick = { asking = true; vm.refreshPc() },

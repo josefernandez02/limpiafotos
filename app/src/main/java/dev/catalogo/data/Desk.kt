@@ -38,6 +38,8 @@ class Desk(private val resolver: ContentResolver) {
         val lastIncident: String = "", val health: Health? = null, val today: List<GameDay> = emptyList(),
         /** The user is using the PC: the program waits (and goes on by itself) until they stop. */
         val usingPc: Boolean = false,
+        /** Which PC it is (its profile name), for when several are connected. */
+        val name: String = "",
     )
 
     /** One game today: hours played out of hours it had, and the reasons the rest were lost. */
@@ -81,7 +83,7 @@ class Desk(private val resolver: ContentResolver) {
         val queue = (o["cola"] as? JsonObject)?.mapValues { (it.value as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0 }.orEmpty()
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
             o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject),
-            o.str("usando_pc") == "true")
+            o.str("usando_pc") == "true", o.str("equipo"))
     }
 
     fun games(link: PcLink): List<Game> = call(link, "GET", "/juegos", null).games()
@@ -238,7 +240,7 @@ class Desk(private val resolver: ContentResolver) {
             throw e
         } catch (e: IOException) {
             AppLog.w("pc", "$method $path: ${e.javaClass.simpleName} ${e.message.orEmpty()}")
-            throw CatalogException("No llego al PC (¿encendido, programa abierto, misma wifi o Tailscale?)")
+            throw CatalogException("No llego al PC")
         } finally {
             c.disconnect()
         }
