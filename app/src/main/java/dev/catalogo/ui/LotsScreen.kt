@@ -80,7 +80,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
         LazyColumn(
             modifier = Modifier.padding(padding),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             item(key = "kpis") {
                 // Pairs of equal tiles: same height, one line each, so the grid stays symmetric.
@@ -94,9 +94,9 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                     Triple("Por subir", "${k.notUploaded}", "en stock"),
                     Triple("+60 días", "${k.aged60}", "${k.aged90} de +90 días"),
                 )
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (pair in tiles.chunked(2)) {
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             for ((label, value, detail) in pair) Kpi(label, value, detail, Modifier.weight(1f).fillMaxHeight())
                         }
                     }
