@@ -73,13 +73,6 @@ fun MainTabs(vm: MainViewModel, current: Screen) {
             label = { Text("Inventario") },
             colors = colors,
         )
-        NavigationBarItem(
-            selected = current == Screen.Connect,
-            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Connect) },
-            icon = { Icon(Icons.Default.Refresh, contentDescription = null) },
-            label = { Text("Conectar") },
-            colors = colors,
-        )
     }
 }
 

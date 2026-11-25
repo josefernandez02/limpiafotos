@@ -7,17 +7,14 @@ import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
-import dev.catalogo.core.ChildState
 import dev.catalogo.core.Device
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Listing
 import dev.catalogo.core.ListingText
-import dev.catalogo.core.Auth
-import dev.catalogo.core.PairAccept
+import dev.catalogo.core.Ids
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Session
 import dev.catalogo.core.Sku
-import dev.catalogo.core.Sync
 import dev.catalogo.core.VintedWardrobe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -36,7 +33,6 @@ class Repo(context: Context) {
     val base: String get() = state.baseFolder
 
     private fun parent(): ParentState = state.parent ?: throw CatalogException("Este móvil no es el principal")
-    private fun child(): ChildState = state.child ?: throw CatalogException("Este móvil no está vinculado")
 
     fun sku(device: Device, number: Int, digits: Int) = Sku.format(device.prefix, number, digits)
 
@@ -46,16 +42,8 @@ class Repo(context: Context) {
         store.update { s ->
             val self = Device(s.deviceId, name.trim(), prefix.trim().uppercase())
             Catalog.validateDevice(ParentState(self = self), self.id, self.name, self.prefix)
-            s.copy(parent = ParentState(self = self), child = null, secondary = false)
+            s.copy(parent = ParentState(self = self))
         }
-    }
-
-    suspend fun setupChild() {
-        store.update { it.copy(secondary = true, parent = null) }
-    }
-
-    suspend fun resetRole() {
-        store.update { it.copy(parent = null, child = null, secondary = false) }
     }
 
     // ---------- parent: articles and photo sessions ----------
@@ -219,7 +207,7 @@ class Repo(context: Context) {
     suspend fun saveLot(id: String?, name: String, price: Long, quantity: Int) {
         store.update { s ->
             val p = s.parent!!
-            s.copy(parent = if (id == null) Ledger.addLot(p, Auth.newId(), name, price, quantity, System.currentTimeMillis())
+            s.copy(parent = if (id == null) Ledger.addLot(p, Ids.newId(), name, price, quantity, System.currentTimeMillis())
             else Ledger.updateLot(p, id, name, price, quantity))
         }
     }
@@ -230,10 +218,6 @@ class Repo(context: Context) {
 
     suspend fun setStyle(id: String, style: Int, template: String) {
         store.update { s -> s.copy(parent = Catalog.styleAndTemplate(s.parent!!, id, style, template)) }
-    }
-
-    suspend fun setListings(listings: Map<Int, ListingText>) {
-        store.update { s -> s.copy(child = s.child?.copy(listings = listings)) }
     }
 
     suspend fun startSession(number: Int, deviceId: String) {
@@ -281,7 +265,7 @@ class Repo(context: Context) {
 
     // ---------- releases ----------
 
-    /** Sold on the parent: record the sale, delete everything local, children follow on next sync. */
+    /** Sold on the parent: record the sale, delete everything local, its accounts are released with it. */
     suspend fun sellOnParent(number: Int, price: Long, cost: Long?, account: String? = null): List<Uri> {
         val consent = deleteLocalForParent(number)
         store.update { s ->
@@ -317,22 +301,6 @@ class Repo(context: Context) {
         store.update { s -> s.parent?.let { s.copy(parent = Catalog.ensureDistinctStyles(it)) } ?: s }
     }
 
-    suspend fun releaseFromChild(number: Int, childId: String, price: Long?): List<Uri> {
-        if (Catalog.article(parent(), number) == null) return emptyList()
-        val consent = deleteLocalForParent(number)
-        store.update { s ->
-            val p = s.parent!!
-            s.copy(parent = if (price != null) Ledger.sell(p, number, childId, price, null, System.currentTimeMillis())
-            else Catalog.release(p, number, confirmedBy = childId))
-        }
-        return consent
-    }
-
-    suspend fun confirmReleases(childId: String, numbers: List<Int>) {
-        if (numbers.isEmpty()) return
-        store.update { s -> s.copy(parent = numbers.fold(s.parent!!) { p, n -> Catalog.confirmRelease(p, n, childId) }) }
-    }
-
     private suspend fun deleteLocalForParent(number: Int): List<Uri> = withContext(Dispatchers.IO) {
         val p = parent()
         outbox.deleteNumber(number)
@@ -340,54 +308,9 @@ class Repo(context: Context) {
         gallery.deleteAlbum(base, sku(p.self, number, p.digits))
     }
 
-    /** Sold on a child: delete its album now, tell the parent on next sync. */
-    /** Sold ([price] set) or removed by mistake ([price] null) on a secondary phone. */
-    suspend fun releaseOnChild(number: Int, price: Long?): List<Uri> {
-        val c = child()
-        val consent = withContext(Dispatchers.IO) { gallery.deleteAlbum(base, sku(c.self, number, c.digits)) }
-        store.update { s ->
-            val current = s.child!!
-            s.copy(child = current.copy(
-                pendingReleases = current.pendingReleases + number,
-                salePrices = if (price != null) current.salePrices + (number to price) else current.salePrices - number,
-                listings = current.listings - number,
-            ))
-        }
-        return consent
-    }
+    // ---------- accounts ----------
 
-    /** Releases asked by the parent; returns the numbers handled. */
-    suspend fun applyRequestedReleases(numbers: List<Int>): List<Int> {
-        val c = child()
-        withContext(Dispatchers.IO) { numbers.forEach { gallery.deleteAlbum(base, sku(c.self, it, c.digits)) } }
-        return numbers
-    }
-
-    suspend fun ackChildReleases(numbers: List<Int>) {
-        store.update { s ->
-            s.copy(child = s.child?.let { it.copy(pendingReleases = it.pendingReleases - numbers.toSet(), salePrices = it.salePrices - numbers.toSet()) })
-        }
-    }
-
-    // ---------- delivery ----------
-
-    suspend fun delivered(childId: String, number: Int, count: Int) {
-        withContext(Dispatchers.IO) {
-            previews.keep(number, childId, outbox.files(childId, number))
-            outbox.delete(childId, number)
-        }
-        store.update { s -> s.copy(parent = Catalog.markDelivered(s.parent!!, number, childId, count)) }
-    }
-
-    fun childAlbums(): Map<Int, Int> {
-        val c = state.child ?: return emptyMap()
-        return gallery.counts(base).mapNotNull { (album, count) ->
-            Sku.parse(album, c.self.prefix, c.digits)?.let { it to count }
-        }.toMap().toSortedMap()
-    }
-
-    // ---------- pairing ----------
-
+    /** Another Vinted account (the one a second PC publishes in). */
     suspend fun addChild(device: Device): ParentState {
         val s = store.update { s ->
             val p = s.parent!!
@@ -399,50 +322,6 @@ class Repo(context: Context) {
     suspend fun removeChild(id: String) {
         withContext(Dispatchers.IO) { outbox.deleteDevice(id) }
         store.update { s -> s.copy(parent = Catalog.removeChild(s.parent!!, id)) }
-    }
-
-    suspend fun pairChild(pair: PairAccept) {
-        store.update { s ->
-            val current = s.child
-            if (current != null && current.parentId != pair.parentId) throw CatalogException("Ya está vinculado a otro principal")
-            val self = Device(s.deviceId, pair.name, pair.prefix)
-            val next = ChildState(
-                self = self,
-                parentId = pair.parentId,
-                secret = pair.secret,
-                digits = pair.digits,
-                configVersion = pair.configVersion,
-                pendingReleases = current?.pendingReleases ?: emptySet(),
-            )
-            s.copy(child = next, secondary = true)
-        }
-    }
-
-    suspend fun unpair() {
-        store.update { it.copy(child = null, secondary = true) }
-    }
-
-    /** Applies the name/prefix/digits the parent assigned, renaming albums if needed. */
-    suspend fun applyChildConfig(sync: Sync): Int {
-        val c = child()
-        val changedFormat = sync.prefix != c.self.prefix || sync.digits != c.digits
-        var failed = 0
-        if (changedFormat) {
-            withContext(Dispatchers.IO) {
-                for (number in childAlbums().keys) {
-                    failed += gallery.move(base, sku(c.self, number, c.digits), base, Sku.format(sync.prefix, number, sync.digits))
-                }
-            }
-        }
-        store.update { s ->
-            val current = s.child!!
-            s.copy(child = current.copy(
-                self = current.self.copy(name = sync.name, prefix = sync.prefix),
-                digits = sync.digits,
-                configVersion = sync.configVersion,
-            ))
-        }
-        return failed
     }
 
     // ---------- settings ----------
@@ -474,9 +353,7 @@ class Repo(context: Context) {
      */
     suspend fun adoptFolder(folder: String): Int {
         val s = state
-        val (prefix, digits) = s.parent?.let { it.self.prefix to it.digits }
-            ?: s.child?.let { it.self.prefix to it.digits }
-            ?: (null to 0)
+        val (prefix, digits) = s.parent?.let { it.self.prefix to it.digits } ?: (null to 0)
         var failed = 0
         if (prefix != null) {
             withContext(Dispatchers.IO) {
@@ -496,7 +373,6 @@ class Repo(context: Context) {
     suspend fun stage(number: Int): Int {
         val s = state
         val album = s.parent?.let { sku(it.self, number, it.digits) }
-            ?: s.child?.let { sku(it.self, number, it.digits) }
             ?: throw CatalogException("Este móvil no está configurado")
         val count = withContext(Dispatchers.IO) { gallery.stage(base, album) }
         if (count == 0) throw CatalogException("$album no tiene fotos")

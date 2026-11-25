@@ -1,6 +1,6 @@
 package dev.catalogo.data
 
-import dev.catalogo.core.Auth
+import dev.catalogo.core.Ids
 import java.io.File
 
 /** Clean photos waiting to be sent: <files>/outbox/<deviceId>/<number>/<name>.jpg */
@@ -11,9 +11,9 @@ class Outbox(filesDir: File) {
 
     fun add(deviceId: String, number: Int, bytes: ByteArray, prefix: String = ""): File {
         val dir = dir(deviceId, number).apply { mkdirs() }
-        val tmp = File(dir, ".${Auth.newId()}.part")
+        val tmp = File(dir, ".${Ids.newId()}.part")
         tmp.writeBytes(bytes)
-        val out = File(dir, "$prefix${Auth.newId()}.jpg")
+        val out = File(dir, "$prefix${Ids.newId()}.jpg")
         if (!tmp.renameTo(out)) {
             tmp.delete()
             error("No se pudo guardar la foto")

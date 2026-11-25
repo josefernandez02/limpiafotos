@@ -12,6 +12,7 @@ import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
+import dev.catalogo.core.Device
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Money
 import android.content.ClipData
@@ -27,11 +28,10 @@ import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
-    /** Main tabs on the parent: articles, lots, connect. */
+    /** Main tabs: articles, status, inventory. */
     data object Home : Screen
     data object Lots : Screen
     data object Status : Screen
-    data object Connect : Screen
 
     data class Article(val number: Int) : Screen
     /** New article when [number] is null. */
@@ -39,8 +39,6 @@ sealed interface Screen {
     data object Review : Screen
     data object Settings : Screen
     data class Template(val deviceId: String) : Screen
-    /** A child's album. */
-    data class Album(val number: Int) : Screen
     /** Order, cover and crop of [deviceId]'s photos of [number]. */
     data class Photos(val number: Int, val deviceId: String) : Screen
     /** Reads every account's Vinted wardrobe. */
@@ -52,7 +50,6 @@ private const val VINTED_PACKAGE = "fr.vinted"
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as CatalogoApp
     val repo = app.repo
-    val sync = app.sync
     val state: StateFlow<AppState> = repo.store.state
 
     private val _stack = MutableStateFlow<List<Screen>>(listOf(Screen.Home))
@@ -132,21 +129,19 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val s = _stack.value
         if (s.size <= 1) {
             // Secondary tabs go back to Artículos before leaving the app.
-            if (s.last() == Screen.Lots || s.last() == Screen.Connect) {
+            if (s.last() == Screen.Lots || s.last() == Screen.Status) {
                 tab(Screen.Home)
                 return true
             }
             return false
         }
-        if (s.last() == Screen.Connect) sync.stop()
         _stack.value = s.dropLast(1)
         refresh()
         return true
     }
 
-    /** Switches main tab; leaving Connect stops the link. */
+    /** Switches main tab. */
     fun tab(screen: Screen) {
-        if (_stack.value.last() == Screen.Connect && screen != Screen.Connect) sync.stop()
         _stack.value = listOf(screen)
         refresh()
     }
@@ -219,13 +214,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun setupParent(name: String, prefix: String) = run {
         repo.setupParent(name, prefix)
         repo.adoptFolder(dev.catalogo.data.Folders.auto())
-    }
-
-    fun setupChild() = run { repo.setupChild() }
-
-    fun resetRole() = run {
-        repo.resetRole()
-        _stack.value = listOf(Screen.Home)
     }
 
     // ---------- parent ----------
@@ -557,8 +545,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         back()
     }
 
-    // ---------- child ----------
-
     /** «Resubir»: new photos, new title and hashtags; the rest of the article stays. */
     fun relist(number: Int, keepPhotos: Boolean = false) = run {
         askToDelete(app.drafts.relist(number, keepPhotos))
@@ -572,22 +558,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         back()
     }
 
-    fun deleteOnChild(number: Int) = run {
-        askToDelete(repo.releaseOnChild(number, null))
-        if (_stack.value.last() is Screen.Album) back() else refresh()
-    }
-
-    fun sellOnChild(number: Int, priceText: String) = run {
-        val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
-        askToDelete(repo.releaseOnChild(number, price))
-        if (_stack.value.last() is Screen.Album) back() else refresh()
-    }
-
-    fun unpair() = run {
-        sync.stop()
-        repo.unpair()
-    }
-
     // ---------- settings ----------
 
     private fun reportMoves(failed: Int) {
@@ -598,6 +568,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         reportMoves(repo.renameDevice(id, name, prefix))
         done()
         refresh()
+    }
+
+    /** Adds a Vinted account (the one a second PC publishes in). Returns an error to show, or null when done. */
+    fun addAccount(name: String, prefix: String): String? {
+        val p = state.value.parent ?: return "Configura primero este móvil"
+        val cleanName = name.trim()
+        val cleanPrefix = prefix.trim().uppercase()
+        return try {
+            val id = java.util.UUID.randomUUID().toString()
+            Catalog.validateDevice(p, id, cleanName, cleanPrefix)
+            run { repo.addChild(Device(id, cleanName, cleanPrefix)); refresh() }
+            null
+        } catch (e: Exception) {
+            e.message ?: "No válido"
+        }
     }
 
     fun removeChild(id: String) = run {

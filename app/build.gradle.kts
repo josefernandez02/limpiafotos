@@ -71,11 +71,14 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
 
-    implementation("com.google.android.gms:play-services-nearby:19.3.0")
     // play-services pulls an old Fragment; Activity Result APIs need >= 1.3.
     implementation("androidx.fragment:fragment:1.8.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     // On-device model that cuts the garment out of the photo (downloaded once by Google Play services).
     implementation("com.google.android.gms:play-services-mlkit-subject-segmentation:16.0.0-beta1")
+    // the versions Play services resolved to while Nearby was also here: kept, so the build does not change
+    implementation("com.google.android.gms:play-services-base:18.5.0")
+    implementation("com.google.android.gms:play-services-basement:18.4.0")
+    implementation("com.google.android.gms:play-services-tasks:18.2.0")
 }

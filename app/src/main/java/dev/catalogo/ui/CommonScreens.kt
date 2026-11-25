@@ -61,161 +61,33 @@ import dev.catalogo.core.Sku
 
 @Composable
 fun SetupScreen(vm: MainViewModel) {
-    var askParent by remember { mutableStateOf(false) }
+    var ask by remember { mutableStateOf(false) }
     Scaffold { padding ->
         Column(
-            Modifier.padding(padding).padding(16.dp).fillMaxSize(),
+            Modifier.padding(padding).padding(24.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Spacer(Modifier.weight(1f))
-            Text("Catálogo", style = MaterialTheme.typography.headlineMedium)
-            Muted("¿Qué hace este móvil?", Modifier.padding(bottom = 16.dp))
-            Tile(onClick = { askParent = true }) {
-                Text("Principal", style = MaterialTheme.typography.titleMedium)
-                Muted("Hace las fotos y las reparte")
-            }
-            Tile(onClick = { vm.setupChild() }) {
-                Text("Secundario", style = MaterialTheme.typography.titleMedium)
-                Muted("Recibe sus fotos del principal")
-            }
+            Text("Catálogo", style = MaterialTheme.typography.headlineLarge)
+            Muted("Haz las fotos, deja que la IA escriba el anuncio y el PC lo sube a Vinted.", Modifier.padding(bottom = 24.dp), maxLines = 4)
+            Button(
+                onClick = { ask = true },
+                modifier = Modifier.fillMaxWidth().height(56.dp),
+                shape = RoundedCornerShape(18.dp),
+            ) { Text("Empezar") }
             Spacer(Modifier.weight(1f))
         }
     }
-    if (askParent) {
+    if (ask) {
         DeviceDialog(
-            title = "Este móvil",
+            title = "Tu cuenta principal",
+            subtitle = "El prefijo es el principio del código de cada artículo (SH0045).",
             initialName = "Samsung",
             initialPrefix = "SH",
             confirm = "Crear",
-            onDismiss = { askParent = false },
+            onDismiss = { ask = false },
             onConfirm = { name, prefix -> vm.setupParent(name, prefix); null },
         )
-    }
-}
-
-// ---------- connect ----------
-
-@Composable
-fun ConnectScreen(vm: MainViewModel, state: AppState) {
-    val status by vm.sync.status.collectAsStateWithLifecycle()
-    val isParent = state.parent != null
-    val start = rememberWithPermissions(Perms.nearby, onDenied = { vm.say("Permite el acceso a dispositivos cercanos") }) {
-        if (isParent) vm.sync.startParent() else vm.sync.startChild()
-    }
-    LaunchedEffect(Unit) { start() }
-    // The transfer stops if the screen turns off: keep it on while this screen is open.
-    val view = androidx.compose.ui.platform.LocalView.current
-    androidx.compose.runtime.DisposableEffect(view) {
-        view.keepScreenOn = true
-        onDispose { view.keepScreenOn = false }
-    }
-    val outbox by vm.outbox.collectAsStateWithLifecycle()
-
-    val done: () -> Unit = { if (isParent) vm.tab(Screen.Home) else vm.back() }
-    Scaffold(
-        topBar = {
-            if (isParent) Header("Conectar", "Sincroniza fotos, anuncios y ventas")
-            else Bar("Conectar", onBack = { vm.back() })
-        },
-        bottomBar = {
-            Column {
-                Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                    if (status.running || status.working) {
-                        OutlinedButton(
-                            onClick = { if (isParent) vm.sync.stop() else vm.back() },
-                            modifier = Modifier.fillMaxWidth().height(54.dp),
-                            shape = RoundedCornerShape(18.dp),
-                        ) { Text("Cancelar") }
-                    } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilledTonalButton(
-                                onClick = start,
-                                modifier = Modifier.weight(1f).height(54.dp),
-                                shape = RoundedCornerShape(18.dp),
-                            ) { OneLine("Conectar de nuevo") }
-                            Button(
-                                onClick = done,
-                                modifier = Modifier.weight(1f).height(54.dp),
-                                shape = RoundedCornerShape(18.dp),
-                            ) { OneLine("Hecho") }
-                        }
-                    }
-                }
-                if (isParent) MainTabs(vm, Screen.Connect) else Spacer(Modifier.navigationBarsPadding())
-            }
-        },
-    ) { padding ->
-        LazyColumn(
-            Modifier.padding(padding).fillMaxSize(),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            val p = state.parent
-            if (p != null && p.children.isNotEmpty()) {
-                item {
-                    Column(Modifier.padding(bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for (c in p.children) {
-                            val photos = outbox[c.id]?.values?.sum() ?: 0
-                            val releases = p.articles.count { it.released && c.id in it.pendingRelease }
-                            val synced = status.log.any { it == "Listo: ${c.name}" }
-                            Tile {
-                                Row2(
-                                    left = {
-                                        Column {
-                                            Text(c.label, style = MaterialTheme.typography.titleMedium)
-                                            Muted(
-                                                when {
-                                                    synced && photos == 0 && releases == 0 -> "Al día"
-                                                    photos == 0 && releases == 0 -> "Nada pendiente"
-                                                    else -> listOfNotNull(
-                                                        if (photos > 0) "$photos fotos por enviar" else null,
-                                                        if (releases > 0) "$releases por quitar" else null,
-                                                    ).joinToString(", ")
-                                                },
-                                            )
-                                        }
-                                    },
-                                    right = { if (synced) Pill("✓", strong = true) },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            items(status.log) { line -> Text(line, style = MaterialTheme.typography.bodyLarge) }
-            if (status.running && !status.working) {
-                item {
-                    Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                        Muted(if (isParent) "  Abre Conectar en el otro móvil" else "  Mantén el principal en Conectar")
-                    }
-                }
-            }
-        }
-    }
-
-    val request = status.pairRequest
-    if (request != null) {
-        if (isParent) {
-            DeviceDialog(
-                title = "Vincular ${request.code}",
-                subtitle = "Comprueba que el código coincide en el otro móvil.",
-                initialName = "",
-                initialPrefix = "",
-                confirm = "Vincular",
-                onDismiss = { vm.sync.rejectPairing() },
-                onConfirm = { name, prefix -> vm.sync.approvePairing(name, prefix) },
-            )
-        } else {
-            AlertDialog(
-                onDismissRequest = { vm.sync.rejectPairing() },
-                title = { Text("Código ${request.code}") },
-                text = { Text("Comprueba que coincide en el principal.") },
-                confirmButton = { TextButton(onClick = { vm.sync.confirmPairing() }) { Text("Coincide") } },
-                dismissButton = { TextButton(onClick = { vm.sync.rejectPairing() }) { Text("Cancelar") } },
-                containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-            )
-        }
     }
 }
 
@@ -224,14 +96,13 @@ fun ConnectScreen(vm: MainViewModel, state: AppState) {
 @Composable
 fun SettingsScreen(vm: MainViewModel, state: AppState) {
     var editing by remember { mutableStateOf<Device?>(null) }
-    var unpairing by remember { mutableStateOf(false) }
+    var adding by remember { mutableStateOf(false) }
     val p = state.parent
-    val c = state.child
 
     Scaffold(topBar = { Bar("Ajustes", onBack = { vm.back() }) }) { padding ->
         Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             if (p != null) {
-                Section("Cuentas y móviles")
+                Section("Cuentas de Vinted")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     for (d in Catalog.devices(p)) {
                         Tile(onClick = { editing = d }) {
@@ -242,7 +113,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                                         Muted(
                                             listOfNotNull(
                                                 d.name.takeIf { d.account.isNotBlank() },
-                                                if (d.id == p.self.id) "Principal" else "Secundario",
+                                                if (d.id == p.self.id) "Principal" else "Otra cuenta",
                                                 "estilo ${d.style + 1}",
                                                 if (d.vintedId.isBlank()) "sin perfil de Vinted" else null,
                                             ).joinToString(GAP),
@@ -254,6 +125,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                         }
                     }
                 }
+                TextButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("Añadir otra cuenta") }
                 Section("IA (Gemini)")
                 GeminiKeyTile(vm, state.geminiKey)
                 Section("PC (crea los borradores)")
@@ -275,25 +147,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                     )
                 }
             }
-            if (c != null) {
-                Section("Este móvil")
-                Tile {
-                    Row2(
-                        left = { Text(c.self.name, style = MaterialTheme.typography.titleMedium) },
-                        right = { Pill(c.self.prefix) },
-                    )
-                    Muted("Se cambia desde el principal")
-                }
-            }
-            if (c != null) {
-                TextButton(onClick = { unpairing = true }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp)) {
-                    Text("Desvincular", color = MaterialTheme.colorScheme.error)
-                }
-            } else if (p == null) {
-                TextButton(onClick = { vm.resetRole() }, modifier = Modifier.fillMaxWidth().padding(top = 24.dp, bottom = 16.dp)) {
-                    Text("Cambiar rol", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            Spacer(Modifier.height(24.dp))
         }
     }
 
@@ -309,7 +163,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                 TextButton(onClick = { editing = null; accountOf = device }) { Text("Cuenta de Vinted") }
                 TextButton(onClick = { editing = null; vm.go(Screen.Template(device.id)) }) { Text("Estilo y plantilla del anuncio") }
                 if (isChild) {
-                    TextButton(onClick = { confirmRemove = true }) { Text("Desvincular", color = MaterialTheme.colorScheme.error) }
+                    TextButton(onClick = { confirmRemove = true }) { Text("Quitar cuenta", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
@@ -332,9 +186,9 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
         )
         if (confirmRemove) {
             Confirm(
-                title = "Desvincular ${device.name}",
-                text = "Dejará de recibir fotos. Sus álbumes no se borran.",
-                confirm = "Desvincular",
+                title = "Quitar ${device.label}",
+                text = "Dejará de estar entre tus cuentas. Sus álbumes no se borran.",
+                confirm = "Quitar",
                 destructive = true,
                 onConfirm = { vm.removeChild(device.id); editing = null },
                 onDismiss = { confirmRemove = false },
@@ -342,14 +196,15 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
         }
     }
 
-    if (unpairing) {
-        Confirm(
-            title = "Desvincular",
-            text = "Este móvil dejará de recibir fotos. Los álbumes no se borran.",
-            confirm = "Desvincular",
-            destructive = true,
-            onConfirm = { vm.unpair() },
-            onDismiss = { unpairing = false },
+    if (adding && p != null) {
+        DeviceDialog(
+            title = "Otra cuenta",
+            subtitle = "La que publica otro PC. El prefijo abre el código de sus artículos.",
+            initialName = "",
+            initialPrefix = "",
+            confirm = "Añadir",
+            onDismiss = { adding = false },
+            onConfirm = { name, prefix -> vm.addAccount(name, prefix).also { if (it == null) adding = false } },
         )
     }
 }

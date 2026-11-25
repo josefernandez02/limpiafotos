@@ -34,7 +34,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import dev.catalogo.core.Role
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -76,7 +75,7 @@ private fun App(vm: MainViewModel) {
         vm.clearMessage()
     }
     val sessionOpen = state.parent?.session != null && stack.last() != Screen.Review
-    val onSecondaryTab = stack.size == 1 && (stack.last() == Screen.Lots || stack.last() == Screen.Connect || stack.last() == Screen.Status)
+    val onSecondaryTab = stack.size == 1 && (stack.last() == Screen.Lots|| stack.last() == Screen.Status)
     BackHandler(enabled = (stack.size > 1 || onSecondaryTab) && !sessionOpen) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {
@@ -98,12 +97,10 @@ private fun App(vm: MainViewModel) {
         ) { shownStack ->
             val parent = state.parent
             val top = shownStack.last()
-            val child = state.child
             when {
-                state.role == null -> SetupScreen(vm)
+                parent == null -> SetupScreen(vm)
                 parent != null && top == Screen.Review && parent.session != null -> ReviewScreen(vm, parent)
                 parent != null && parent.session != null -> SessionScreen(vm, parent)
-                top == Screen.Connect -> ConnectScreen(vm, state)
                 top == Screen.Settings -> SettingsScreen(vm, state)
                 parent != null && top is Screen.Template -> TemplateScreen(vm, parent, top.deviceId)
                 parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
@@ -112,9 +109,7 @@ private fun App(vm: MainViewModel) {
                 parent != null && top == Screen.Vinted -> VintedScreen(vm, parent)
                 parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
                 parent != null && top == Screen.Status -> StatusScreen(vm, parent)
-                parent != null -> ParentHome(vm, parent)
-                child != null && top is Screen.Album -> AlbumScreen(vm, child, top.number)
-                state.role == Role.CHILD -> ChildHome(vm, state)
+                else -> ParentHome(vm, parent)
             }
         }
         val viewer by vm.viewer.collectAsStateWithLifecycle()

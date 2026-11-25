@@ -186,24 +186,6 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
                     }
                 }
             }
-            val toSend = outbox.values.sumOf { it.values.sum() }
-            if (pending > 0 || toSend > 0) {
-                item(key = "pending") {
-                    Tile(onClick = { vm.tab(Screen.Connect) }) {
-                        Row2(
-                            left = {
-                                Muted(
-                                    listOfNotNull(
-                                        if (toSend > 0) "$toSend fotos por enviar" else null,
-                                        if (pending > 0) "$pending por quitar en otros móviles" else null,
-                                    ).joinToString(", "),
-                                )
-                            },
-                            right = { Text("Conectar", style = MaterialTheme.typography.labelLarge) },
-                        )
-                    }
-                }
-            }
             if (shown.isEmpty()) item(key = "none") { Muted("Ningún artículo", Modifier.padding(start = 4.dp, top = 16.dp)) }
             items(shown, key = { it.number }) { a ->
                 val n = a.number

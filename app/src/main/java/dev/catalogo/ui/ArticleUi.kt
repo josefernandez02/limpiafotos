@@ -197,13 +197,9 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
                 DeskBlock(vm, p, article, state)
                 return@forEachIndexed
             } else {
-                val n = waiting[d.id] ?: 0
-                Muted(
-                    if (n > 0) "$n fotos se enviarán al ${d.name} al conectar" else "Se sube desde el ${d.name}",
-                    Modifier.padding(top = 6.dp),
-                )
+                Muted("Lo sube su propio PC (${d.label})", Modifier.padding(top = 6.dp))
             }
-            // Other phones' accounts are uploaded from those phones: here only the mark.
+            // Other accounts are uploaded by their own PC: here only the mark.
             var asking by remember { mutableStateOf(false) }
             OutlinedButton(
                 onClick = { asking = true },

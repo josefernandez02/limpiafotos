@@ -2,7 +2,7 @@ package dev.catalogo.data
 
 import android.util.AtomicFile
 import dev.catalogo.core.AppState
-import dev.catalogo.core.Auth
+import dev.catalogo.core.Ids
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -38,7 +38,7 @@ class Store(dir: File) {
         if (loaded != null) return loaded
         // Never overwrite an unreadable state silently: keep it aside.
         if (file.baseFile.exists()) file.baseFile.renameTo(File(file.baseFile.path + ".unreadable-${System.currentTimeMillis()}"))
-        return AppState(deviceId = Auth.newId()).also(::write)
+        return AppState(deviceId = Ids.newId()).also(::write)
     }
 
     private fun write(state: AppState) {

@@ -2,10 +2,7 @@ package dev.catalogo.core
 
 import kotlinx.serialization.Serializable
 
-@Serializable
-enum class Role { PARENT, CHILD }
-
-/** A phone taking part. [secret] is the pairing key (children only). */
+/** A Vinted account the catalogue publishes in (the main one, or another that a second PC handles). */
 @Serializable
 data class Device(
     val id: String,
@@ -189,39 +186,15 @@ data class ParentState(
 )
 
 @Serializable
-data class ChildState(
-    val self: Device,
-    val parentId: String,
-    val secret: String,
-    val digits: Int,
-    val configVersion: Long = 0,
-    /** Numbers released on this device that the parent has not acknowledged yet. */
-    val pendingReleases: Set<Int> = emptySet(),
-    /** Sale price (cents) entered here for each pending release. */
-    val salePrices: Map<Int, Long> = emptyMap(),
-    /** Title and description for each article, written by the parent for this phone. */
-    val listings: Map<Int, ListingText> = emptyMap(),
-)
-
-@Serializable
 data class AppState(
     val deviceId: String,
     val baseFolder: String = "Pictures",
     val parent: ParentState? = null,
-    val child: ChildState? = null,
-    /** Chosen as secondary but not paired yet. */
-    val secondary: Boolean = false,
     /** Google AI Studio key; stays on this phone, never synced. */
     val geminiKey: String = "",
     /** The PC that creates the drafts; stays on this phone, never synced. */
     val pc: PcLink? = null,
 ) {
-    val role: Role? get() = when {
-        parent != null -> Role.PARENT
-        child != null || secondary -> Role.CHILD
-        else -> null
-    }
-
     companion object {
         /** Folders where galleries list albums; the app picks one per phone automatically. */
         val BASE_FOLDERS = listOf("DCIM", "Pictures/Gallery/owner", "Pictures")

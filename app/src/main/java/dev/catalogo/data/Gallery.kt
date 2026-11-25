@@ -5,7 +5,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.MediaStore
-import dev.catalogo.core.Auth
+import dev.catalogo.core.Ids
 import java.io.File
 import java.io.IOException
 
@@ -101,7 +101,7 @@ class Gallery(context: Context) {
         arrayOf(path(base, album), name),
     ).isNotEmpty()
 
-    private fun randomName() = "${Auth.newId().take(12)}.jpg"
+    private fun randomName() = "${Ids.newId().take(12)}.jpg"
 
     private fun save(base: String, album: String, name: String, takenAt: Long?, writer: (java.io.OutputStream) -> Unit): Uri {
         val values = ContentValues().apply {

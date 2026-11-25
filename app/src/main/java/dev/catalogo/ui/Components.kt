@@ -242,23 +242,6 @@ object Perms {
         if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.READ_MEDIA_IMAGES)
         else arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
 
-    val nearby: Array<String> = when {
-        Build.VERSION.SDK_INT >= 33 -> arrayOf(
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-            Manifest.permission.NEARBY_WIFI_DEVICES,
-        )
-        Build.VERSION.SDK_INT >= 31 -> arrayOf(
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_ADVERTISE,
-            Manifest.permission.BLUETOOTH_CONNECT,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        )
-        else -> arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
-
     /** The quiet «Preparando borradores» notification while the queue works in the background. */
     val notifications: Array<String> =
         if (Build.VERSION.SDK_INT >= 33) arrayOf(Manifest.permission.POST_NOTIFICATIONS) else emptyArray()
