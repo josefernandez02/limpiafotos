@@ -252,6 +252,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val pc = app.drafts.pc
     val incidents = app.drafts.incidents
     val offers = app.drafts.offers
+    val games = app.drafts.games
 
     fun incidentReviewed(id: String) = run { app.drafts.reviewed(id) }
 
@@ -328,6 +329,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             else -> "PC ${s.text}"
         }
     }
+
+    /** Switch of one game (the PC never plays one that is off). */
+    fun setGame(id: String, on: Boolean) = run { app.drafts.setGame(id, on) }
 
     /** «mandar» or «parar» for the automatic offers. */
     fun offersControl(action: String) = run {

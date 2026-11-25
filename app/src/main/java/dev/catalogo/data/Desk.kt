@@ -69,6 +69,9 @@ class Desk(private val resolver: ContentResolver) {
         val lastRunAt: Long, val lastRunSent: Int, val lastRunWhy: String, val last: List<OfferEntry>,
     )
 
+    /** A game the PC can play, and whether its switch is on. [id] is the PC's own name for it. */
+    data class Game(val id: String, val title: String, val origin: String, val on: Boolean)
+
     data class OfferEntry(val at: Long, val user: String, val title: String, val result: String, val price: Double, val offer: Double, val reason: String)
 
     private val json = Json { ignoreUnknownKeys = true }
@@ -79,6 +82,15 @@ class Desk(private val resolver: ContentResolver) {
         return Status(o.str("estado"), o.str("siguiente"), o.str("pausado") == "true", queue,
             o.str("incidencias").toIntOrNull() ?: 0, o.str("incidencia_ultima"), (o["salud"] as? JsonObject)?.health(), today(o["agenda"] as? JsonObject),
             o.str("usando_pc") == "true")
+    }
+
+    fun games(link: PcLink): List<Game> = call(link, "GET", "/juegos", null).games()
+
+    fun setGame(link: PcLink, id: String, on: Boolean): List<Game> =
+        call(link, "POST", "/juegos", buildJsonObject { put("id", id); put("activo", on) }.toString()).games()
+
+    private fun JsonObject.games(): List<Game> = (this["juegos"] as? JsonArray).orEmpty().mapNotNull { e ->
+        (e as? JsonObject)?.let { Game(it.str("id"), it.str("titulo"), it.str("origen"), it.str("activo") == "true") }
     }
 
     fun offers(link: PcLink): Offers = call(link, "GET", "/ofertas", null).offers()
