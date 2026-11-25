@@ -539,6 +539,69 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
     }
 }
 
+/** Rectangle (x0, y0, x1, y1 as shares of the photo) around the garment, each side dragged on its own: «Marcar prenda». */
+@Composable
+private fun MarkArea(img: ImageBitmap, rect: FloatArray, onChange: (FloatArray) -> Unit) {
+    val density = LocalDensity.current
+    val current by rememberUpdatedState(rect)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val areaW = with(density) { maxWidth.toPx() }
+        val areaH = with(density) { maxHeight.toPx() }
+        val d = minOf(areaW / img.width, areaH / img.height) * 0.97f
+        val pw = d * img.width
+        val ph = d * img.height
+        val ox = (areaW - pw) / 2
+        val oy = (areaH - ph) / 2
+        val slop = with(density) { 36.dp.toPx() }
+        var sides by remember { mutableStateOf(booleanArrayOf(false, false, false, false)) }   // left, top, right, bottom being dragged
+        Canvas(
+            Modifier.fillMaxSize().pointerInput(img, areaW, areaH) {
+                detectDragGestures(
+                    onDragStart = { at ->
+                        val r = current
+                        val x = floatArrayOf(ox + r[0] * pw, oy + r[1] * ph, ox + r[2] * pw, oy + r[3] * ph)
+                        val inX = at.x in x[0] - slop..x[2] + slop
+                        val inY = at.y in x[1] - slop..x[3] + slop
+                        sides = booleanArrayOf(
+                            inY && kotlin.math.abs(at.x - x[0]) <= slop,
+                            inX && kotlin.math.abs(at.y - x[1]) <= slop,
+                            inY && kotlin.math.abs(at.x - x[2]) <= slop,
+                            inX && kotlin.math.abs(at.y - x[3]) <= slop,
+                        )
+                    },
+                    onDragEnd = { sides = booleanArrayOf(false, false, false, false) },
+                    onDragCancel = { sides = booleanArrayOf(false, false, false, false) },
+                    onDrag = { change, drag ->
+                        change.consume()
+                        val r = current.copyOf()
+                        val gap = 0.05f
+                        if (sides[0]) r[0] = (r[0] + drag.x / pw).coerceIn(0f, r[2] - gap)
+                        if (sides[1]) r[1] = (r[1] + drag.y / ph).coerceIn(0f, r[3] - gap)
+                        if (sides[2]) r[2] = (r[2] + drag.x / pw).coerceIn(r[0] + gap, 1f)
+                        if (sides[3]) r[3] = (r[3] + drag.y / ph).coerceIn(r[1] + gap, 1f)
+                        onChange(r)
+                    },
+                )
+            },
+        ) {
+            drawIntoCanvas { c -> c.nativeCanvas.drawBitmap(img.asAndroidBitmap(), null, android.graphics.RectF(ox, oy, ox + pw, oy + ph), null) }
+            val l = ox + rect[0] * pw; val t = oy + rect[1] * ph; val r = ox + rect[2] * pw; val b = oy + rect[3] * ph
+            val dim = Color.Black.copy(alpha = 0.5f)
+            drawRect(dim, Offset(ox, oy), GSize(pw, t - oy))
+            drawRect(dim, Offset(ox, b), GSize(pw, oy + ph - b))
+            drawRect(dim, Offset(ox, t), GSize(l - ox, b - t))
+            drawRect(dim, Offset(r, t), GSize(ox + pw - r, b - t))
+            val cyan = Color(0xFF4DD0E1)
+            drawRect(cyan, Offset(l, t), GSize(r - l, b - t), style = Stroke(width = 2.dp.toPx()))
+            val bar = 18.dp.toPx(); val th = 5.dp.toPx()
+            val mx = (l + r) / 2; val my = (t + b) / 2
+            drawLine(cyan, Offset(mx - bar, t), Offset(mx + bar, t), th); drawLine(cyan, Offset(mx - bar, b), Offset(mx + bar, b), th)
+            drawLine(cyan, Offset(l, my - bar), Offset(l, my + bar), th); drawLine(cyan, Offset(r, my - bar), Offset(r, my + bar), th)
+            for ((cx, cy) in listOf(l to t, r to t, l to b, r to b)) drawCircle(cyan, 6.dp.toPx(), Offset(cx, cy))
+        }
+    }
+}
+
 /**
  * Crop like in any photo app: the photo stays still and a 3:4 box is dragged by its corners and its middle. The box never
  * goes beyond the photo, so nothing is ever made up around it. "Giro" straightens the photo.
@@ -559,6 +622,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
     var touched by remember { mutableStateOf(false) }      // the user has moved the box: an automatic framing on opening must not undo it
     var manual by remember { mutableStateOf(false) }       // how the framing was made, for the record
     var garment by remember { mutableStateOf<dev.catalogo.core.Mask?>(null) }   // the garment's silhouette, to measure the space around it
+    var marking by remember { mutableStateOf(false) }            // «Marcar prenda»: the user draws the box around the garment and the app frames by it
+    var markRect by remember { mutableStateOf(floatArrayOf(0.2f, 0.2f, 0.8f, 0.8f)) }
     val auto: (Boolean) -> Unit = { onOpen ->
         scope.launch {
             analyzing = true
@@ -625,7 +690,28 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
         bottomBar = {
             if (img != null && fr != null) {
                 // everything that adjusts the photo lives in one panel: straighten, the four views, the three shortcuts
-                Panel {
+                if (marking) Panel {
+                    Text("Arrastra cada lado de la caja azul hasta rodear la prenda entera (mangas incluidas).", style = MaterialTheme.typography.bodyMedium)
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { marking = false }, modifier = Modifier.weight(1f).height(44.dp)) { OneLine("Cancelar") }
+                        Button(
+                            onClick = {
+                                val mw = maxOf(1, img.width * 128 / maxOf(img.width, img.height))
+                                val mh = maxOf(1, img.height * 128 / maxOf(img.width, img.height))
+                                val x0 = (markRect[0] * mw).toInt(); val x1 = (markRect[2] * mw).toInt().coerceAtLeast(x0 + 1)
+                                val y0 = (markRect[1] * mh).toInt(); val y1 = (markRect[3] * mh).toInt().coerceAtLeast(y0 + 1)
+                                val mask = dev.catalogo.core.Mask(mw, mh, BooleanArray(mw * mh) { (it % mw) in x0 until x1 && (it / mw) in y0 until y1 })
+                                val p = CoverFrame.place(mask, img.width, img.height)
+                                if (p != null) {
+                                    framing = CoverFrame.settle(p, img.width, img.height, CoverFrame.fillLimit(p.rotation)).framing()
+                                    garment = mask; touched = true; manual = true; note = ""; marking = false
+                                } else note = "Esa caja no sirve: debe ocupar entre un 8 % y un 90 % de la foto"
+                            },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                        ) { OneLine("Reencuadrar") }
+                    }
+                    if (note.isNotBlank()) Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                } else Panel {
                     StraightenRow(fr.rotation) {
                         touched = true; manual = true; note = ""
                         framing = CoverFrame.settle(fr.copy(rotation = it).placement(), img.width, img.height, CoverFrame.FILL_MAX).framing()
@@ -642,6 +728,17 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                             enabled = !analyzing,
                             modifier = Modifier.weight(1f).height(44.dp),
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
+                        if (isCover) OutlinedButton(
+                            onClick = {
+                                garment?.let { g -> CoverFrame.largestParts(g) }?.let { c ->
+                                    var x0 = c.w; var y0 = c.h; var x1 = -1; var y1 = -1
+                                    for (y in 0 until c.h) for (x in 0 until c.w) if (c.on[y * c.w + x]) { x0 = minOf(x0, x); y0 = minOf(y0, y); x1 = maxOf(x1, x); y1 = maxOf(y1, y) }
+                                    if (x1 >= 0) markRect = floatArrayOf(x0.toFloat() / c.w, y0.toFloat() / c.h, (x1 + 1f) / c.w, (y1 + 1f) / c.h)
+                                }
+                                note = ""; marking = true
+                            },
+                            modifier = Modifier.weight(1f).height(44.dp),
+                        ) { OneLine("Marcar prenda") }
                         OutlinedButton(
                             onClick = {
                                 val c = garment?.let { g -> CoverFrame.centered(g, img.width, fr.placement())?.framing() }
@@ -666,7 +763,8 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
             // the work area takes everything the panel leaves
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 if (img == null || fr == null) return@Box
-                CropArea(img, fr, isCover, m) { framing = it; touched = true; manual = true; note = "" }
+                if (marking) MarkArea(img, markRect) { markRect = it }
+                else CropArea(img, fr, isCover, m) { framing = it; touched = true; manual = true; note = "" }
             }
             val off = if (m != null && g != null && img != null && fr != null) remember(fr, g, img) { CoverFrame.offCentre(g, img.width, img.height, fr.placement(), Crop.OUT_W) } else 0
             if (m != null) MarginChip(m, off, Modifier.padding(top = 8.dp))
