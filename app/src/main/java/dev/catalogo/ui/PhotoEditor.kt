@@ -506,6 +506,19 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
                     style = Stroke(width = 1.dp.toPx()),
                 )
             }
+            if (guide) {
+                // legend: what each guide is
+                drawIntoCanvas { c ->
+                    val tp = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { textSize = 11.dp.toPx(); setShadowLayer(3f, 0f, 0f, android.graphics.Color.BLACK) }
+                    val sb = CoverFrame.safeBox()
+                    tp.color = android.graphics.Color.WHITE
+                    c.nativeCanvas.drawText("Zona segura (la prenda debe caber)", b[0] + sb[0] * bw + 6.dp.toPx(), b[1] + sb[1] * bw + 14.dp.toPx(), tp)
+                    if (garment != null) {
+                        tp.color = 0xFF4DD0E1.toInt()
+                        c.nativeCanvas.drawText("Prenda detectada", b[0] + garment[2] * (bw / Crop.OUT_W) + 6.dp.toPx(), b[3] - garment[1] * (bw / Crop.OUT_W) - 6.dp.toPx(), tp)
+                    }
+                }
+            }
             drawRect(Color.White, Offset(b[0], b[1]), GSize(bw, b[3] - b[1]), style = Stroke(width = 1.5.dp.toPx()))
             val len = 24.dp.toPx()
             val th = 4.dp.toPx()

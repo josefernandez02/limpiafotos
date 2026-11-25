@@ -177,6 +177,15 @@ object CoverFrame {
     /** The box every preview shows (x0, y0, x1, y1 in frame widths from the frame's top-left), for the editor's guide. */
     fun safeBox(): FloatArray = safe.copyOf()
 
+    /** Share of [small] that lies inside [big] (same grid): 1 = [small] is entirely within [big]. */
+    fun containment(big: Mask, small: Mask): Float {
+        if (big.w != small.w || big.h != small.h) return 0f
+        var inside = 0
+        var total = 0
+        for (i in small.on.indices) if (small.on[i]) { total++; if (big.on[i]) inside++ }
+        return if (total == 0) 0f else inside.toFloat() / total
+    }
+
     /** How much two silhouettes (same grid) agree: shared area over joint area (1 = identical). */
     fun agreement(a: Mask, b: Mask): Float {
         if (a.w != b.w || a.h != b.h) return 0f

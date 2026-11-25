@@ -30,6 +30,7 @@ object AutoFrame {
 
     private const val DECODE_EDGE = 640
     private const val MASK_EDGE = 128
+    private const val CONTAINED = 0.85f       // share of the backdrop silhouette that the model's must contain to be trusted over it
     private const val AGREE = 0.8f             // overlap of the two silhouettes from which they count as the same
     private const val MODEL_WAIT_MS = 25_000L   // the first time Google Play services may have to download the model
 
@@ -43,8 +44,11 @@ object AutoFrame {
             // Two independent opinions. When they agree, the model's smoother edge wins; when they do not (the model
             // loses a sleeve or a pattern, or the floor is tricky), the one that gave a believable silhouette is used.
             val agree = model != null && floor != null && CoverFrame.agreement(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= AGREE
+            // the backdrop read lost part of the garment (a sleeve as pale as the floor): the model's silhouette contains all of it and more
+            val modelWhole = model != null && floor != null && byModel != null &&
+                CoverFrame.containment(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= CONTAINED
             val first = when {
-                byModel != null && (agree || byFloor == null) -> byModel to "IA"
+                byModel != null && (agree || byFloor == null || modelWhole) -> byModel to "IA"
                 byFloor != null -> byFloor to "fondo"
                 else -> null
             }

@@ -637,3 +637,13 @@ class CoverFrameTest {
         assertEquals(CoverFrame.place(m, 931, 1129), CoverFrame.place(m, 931, 1129, m))
     }
 }
+
+class ContainmentTest {
+    @kotlin.test.Test
+    fun `a silhouette inside a bigger one is fully contained`() {
+        val big = Mask(4, 1, booleanArrayOf(true, true, true, true))
+        val small = Mask(4, 1, booleanArrayOf(false, true, true, false))
+        kotlin.test.assertEquals(1f, CoverFrame.containment(big, small))
+        kotlin.test.assertEquals(0.5f, CoverFrame.containment(small, big))
+    }
+}
