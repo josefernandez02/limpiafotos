@@ -128,6 +128,10 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                 TextButton(onClick = { adding = true }, modifier = Modifier.fillMaxWidth()) { Text("Añadir otra cuenta") }
                 Section("IA (Gemini)")
                 GeminiKeyTile(vm, state.geminiKey)
+                Section("Juegos")
+                val games by vm.games.collectAsStateWithLifecycle()
+                val pcNow by vm.pc.collectAsStateWithLifecycle()
+                GamesPanel(vm, games, online = pcNow.error == null && pcNow.status != null)
                 Section("PC (crea los borradores)")
                 PcSettingsTile(vm, state.pc)
                 Section("SKU")

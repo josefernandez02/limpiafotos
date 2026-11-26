@@ -59,7 +59,6 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val pc by vm.pc.collectAsStateWithLifecycle()
     val incidents by vm.incidents.collectAsStateWithLifecycle()
     val offers by vm.offers.collectAsStateWithLifecycle()
-    val games by vm.games.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
     val articles = p.articles.filter { !it.released }
     // Pending notices are always open by default: a missed like must never hide behind a tap. The user can hide them.
@@ -81,7 +80,6 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
-            item(key = "juegos") { GamesPanel(vm, games, online = pc.error == null && pc.status != null) }
             offers?.let { o -> item(key = "ofertas") { OffersPanel(vm, o) } }
             pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today, incidents) } }
             if (incidents.isNotEmpty()) {
@@ -303,7 +301,7 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 
 /** One switch per game: what is off is never played, and no article is kept for it. */
 @Composable
-private fun GamesPanel(vm: MainViewModel, games: List<dev.catalogo.data.Desk.Game>, online: Boolean) {
+fun GamesPanel(vm: MainViewModel, games: List<dev.catalogo.data.Desk.Game>, online: Boolean) {
     Tile {
         Text("Juegos", style = MaterialTheme.typography.titleMedium)
         Muted(
