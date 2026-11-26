@@ -77,7 +77,15 @@ data class Article(
     val round: Int = 0,
     /** Set while a re-listing waits for its new title and hashtags. */
     val relist: Relist? = null,
+    /** Id of the sale in progress that holds this article ("" = none). It keeps its number, data and photos until it ends. */
+    val soldIn: String = "",
 ) {
+    /** Sold, but the order can still be cancelled: out of stock without being gone. */
+    val held: Boolean get() = soldIn.isNotEmpty()
+
+    /** There to be published, played and sold. */
+    val inStock: Boolean get() = !released && !held
+
     /** Chosen accounts; articles from before the choice existed use where they went. */
     val targets: Set<String> get() = accounts.ifEmpty { uploaded + delivered.filterValues { it > 0 }.keys }
 
@@ -183,6 +191,8 @@ data class ParentState(
     val configVersion: Long = 1,
     val lots: List<Lot> = emptyList(),
     val sales: List<Sale> = emptyList(),
+    /** Jobs of sold articles that no longer exist here, still to be taken off the PC. */
+    val retired: List<Desk> = emptyList(),
 )
 
 @Serializable

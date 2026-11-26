@@ -43,12 +43,11 @@ class LedgerTest {
     }
 
     @Test
-    fun `selling on the parent records the sale and releases everywhere`() {
-        var s = withLot()
-        s = Ledger.sell(s, 0, "p", 2_500, null, 10)
+    fun `a finished sale records the money and frees the number`() {
+        var s = withLot().sold(0, "p", 2_500, null, 10)
         assertEquals(1, s.sales.size)
         assertEquals(500, s.sales.single().cost)
-        assertEquals(listOf(0), Catalog.releasesFor(s, "c1"))
+        assertEquals(0, Catalog.nextFree(s))
         val stats = Ledger.stats(s, s.lots.single())
         assertEquals(1, stats.sold)
         assertEquals(1, stats.inStock)
@@ -57,21 +56,10 @@ class LedgerTest {
     }
 
     @Test
-    fun `selling on a child releases the rest and is never counted twice`() {
-        var s = withLot()
-        s = Ledger.sell(s, 1, "c1", 3_000, null, 10)
-        assertEquals(emptyList(), Catalog.releasesFor(s, "c1"))
-        assertEquals(1, Catalog.nextFree(s), "number free again once every phone released it")
-        s = Ledger.sell(s, 1, "c1", 3_000, null, 11)
-        s = Ledger.sell(s, 1, "p", 3_000, null, 12)
-        assertEquals(1, s.sales.size)
-    }
-
-    @Test
     fun `explicit cost wins and totals add up`() {
         var s = withLot()
-        s = Ledger.sell(s, 2, "p", 2_000, 900, 5)
-        s = Ledger.sell(s, 0, "p", 1_500, null, 50)
+        s = s.sold(2, "p", 2_000, 900, 5)
+        s = s.sold(0, "p", 1_500, null, 50)
         val all = Ledger.totals(s.sales)
         assertEquals(2, all.count)
         assertEquals(3_500, all.revenue)
@@ -98,3 +86,7 @@ class LedgerTest {
         assertEquals(500, Ledger.costOf(s, Catalog.article(s, 2)!!))
     }
 }
+
+/** Sold and paid. */
+internal fun ParentState.sold(number: Int, account: String, price: Long, cost: Long?, now: Long): ParentState =
+    Sales.complete(Sales.register(this, number, "t$number-$now", account, price, cost, now), "t$number-$now", now)

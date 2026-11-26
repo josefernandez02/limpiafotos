@@ -39,21 +39,80 @@ object Stats {
         val accounts: List<Account>,
         /** Brands by units sold, best first. */
         val brands: List<Pair<String, Int>>,
+        /** Sales in progress and their money, not counted anywhere else. */
+        val pending: Int = 0,
+        val pendingRevenue: Long = 0,
+        /** Finished sales with no cost: left out of the profit. */
+        val unknownCost: Int = 0,
+        /** What the stock adds up to at its listed prices. */
+        val stockValue: Long = 0,
     )
 
+    enum class Period(val label: String) { MONTH("Este mes"), LAST_30("30 días"), YEAR("Año"), ALL("Todo") }
+
+    /** [sales] made in [period], counting from [now]. */
+    fun within(sales: List<Sale>, period: Period, now: Long, zone: ZoneId = ZoneId.systemDefault()): List<Sale> {
+        val today = Instant.ofEpochMilli(now).atZone(zone)
+        return sales.filter { sale ->
+            val day = Instant.ofEpochMilli(sale.soldAt).atZone(zone)
+            when (period) {
+                Period.MONTH -> YearMonth.from(day) == YearMonth.from(today)
+                Period.LAST_30 -> now - sale.soldAt <= 30 * DAY
+                Period.YEAR -> day.year == today.year
+                Period.ALL -> true
+            }
+        }
+    }
+
+    /** Days between the article being catalogued and its sale; null for sales without article. */
+    fun daysToSell(sale: Sale): Int? = sale.listedAt?.let { ((sale.soldAt - it) / DAY).toInt().coerceAtLeast(0) }
+
+    /** What a group of sales adds up to. Money, profit, price and speed only count finished ones. */
+    data class Summary(
+        val sold: Int,
+        val revenue: Long,
+        val profit: Long,
+        val unknownCost: Int,
+        val pending: Int,
+        val pendingRevenue: Long,
+        val cancelled: Int,
+        val averagePrice: Long?,
+        val medianDays: Int?,
+    )
+
+    fun summary(sales: List<Sale>): Summary {
+        val done = sales.filter { it.status == SaleStatus.COMPLETED }
+        val pending = sales.filter { it.status == SaleStatus.PENDING }
+        val totals = Ledger.totals(done)
+        val days = done.mapNotNull(::daysToSell).sorted()
+        return Summary(
+            sold = done.size,
+            revenue = totals.revenue,
+            profit = totals.profit,
+            unknownCost = done.count { it.cost == null },
+            pending = pending.size,
+            pendingRevenue = pending.sumOf { it.price },
+            cancelled = sales.count { it.status == SaleStatus.CANCELLED },
+            averagePrice = if (done.isEmpty()) null else totals.revenue / done.size,
+            medianDays = days.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] },
+        )
+    }
+
     fun kpis(s: ParentState, now: Long, zone: ZoneId = ZoneId.systemDefault(), months: Int = 6): Kpis {
-        val stock = s.articles.filter { !it.released }
-        val sales = s.sales
-        val costOfSold = sales.sumOf { it.cost ?: 0 }
-        val revenue = sales.sumOf { it.price }
-        val profit = revenue - costOfSold
-        val days = sales.mapNotNull { sale -> sale.listedAt?.let { ((sale.soldAt - it) / DAY).toInt().coerceAtLeast(0) } }.sorted()
+        val stock = s.articles.filter { it.inStock }
+        val sales = s.sales.filter { it.status == SaleStatus.COMPLETED }
+        val pending = s.sales.filter { it.status == SaleStatus.PENDING }
+        val totals = Ledger.totals(sales)
+        val costOfSold = totals.cost
+        val revenue = totals.revenue
+        val profit = totals.profit
+        val days = sales.mapNotNull(::daysToSell).sorted()
         val thisMonth = YearMonth.from(Instant.ofEpochMilli(now).atZone(zone))
         val byMonth = sales.groupBy { YearMonth.from(Instant.ofEpochMilli(it.soldAt).atZone(zone)) }
         val monthly = (months - 1 downTo 0).map { back ->
             val m = thisMonth.minusMonths(back.toLong())
             val list = byMonth[m].orEmpty()
-            Month(m, list.size, list.sumOf { it.price }, list.sumOf { it.price - (it.cost ?: 0) })
+            Month(m, list.size, list.sumOf { it.price }, Ledger.totals(list).profit)
         }
         val accounts = Catalog.devices(s).map { d ->
             val mine = sales.filter { it.deviceId == d.id }
@@ -76,17 +135,22 @@ object Stats {
             profit = profit,
             roi = if (costOfSold > 0) (profit * 100 / costOfSold).toInt() else null,
             averagePrice = if (sales.isNotEmpty()) revenue / sales.size else null,
-            sellThrough = (sales.size + stock.size).takeIf { it > 0 }?.let { sales.size * 100 / it },
+            // Only articles catalogued here: older history has no stock to compare with.
+            sellThrough = sales.count { it.listedAt != null }.let { sold -> (sold + stock.size).takeIf { it > 0 }?.let { sold * 100 / it } },
             medianDays = days.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] },
             favourites = stock.sumOf { a -> a.vinted.values.sumOf { it.favourites ?: 0 } },
             months = monthly,
             accounts = accounts,
             brands = brands,
+            pending = pending.size,
+            pendingRevenue = pending.sumOf { it.price },
+            unknownCost = sales.count { it.cost == null },
+            stockValue = stock.sumOf { it.price ?: 0 },
         )
     }
 
     /** Articles in stock, oldest first, with their age in days: what to review, discount or re-upload. */
     fun oldest(s: ParentState, now: Long, limit: Int = 5): List<Pair<Article, Int>> =
-        s.articles.filter { !it.released }.sortedBy { it.createdAt }.take(limit)
+        s.articles.filter { it.inStock }.sortedBy { it.createdAt }.take(limit)
             .map { it to ((now - it.createdAt) / DAY).toInt() }
 }

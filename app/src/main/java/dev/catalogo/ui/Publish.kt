@@ -67,6 +67,13 @@ fun MainTabs(vm: MainViewModel, current: Screen) {
             colors = colors,
         )
         NavigationBarItem(
+            selected = current == Screen.Sales,
+            onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Sales) },
+            icon = { Icon(Icons.Default.ShoppingCart, contentDescription = null) },
+            label = { Text("Ventas") },
+            colors = colors,
+        )
+        NavigationBarItem(
             selected = current == Screen.Lots,
             onClick = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.TextHandleMove); vm.tab(Screen.Lots) },
             icon = { Icon(ChartIcon, contentDescription = null) },
@@ -152,7 +159,7 @@ fun SellDialog(
         title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Muted("Se borrarán sus fotos en todos los móviles.")
+                Muted("Queda como venta en curso y se puede anular. Sus fotos se borran cuando se complete.")
                 MoneyField(price, { price = it }, "Precio de venta")
                 if (initialCost != null) MoneyField(cost, { cost = it }, "Coste", hint = costHint)
                 extra?.invoke()

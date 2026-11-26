@@ -21,8 +21,8 @@ class StatsTest {
         }
         s = Catalog.setUploaded(s, 0, "p", true)
         val now = 100 * day
-        s = Ledger.sell(s, 0, "p", 3000, null, 20 * day)
-        s = Ledger.sell(s, 1, "c1", 2000, null, 40 * day)
+        s = s.sold(0, "p", 3000, null, 20 * day)
+        s = s.sold(1, "c1", 2000, null, 40 * day)
         val k = Stats.kpis(s, now, ZoneOffset.UTC)
         assertEquals(2, k.inStock)
         assertEquals(2000, k.stockCost)

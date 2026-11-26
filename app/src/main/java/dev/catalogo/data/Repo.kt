@@ -13,6 +13,7 @@ import dev.catalogo.core.Listing
 import dev.catalogo.core.ListingText
 import dev.catalogo.core.Ids
 import dev.catalogo.core.ParentState
+import dev.catalogo.core.Sales
 import dev.catalogo.core.Session
 import dev.catalogo.core.Sku
 import dev.catalogo.core.VintedWardrobe
@@ -28,11 +29,15 @@ class Repo(context: Context) {
     val gemini = Gemini(context.contentResolver)
     val previews = Previews(context.filesDir)
     val desk = Desk(context.contentResolver)
+    val saleImages = SaleImages(context.filesDir, context.contentResolver)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
 
     private fun parent(): ParentState = state.parent ?: throw CatalogException("Este móvil no es el principal")
+
+    /** The main phone's catalogue as it is now. */
+    fun catalog(): ParentState = parent()
 
     fun sku(device: Device, number: Int, digits: Int) = Sku.format(device.prefix, number, digits)
 
@@ -227,7 +232,7 @@ class Repo(context: Context) {
     suspend fun startSession(number: Int, deviceId: String) {
         store.update { s ->
             val p = s.parent!!
-            if (Catalog.article(p, number)?.released != false) throw CatalogException("Artículo no disponible")
+            if (Catalog.article(p, number)?.inStock != true) throw CatalogException("Artículo no disponible")
             s.copy(parent = p.copy(session = Session(number, deviceId, System.currentTimeMillis())))
         }
     }
@@ -267,15 +272,50 @@ class Repo(context: Context) {
         return gallery.albumPhotos(base, sku(p.self, number, p.digits)).size
     }
 
-    // ---------- releases ----------
+    // ---------- sales ----------
 
-    /** Sold on the parent: record the sale, delete everything local, its accounts are released with it. */
-    suspend fun sellOnParent(number: Int, price: Long, cost: Long?, account: String? = null): List<Uri> {
-        val consent = deleteLocalForParent(number)
-        store.update { s ->
-            s.copy(parent = Ledger.sell(s.parent!!, number, s.deviceId, price, cost, System.currentTimeMillis(), account ?: s.deviceId))
+    /**
+     * Applies [block] (a sale transition) to the catalogue. The photos of the articles it
+     * takes away are deleted first, so their numbers can be used again with nothing left
+     * behind; a picture of each is kept for its sale. Returns the originals only the user
+     * can allow deleting.
+     */
+    suspend fun changeSales(block: (ParentState) -> ParentState): List<Uri> {
+        val before = parent()
+        val after = block(before) // an impossible change throws here, before anything is touched
+        val gone = Sales.freed(before, after)
+        val consent = ArrayList<Uri>()
+        for (number in gone) {
+            val listedAt = Catalog.article(before, number)?.createdAt
+            cover(before, number)?.let { uri ->
+                for (sale in after.sales.filter { it.number == number && it.listedAt == listedAt }) saleImages.keep(sale.id, uri)
+            }
+            consent += deleteLocalForParent(number)
         }
+        store.update { s -> s.copy(parent = block(s.parent!!)) }
         return consent
+    }
+
+    /** A sale registered by hand: it stays in progress until completed or cancelled. */
+    suspend fun registerSale(number: Int, price: Long, cost: Long?, account: String? = null): List<Uri> {
+        val id = Ids.newId()
+        val now = System.currentTimeMillis()
+        return changeSales { Sales.register(it, number, id, account ?: it.self.id, price, cost, now) }
+    }
+
+    suspend fun ensureSaleIds() {
+        store.update { s -> s.parent?.let { s.copy(parent = Sales.ensureIds(it)) } ?: s }
+    }
+
+    /** The PC dropped the job [ref] of an article that is gone. */
+    suspend fun heard(ref: String) {
+        store.update { s -> s.parent?.let { s.copy(parent = Sales.heard(it, ref)) } ?: s }
+    }
+
+    private suspend fun cover(p: ParentState, number: Int): Uri? = withContext(Dispatchers.IO) {
+        runCatching { gallery.albumPhotos(base, sku(p.self, number, p.digits)).firstOrNull() }.getOrNull()
+            ?: p.children.firstNotNullOfOrNull { d -> outbox.files(d.id, number).firstOrNull() }?.let { Uri.fromFile(it) }
+            ?: previews.files(number).firstOrNull()?.let { Uri.fromFile(it) }
     }
 
     /**
@@ -283,6 +323,7 @@ class Repo(context: Context) {
      * sale) and the article keeps everything else. See [Catalog.relist].
      */
     suspend fun relist(number: Int, keepPhotos: Boolean = false): List<Uri> {
+        if (Catalog.article(parent(), number)?.inStock != true) throw CatalogException("Artículo no disponible")
         // keepPhotos: the new photos were already taken (without pressing «Resubir»): they stay, only the state changes.
         val consent = if (keepPhotos) emptyList() else deleteLocalForParent(number)
         store.update { s -> s.copy(parent = Catalog.relist(s.parent!!, number)) }
@@ -295,11 +336,7 @@ class Repo(context: Context) {
     }
 
     /** Removed by mistake: delete it everywhere without recording a sale. */
-    suspend fun deleteArticle(number: Int): List<Uri> {
-        val consent = deleteLocalForParent(number)
-        store.update { s -> s.copy(parent = Catalog.release(s.parent!!, number)) }
-        return consent
-    }
+    suspend fun deleteArticle(number: Int): List<Uri> = changeSales { Catalog.delete(it, number) }
 
     suspend fun ensureDistinctStyles() {
         store.update { s -> s.parent?.let { s.copy(parent = Catalog.ensureDistinctStyles(it)) } ?: s }

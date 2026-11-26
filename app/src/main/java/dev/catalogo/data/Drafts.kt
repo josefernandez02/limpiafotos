@@ -117,7 +117,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     /** Articles still being worked on this phone (AI or upload), in queue order. */
     fun local(): List<Article> = repo.state.parent?.articles.orEmpty()
-        .filter { !it.released && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
+        .filter { it.inStock && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
         .sortedBy { it.desk!!.at }
 
     private fun album(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> =
@@ -138,12 +138,12 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     }
 
     private fun busy(): Boolean = repo.state.parent?.articles.orEmpty().any { a ->
-        a.desk?.let { it.working || it.status == "borrador" || it.status == "publicado" } == true
+        a.inStock && a.desk?.let { it.working || it.status == "borrador" || it.status == "publicado" } == true
     }
 
     private suspend fun tick() = mutex.withLock {
         val p = repo.state.parent ?: return@withLock
-        val moving = p.articles.filter { !it.released && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
+        val moving = p.articles.filter { it.inStock && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
             .sortedBy { it.desk!!.at }
         for (a in moving) {
             if (a.desk!!.status == DeskState.PREPARING) prepare(a.number)
@@ -154,6 +154,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private fun current(number: Int): Article? = repo.state.parent?.let { Catalog.article(it, number) }
 
     private suspend fun set(number: Int, status: String, message: String = "", doubts: List<String> = emptyList()) {
+        // Sold while it was being prepared: it stays as the sale left it.
+        if (current(number)?.inStock != true) return
         val before = current(number)?.desk?.status
         repo.updateDesk(number) { d ->
             d?.copy(status = status, message = message, doubts = doubts, at = System.currentTimeMillis())
@@ -249,7 +251,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private suspend fun send(number: Int) {
         val link = repo.state.pc ?: return set(number, DeskState.REVIEW, "Configura el PC en Ajustes")
         val p = repo.state.parent ?: return
-        val a = current(number) ?: return
+        val a = current(number)?.takeIf { it.inStock } ?: return
         val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
         if (!built.ready) return check(number)
         val photos = album(p, a).take(MAX_PHOTOS)
@@ -257,6 +259,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         try {
             // A cheap question first: without the PC, the photos (MBs) are not uploaded every few seconds.
             repo.desk.status(link)
+            if (current(number)?.inStock != true) return
             val job = repo.desk.send(link, built.ref, built.payload!!, photos)
             repo.updateDesk(number) { d ->
                 d?.copy(ref = built.ref, status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis())
@@ -301,10 +304,10 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val link = repo.state.pc ?: return run { _pc.value = Pc() }
         try {
             val status = repo.desk.status(link)
-            // States set by hand first: the PC must know them before it plays anything.
-            for (a in repo.state.parent?.articles.orEmpty().filter { it.desk?.pending?.isNotBlank() == true }) push(a.number)
+            // States set by hand and sold articles first: the PC must know them before it plays anything.
+            tellPc()
             val onPc = repo.state.parent?.articles.orEmpty().filter { a ->
-                a.desk != null && a.desk!!.status !in LOCAL && a.desk!!.pending.isBlank()
+                a.inStock && a.desk != null && a.desk!!.status !in LOCAL && a.desk!!.pending.isBlank()
             }
             if (onPc.isNotEmpty()) {
                 val jobs = repo.desk.jobs(link).associateBy { it.ref }
@@ -319,6 +322,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                     }
                     val before = a.desk!!.status
                     // A state set by hand meanwhile wins: the PC is told first, then it answers.
+                    // Sold while the PC was answering: its answer is old news.
+                    if (current(a.number)?.inStock != true) continue
                     repo.updateDesk(a.number) { d ->
                         if (d == null || d.pending.isNotBlank()) d
                         else d.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
@@ -379,7 +384,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      */
     suspend fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "", notify: Boolean = true) {
         val p = repo.state.parent ?: return
-        val a = current(number) ?: return
+        val a = current(number)?.takeIf { it.inStock } ?: return
         val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
         val link = repo.state.pc
         val cleanUrl = url.trim().ifBlank { a.desk?.url.orEmpty() }
@@ -438,7 +443,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     /** What to do with it (only before the PC acts, or for a draft / an uploaded article). */
     suspend fun setMode(number: Int, mode: String) {
-        val d = current(number)?.desk ?: return
+        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
         repo.updateDesk(number) { x -> x?.copy(mode = mode, pending = if (x.status in setOf("borrador", "publicado")) x.status else x.pending) }
         AppLog.i("cola", "${d.ref} modo: $mode")
         push(number)
@@ -447,7 +452,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     /** «Solo jugar»: the article is already on Vinted; its link goes to the next game. */
     suspend fun playOnly(number: Int, url: String) {
         val p = repo.state.parent ?: return
-        val a = current(number) ?: return
+        val a = current(number)?.takeIf { it.inStock } ?: return
         val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
         repo.updateDesk(number) { d ->
             (d ?: DeskState(ref, "publicado")).copy(ref = ref, status = "publicado", mode = dev.catalogo.core.Mode.PLAY,
@@ -455,6 +460,25 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         }
         repo.setUploaded(number, p.self.id, true)
         push(number)
+    }
+
+    /**
+     * Everything the PC still has to hear: states set by hand, articles held by a sale
+     * («fuera») or back from one, and the sold ones that are already gone. What cannot be
+     * sent now stays pending for the next check.
+     */
+    suspend fun tellPc() {
+        val link = repo.state.pc ?: return
+        val p = repo.state.parent ?: return
+        for (a in p.articles.filter { it.desk?.pending?.isNotBlank() == true }) push(a.number)
+        for (d in p.retired) {
+            runCatching {
+                withContext(Dispatchers.IO) { repo.desk.setState(link, d.ref, d.pending, d.mode, d.url, p.self.account) }
+            }.onSuccess {
+                repo.heard(d.ref)
+                AppLog.i("cola", "${d.ref} PC enterado: vendido")
+            }.onFailure { AppLog.w("cola", "${d.ref} pendiente de avisar al PC: ${it.message}") }
+        }
     }
 
     /** Sends a state set by hand to the PC; on failure it stays pending for the next check. */
@@ -484,7 +508,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     /** «Generar y preparar borrador». */
     suspend fun prepareNow(number: Int, mode: String? = null) {
         val p = repo.state.parent ?: return
-        val a = current(number) ?: return
+        val a = current(number)?.takeIf { it.inStock } ?: return
         val ref = Draft.ref(p.self, a, p.digits)
         repo.updateDesk(number) { d ->
             val keep = d?.takeIf { it.ref == ref }
@@ -506,7 +530,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * the article goes through the checks again (the AI only if its data changed).
      */
     suspend fun retry(number: Int) {
-        val d = current(number)?.desk ?: return
+        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
         val link = repo.state.pc
         if (link != null && (d.status == "revisar" || d.status == "error") && d.ref.isNotBlank()) {
             val job = withContext(Dispatchers.IO) { repo.desk.retry(link, d.ref) }
@@ -523,7 +547,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * draft is not created yet) and back to «Por subir». Nothing is deleted in Vinted.
      */
     suspend fun remove(number: Int) {
-        val d = current(number)?.desk ?: return
+        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
         val link = repo.state.pc
         if (link != null && d.ref.isNotBlank() && d.status !in LOCAL) {
             withContext(Dispatchers.IO) { runCatching { repo.desk.delete(link, d.ref) } }

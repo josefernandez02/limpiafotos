@@ -89,7 +89,7 @@ object VintedWardrobe {
         var newly = 0
         val sold = ArrayList<Int>()
         val articles = s.articles.map { a ->
-            if (a.released) return@map a
+            if (!a.inStock) return@map a
             val linked = a.vinted[deviceId]?.id?.let(byId::get)
             val remote = linked ?: Catalog.listingText(s, a.number, device)?.title?.let(::key)?.takeIf { it.isNotEmpty() }
                 ?.let { k -> byTitle[k]?.firstOrNull { it.id !in used } }

@@ -60,7 +60,7 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     val incidents by vm.incidents.collectAsStateWithLifecycle()
     val offers by vm.offers.collectAsStateWithLifecycle()
     val context = androidx.compose.ui.platform.LocalContext.current
-    val articles = p.articles.filter { !it.released }
+    val articles = p.articles.filter { it.inStock }
     // Pending notices are always open by default: a missed like must never hide behind a tap. The user can hide them.
     val now = System.currentTimeMillis()
     val urgent = incidents.any { it.level == "grave" && now - it.at < 3 * 3_600_000L }

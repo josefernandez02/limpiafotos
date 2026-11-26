@@ -13,19 +13,48 @@ data class Lot(
     val createdAt: Long,
 )
 
-/** One sold article. [cost] is null when unknown. */
+/** Where a sale stands. Only [COMPLETED] is final: the money is in. */
+enum class SaleStatus(val label: String) { PENDING("En curso"), COMPLETED("Completada"), CANCELLED("Cancelada") }
+
+/**
+ * One sold article. [cost] is null when unknown. Sales saved by earlier versions
+ * have none of the later fields: they were final the moment they were recorded.
+ */
 @Serializable
 data class Sale(
+    /** Article number, or -1 while it is not known which article it was. */
     val number: Int,
     val deviceId: String,
     val price: Long,
     val cost: Long?,
     val lotId: String?,
     val soldAt: Long,
-    /** When the article was created, to know how long it took to sell. */
+    /**
+     * When the article was created: with [number] it says which article it was
+     * (numbers are reused), and how long it took to sell. Null = not linked.
+     */
     val listedAt: Long? = null,
     val brand: String = "",
     val type: String = "",
+    val id: String = "",
+    val status: SaleStatus = SaleStatus.COMPLETED,
+    /** Vinted's order number; blank for a sale registered by hand. */
+    val order: String = "",
+    /** Vinted's listing id of the garment. */
+    val itemId: String = "",
+    /** The code read in the listing's description, e.g. SH0012. */
+    val code: String = "",
+    /** Listing title and photo, as the order shows them. */
+    val title: String = "",
+    val photo: String = "",
+    /** Vinted's own words for where the order is. */
+    val detail: String = "",
+    /** Cancelled by the user: an order Vinted still shows in progress does not reopen it. */
+    val byHand: Boolean = false,
+    /** Cancelled here, but Vinted says it finished: the user decides. */
+    val conflict: Boolean = false,
+    /** When it was completed or cancelled. */
+    val closedAt: Long? = null,
 )
 
 object Money {
@@ -54,7 +83,7 @@ object Money {
 /** Lots, sales and their numbers. Pure functions over the parent state. */
 object Ledger {
 
-    data class LotStats(val sold: Int, val quantity: Int, val inStock: Int, val recovered: Long, val profit: Long)
+    data class LotStats(val sold: Int, val quantity: Int, val inStock: Int, val recovered: Long, val profit: Long, val pending: Int = 0)
 
     data class Totals(val count: Int, val revenue: Long, val cost: Long, val profit: Long)
 
@@ -87,32 +116,22 @@ object Ledger {
         if (quantity !in 1..10_000) throw CatalogException("Número de prendas no válido")
     }
 
-    /**
-     * Records the sale of [number] (sold through [deviceId]) and releases it on
-     * every phone. An article already released is not sold twice.
-     */
-    fun sell(s: ParentState, number: Int, deviceId: String, price: Long, cost: Long?, now: Long, account: String = deviceId): ParentState {
-        val a = Catalog.article(s, number) ?: return s
-        val fromChild = deviceId != s.self.id
-        if (a.released) return if (fromChild) Catalog.release(s, number, confirmedBy = deviceId) else s
-        val l = a.listing
-        val brand = if (l == null || l.noBrand) "" else l.brand.trim()
-        val sale = Sale(number, account, price, cost ?: costOf(s, a), a.lotId, now, a.createdAt, brand, l?.type.orEmpty())
-        val withSale = s.copy(sales = s.sales + sale)
-        return if (fromChild) Catalog.release(withSale, number, confirmedBy = deviceId) else Catalog.release(withSale, number)
-    }
-
+    /** A lot's numbers: only finished sales have recovered money. */
     fun stats(s: ParentState, lot: Lot): LotStats {
         val sales = s.sales.filter { it.lotId == lot.id }
-        val recovered = sales.sumOf { it.price }
-        val inStock = s.articles.count { it.lotId == lot.id && !it.released }
-        return LotStats(sales.size, lot.quantity, inStock, recovered, recovered - lot.price)
+        val done = sales.filter { it.status == SaleStatus.COMPLETED }
+        val recovered = done.sumOf { it.price }
+        val inStock = s.articles.count { it.lotId == lot.id && it.inStock }
+        val pending = sales.count { it.status == SaleStatus.PENDING }
+        return LotStats(done.size, lot.quantity, inStock, recovered, recovered - lot.price, pending)
     }
 
+    /** Money of the finished ones among [sales]; the profit only counts those whose cost is known. */
     fun totals(sales: List<Sale>): Totals {
-        val revenue = sales.sumOf { it.price }
-        val cost = sales.sumOf { it.cost ?: 0 }
-        return Totals(sales.size, revenue, cost, revenue - cost)
+        val done = sales.filter { it.status == SaleStatus.COMPLETED }
+        val known = done.filter { it.cost != null }
+        val cost = known.sumOf { it.cost!! }
+        return Totals(done.size, done.sumOf { it.price }, cost, known.sumOf { it.price } - cost)
     }
 
     fun totalsBetween(s: ParentState, from: Long, until: Long): Totals =

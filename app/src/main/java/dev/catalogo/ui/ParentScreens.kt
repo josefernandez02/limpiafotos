@@ -114,9 +114,8 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
     var bulk by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
     val devices = Catalog.devices(p)
-    // Sold or deleted articles stay only until the other phones confirm; they are not shown.
-    val active = p.articles.filter { !it.released }.sortedByDescending { it.number }
-    val pending = p.articles.size - active.size
+    // Articles in a sale in progress are in Ventas, not here.
+    val active = p.articles.filter { it.inStock }.sortedByDescending { it.number }
     val shown = active.filter { a ->
         when (val f = filter) {
             Filter.All -> true
@@ -270,6 +269,11 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
         mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.self.id)
     }
 
+    if (article != null && article.held) {
+        HeldArticle(vm, p, article)
+        return
+    }
+
     Scaffold(
         topBar = {
             Bar("", onBack = { vm.back() }) {
@@ -420,7 +424,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             initialCost = Money.input(cost),
             costHint = Ledger.lot(p, article.lotId)?.let { "Coste por prenda de ${it.name}" },
             onDismiss = { selling = false },
-            onConfirm = { price, c -> vm.sellOnParent(number, price, c, soldBy) },
+            onConfirm = { price, c -> vm.registerSale(number, price, c, soldBy) },
             extra = if (Catalog.devices(p).size > 1) {
                 {
                     Muted("Vendido en")

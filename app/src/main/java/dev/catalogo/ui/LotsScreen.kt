@@ -35,24 +35,22 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.graphics.Color
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Lot
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.ui.text.style.TextOverflow
 
 /**
- * Inventory: the numbers that matter (stock, sales, profit, speed, age),
- * sales per month, per account and per brand, what is getting old, and lots.
+ * Inventory: what is in stock, what it cost and is worth, how old it is, and the
+ * lots. The money that came in and its statistics are in «Ventas».
  */
 @Composable
 fun LotsScreen(vm: MainViewModel, p: ParentState) {
@@ -60,6 +58,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
     var creating by remember { mutableStateOf(false) }
     val now = remember(p) { System.currentTimeMillis() }
     val k = remember(p) { Stats.kpis(p, now) }
+    val covers by vm.articleCovers.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -82,49 +81,42 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "kpis") {
-                // Pairs of equal tiles: same height, one line each, so the grid stays symmetric.
-                val tiles = listOf(
-                    Triple("Beneficio", Money.format(k.profit), k.roi?.let { "ROI $it %" } ?: "sin costes"),
-                    Triple("Ingresos", Money.format(k.revenue), if (k.sold == 1) "1 venta" else "${k.sold} ventas"),
-                    Triple("Vendido", k.sellThrough?.let { "$it %" } ?: "—", "del total"),
-                    Triple("Días en venderse", k.medianDays?.toString() ?: "—", "mediana"),
-                    Triple("En stock", "${k.inStock}", "coste ${Money.format(k.stockCost)}"),
-                    Triple("Precio medio", k.averagePrice?.let(Money::format) ?: "—", "por venta"),
-                    Triple("Por subir", "${k.notUploaded}", "en stock"),
-                    Triple("+60 días", "${k.aged60}", "${k.aged90} de +90 días"),
-                )
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    for (pair in tiles.chunked(2)) {
-                        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            for ((label, value, detail) in pair) Kpi(label, value, detail, Modifier.weight(1f).fillMaxHeight())
-                        }
-                    }
-                }
-            }
-            item(key = "months") {
+            item(key = "stock") {
                 Tile {
-                    Text("Ingresos por mes", style = MaterialTheme.typography.titleMedium)
-                    MonthBars(k.months)
+                    Muted("Valor a la venta")
+                    Text(Money.format(k.stockValue), style = Mono.copy(fontSize = 38.sp), maxLines = 1, softWrap = false)
+                    val unpriced = p.articles.count { it.inStock && it.price == null }
+                    Muted(
+                        listOfNotNull(
+                            if (k.inStock == 1) "1 prenda" else "${k.inStock} prendas",
+                            if (unpriced > 0) "$unpriced sin precio" else null,
+                        ).joinToString(GAP),
+                        maxLines = 1,
+                    )
                 }
             }
-            if (k.accounts.size > 1 || k.sold > 0) {
-                item(key = "accounts") {
-                    Tile {
-                        Text("Por cuenta", style = MaterialTheme.typography.titleMedium)
-                        val max = k.accounts.maxOf { it.revenue }.coerceAtLeast(1)
-                        for (a in k.accounts) {
-                            BarRow(a.label, "${a.sold} vendidos$GAP${Money.format(a.revenue)}$GAP${a.listed} subidos", a.revenue.toFloat() / max)
-                        }
-                    }
-                }
+            item(key = "kpis") {
+                KpiGrid(
+                    listOf(
+                        Triple("Invertido", Money.format(k.stockCost), "coste en stock"),
+                        Triple("Por subir", "${k.notUploaded}", "en stock"),
+                        Triple("Favoritos", "${k.favourites}", "en tus anuncios"),
+                        Triple("En camino", "${k.pending}", Money.format(k.pendingRevenue)),
+                    ),
+                )
             }
-            if (k.brands.isNotEmpty()) {
-                item(key = "brands") {
+            if (k.inStock > 0) {
+                item(key = "age") {
                     Tile {
-                        Text("Marcas más vendidas", style = MaterialTheme.typography.titleMedium)
-                        val max = k.brands.first().second.coerceAtLeast(1)
-                        for ((brand, n) in k.brands.take(5)) BarRow(brand, if (n == 1) "1 venta" else "$n ventas", n.toFloat() / max)
+                        Text("Antigüedad del stock", style = MaterialTheme.typography.titleMedium)
+                        SplitBar(
+                            listOf(
+                                Triple("Hasta 30 días", k.inStock - k.aged30, Color(0xFF6CC48A)),
+                                Triple("De 31 a 60 días", k.aged30 - k.aged60, Color(0xFF7FA7E8)),
+                                Triple("De 61 a 90 días", k.aged60 - k.aged90, Color(0xFFE8B45C)),
+                                Triple("Más de 90 días", k.aged90, Color(0xFFE5484D)),
+                            ),
+                        )
                     }
                 }
             }
@@ -134,16 +126,16 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                     Tile {
                         Text("Más tiempo en stock", style = MaterialTheme.typography.titleMedium)
                         for ((a, days) in oldest) {
-                            val l = a.listing
                             Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.go(Screen.Article(a.number)) }
-                                    .padding(vertical = 8.dp),
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { vm.go(Screen.Article(a.number)) }
+                                    .padding(vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
+                                Cover(covers[a.number], size = 48.dp)
                                 Text(Sku.number(a.number, p.digits), style = Mono.copy(fontSize = 15.sp))
                                 Text(
-                                    listOfNotNull(l?.brand?.takeIf { it.isNotBlank() }, l?.model?.takeIf { it.isNotBlank() }).joinToString(" ").ifBlank { "—" },
+                                    articleName(a),
                                     style = MaterialTheme.typography.bodyMedium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
@@ -167,7 +159,14 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                         left = { Text(lot.name, style = MaterialTheme.typography.titleMedium) },
                         right = { Pill(if (st.profit >= 0) "+${Money.format(st.profit)}" else Money.format(st.profit), strong = st.profit >= 0) },
                     )
-                    Muted("${st.sold}/${lot.quantity} vendidas$GAP${st.inStock} en stock$GAP${Money.format(Ledger.unitCost(lot))} por prenda")
+                    Muted(
+                        listOfNotNull(
+                            "${st.sold}/${lot.quantity} vendidas",
+                            if (st.pending > 0) "${st.pending} en curso" else null,
+                            "${st.inStock} en stock",
+                            "${Money.format(Ledger.unitCost(lot))} por prenda",
+                        ).joinToString(GAP),
+                    )
                     LinearProgressIndicator(
                         progress = { progress },
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -185,62 +184,6 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
 
     if (creating) LotDialog(vm, null) { creating = false }
     editing?.let { lot -> LotDialog(vm, lot) { editing = null } }
-}
-
-@Composable
-private fun Kpi(label: String, value: String, detail: String, modifier: Modifier = Modifier) {
-    Tile(modifier) {
-        Muted(label, maxLines = 1)
-        Text(value, style = Mono.copy(fontSize = 22.sp), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-        Muted(detail, maxLines = 1)
-    }
-}
-
-/** A labelled horizontal bar: one value per row, one colour. */
-@Composable
-private fun BarRow(label: String, detail: String, fraction: Float) {
-    Column(Modifier.padding(top = 8.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Muted(detail, maxLines = 1)
-        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
-            Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).fillMaxHeight().clip(RoundedCornerShape(3.dp)).background(MaterialTheme.colorScheme.primary))
-        }
-    }
-}
-
-/**
- * Revenue of the last months as thin bars on a shared baseline. The latest
- * month is labelled; tapping a bar shows its numbers.
- */
-@Composable
-private fun MonthBars(months: List<Stats.Month>) {
-    var picked by remember(months) { mutableStateOf(months.lastIndex) }
-    val max = months.maxOfOrNull { it.revenue }?.coerceAtLeast(1) ?: 1
-    val names = listOf("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-    months.getOrNull(picked)?.let { m ->
-        Muted("${names[m.month.monthValue - 1]} ${m.month.year}: ${m.sold} ventas$GAP${Money.format(m.revenue)}${GAP}beneficio ${Money.format(m.profit)}")
-    }
-    Row(
-        Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        months.forEachIndexed { i, m ->
-            Column(
-                Modifier.weight(1f).fillMaxHeight().clickable { picked = i },
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Bottom,
-            ) {
-                val f = m.revenue.toFloat() / max
-                Box(
-                    Modifier.fillMaxWidth(0.55f).fillMaxHeight(0.82f * f.coerceAtLeast(0.02f))
-                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
-                        .background(if (i == picked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary),
-                )
-                Text(names[m.month.monthValue - 1], style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 4.dp))
-            }
-        }
-    }
 }
 
 @Composable

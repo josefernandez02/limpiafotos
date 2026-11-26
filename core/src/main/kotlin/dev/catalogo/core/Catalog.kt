@@ -54,7 +54,7 @@ object Catalog {
      * «subido» from their own phones.
      */
     fun stage(s: ParentState, article: Article, device: Device): Stage {
-        if (article.vinted[device.id]?.status == "sold") return Stage.SOLD
+        if (article.held || article.vinted[device.id]?.status == "sold") return Stage.SOLD
         val desk = article.desk.takeIf { device.id == s.self.id }
         return when {
             desk?.status == "jugado" -> Stage.PLAYED
@@ -88,7 +88,7 @@ object Catalog {
      */
     fun relist(s: ParentState, number: Int): ParentState {
         val a = article(s, number) ?: return s
-        if (a.released) return s
+        if (!a.inStock) return s
         val me = s.self
         // What it was published with is what the AI wrote (a draft is never sent without it); without AI data there is nothing to avoid.
         val avoid = a.relist ?: Relist(
@@ -121,7 +121,7 @@ object Catalog {
     /** Marks whether [deviceId]'s account already has [number] published on Vinted (and so is one of its accounts). */
     fun setUploaded(s: ParentState, number: Int, deviceId: String, uploaded: Boolean): ParentState {
         val a = article(s, number) ?: return s
-        if (a.released || device(s, deviceId) == null) return s
+        if (!a.inStock || device(s, deviceId) == null) return s
         return replace(
             s,
             a.copy(
@@ -134,7 +134,7 @@ object Catalog {
     /** Accounts [number] will be published in. Unknown devices are ignored. */
     fun setAccounts(s: ParentState, number: Int, accounts: Set<String>): ParentState {
         val a = article(s, number) ?: return s
-        if (a.released) return s
+        if (!a.inStock) return s
         val known = devices(s).map { it.id }.toSet()
         val chosen = accounts.filter { it in known }.toSet()
         return replace(s, a.copy(accounts = chosen, uploaded = a.uploaded.filter { it in chosen }.toSet()))
@@ -191,6 +191,16 @@ object Catalog {
         val done = setOfNotNull(confirmedBy)
         val pending = if (a.released) a.pendingRelease - done else s.children.map { it.id }.toSet() - done
         return settle(s, a.copy(released = true, pendingRelease = pending, delivered = emptyMap()))
+    }
+
+    /**
+     * Removes an article added by mistake, without a sale: its number is free at
+     * once (other accounts have no phone of their own left to confirm anything).
+     */
+    fun delete(s: ParentState, number: Int): ParentState {
+        val a = article(s, number) ?: return s
+        if (a.held) throw CatalogException("Tiene una venta en curso: anúlala primero")
+        return s.copy(articles = s.articles.filter { it.number != number })
     }
 
     fun confirmRelease(s: ParentState, number: Int, childId: String): ParentState {

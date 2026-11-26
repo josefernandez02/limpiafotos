@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -19,18 +20,22 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.ParentState
-import dev.catalogo.core.Sku
+import dev.catalogo.core.SalesSync
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONObject
@@ -50,67 +55,100 @@ private class Bridge {
     }
 }
 
+/** Between two requests to Vinted: asking quickly gets «too many requests». */
+private const val PAUSE_MS = 1_300L
+
+private fun isVinted(host: String) = host == "vinted.es" || host.endsWith(".vinted.es")
+
 /**
  * Vinted's own web page inside the app. It is visible so any login or check
- * Vinted asks for can be done by hand; the wardrobes are then read with the
- * same request the profile page makes, nothing else.
+ * Vinted asks for can be done by hand; the sales are then read with the same
+ * requests Vinted's pages make, nothing else. With [auto] the synchronisation
+ * starts as soon as the page is ready.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun VintedScreen(vm: MainViewModel, p: ParentState) {
+fun VintedScreen(vm: MainViewModel, p: ParentState, auto: Boolean = false) {
     val check by vm.vinted.collectAsStateWithLifecycle()
     var web by remember { mutableStateOf<WebView?>(null) }
     var ready by remember { mutableStateOf(false) }
     val bridge = remember { Bridge() }
 
+    var started by rememberSaveable { mutableStateOf(false) }
+    val context = LocalContext.current
+    // Looks up what one order was; see the file itself.
+    val orderScript = remember { context.assets.open("vinted_order.js").bufferedReader().use { it.readText() } }
+
     DisposableEffect(Unit) {
         onDispose {
+            vm.leaveVinted()
             bridge.waiting.values.forEach { it.complete(0 to "") }
             web?.destroy()
-            vm.clearVinted()
+            web = null
         }
     }
 
-    suspend fun fetch(path: String): Pair<Int, String> {
+    /** Runs [call] (an expression giving a promise of [status, body]) in the Vinted page. */
+    suspend fun ask(call: String, timeout: Long): Pair<Int, String> {
         val view = web ?: return 0 to ""
         val id = UUID.randomUUID().toString()
         val answer = CompletableDeferred<Pair<Int, String>>()
         bridge.waiting[id] = answer
-        val js = "fetch(${JSONObject.quote(path)},{credentials:'include',headers:{'Accept':'application/json'}})" +
-            ".then(r=>r.text().then(t=>CatalogoBridge.done('$id',r.status,t)))" +
-            ".catch(e=>CatalogoBridge.done('$id',0,String(e)))"
+        val js = "$call.then(a=>CatalogoBridge.done('$id',a[0],a[1])).catch(e=>CatalogoBridge.done('$id',0,String(e)))"
         withContext(Dispatchers.Main) {
             val host = runCatching { java.net.URI(view.url ?: "").host.orEmpty() }.getOrDefault("")
-            if (host.endsWith("vinted.es")) view.evaluateJavascript(js, null) else answer.complete(0 to "")
+            if (isVinted(host)) view.evaluateJavascript(js, null) else answer.complete(0 to "")
         }
-        return withTimeoutOrNull(30_000) { answer.await() } ?: (0 to "").also { bridge.waiting.remove(id) }
+        return withTimeoutOrNull(timeout) { answer.await() } ?: (0 to "").also { bridge.waiting.remove(id) }
+    }
+
+    val page = remember {
+        object : SalesSync.Page {
+            override suspend fun get(path: String) = ask(
+                "fetch(${JSONObject.quote(path)},{credentials:'include',headers:{'Accept':'application/json'}})" +
+                    ".then(r=>r.text().then(t=>[r.status,t]))",
+                30_000,
+            )
+
+            override suspend fun deal(order: String): Pair<Int, String> {
+                // The number goes into the script: digits only.
+                if (order.isEmpty() || !order.all(Char::isDigit)) return 0 to ""
+                return ask("(function(){$orderScript\nreturn catalogoOrder('$order');})()", 60_000)
+            }
+
+            override suspend fun pause() = delay(PAUSE_MS)
+        }
+    }
+
+    LaunchedEffect(ready) {
+        if (auto && ready && !started) {
+            started = true
+            vm.syncSales(page)
+        }
     }
 
     Scaffold(
-        topBar = { Bar("Vinted", onBack = { vm.back() }) },
+        topBar = { Bar("Ventas de Vinted", onBack = { vm.back() }) },
         bottomBar = {
             BottomActions {
                 val c = check
                 if (c != null) {
                     Column(
-                        Modifier.fillMaxWidth().padding(bottom = 4.dp).verticalScroll(rememberScrollState()),
+                        Modifier.fillMaxWidth().heightIn(max = 220.dp).padding(bottom = 4.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         for (line in c.lines) Text(line, style = MaterialTheme.typography.bodyMedium)
-                        if (c.sold.isNotEmpty()) {
-                            Text(
-                                "Vendidos en Vinted: " + c.sold.joinToString(", ") { Sku.number(it, p.digits) },
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        }
                     }
                     if (c.running) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 BigButton(
-                    if (ready) "Comprobar cuentas" else "Cargando Vinted…",
+                    when {
+                        !ready -> "Cargando Vinted…"
+                        check?.running == true -> "Sincronizando…"
+                        else -> "Sincronizar ventas"
+                    },
                     enabled = ready && check?.running != true,
-                    onClick = { vm.checkVinted { path -> fetch(path) } },
+                    onClick = { vm.syncSales(page) },
                 )
             }
         },
@@ -132,7 +170,7 @@ fun VintedScreen(vm: MainViewModel, p: ParentState) {
                         }
 
                         override fun onPageFinished(view: WebView, url: String) {
-                            ready = runCatching { java.net.URI(url).host.orEmpty().endsWith("vinted.es") }.getOrDefault(false)
+                            ready = isVinted(runCatching { java.net.URI(url).host.orEmpty() }.getOrDefault(""))
                         }
                     }
                     loadUrl(HOME)

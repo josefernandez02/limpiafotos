@@ -75,7 +75,7 @@ private fun App(vm: MainViewModel) {
         vm.clearMessage()
     }
     val sessionOpen = state.parent?.session != null && stack.last() != Screen.Review
-    val onSecondaryTab = stack.size == 1 && (stack.last() == Screen.Lots|| stack.last() == Screen.Status)
+    val onSecondaryTab = stack.size == 1 && stack.last() in setOf(Screen.Lots, Screen.Status, Screen.Sales)
     BackHandler(enabled = (stack.size > 1 || onSecondaryTab) && !sessionOpen) { vm.back() }
 
     Box(Modifier.fillMaxSize()) {
@@ -106,7 +106,9 @@ private fun App(vm: MainViewModel) {
                 parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
                 parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
                 parent != null && top is Screen.Photos -> PhotosScreen(vm, parent, top.number, top.deviceId)
-                parent != null && top == Screen.Vinted -> VintedScreen(vm, parent)
+                parent != null && top is Screen.Vinted -> VintedScreen(vm, parent, top.auto)
+                parent != null && top == Screen.Sales -> SalesScreen(vm, parent)
+                parent != null && top is Screen.Sale -> SaleScreen(vm, parent, top.id)
                 parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
                 parent != null && top == Screen.Status -> StatusScreen(vm, parent)
                 else -> ParentHome(vm, parent)
