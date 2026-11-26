@@ -72,7 +72,6 @@ class Desk(private val resolver: ContentResolver) {
     )
 
     /** A game the PC can play, and whether its switch is on. [id] is the PC's own name for it. */
-    data class Game(val id: String, val title: String, val origin: String, val on: Boolean)
 
     data class OfferEntry(val at: Long, val user: String, val title: String, val result: String, val price: Double, val offer: Double, val reason: String)
 
@@ -86,14 +85,14 @@ class Desk(private val resolver: ContentResolver) {
             o.str("usando_pc") == "true", o.str("equipo"))
     }
 
-    fun games(link: PcLink): List<Game> = call(link, "GET", "/juegos", null).games()
+    /** The game groups the PC has switched off, or null if its program is older and does not know them. */
+    fun gamesOff(link: PcLink): Set<String>? = call(link, "GET", "/juegos", null).off()
 
-    fun setGame(link: PcLink, id: String, on: Boolean): List<Game> =
-        call(link, "POST", "/juegos", buildJsonObject { put("id", id); put("activo", on) }.toString()).games()
+    fun setGamesOff(link: PcLink, off: Set<String>): Set<String>? =
+        call(link, "POST", "/juegos", buildJsonObject { put("apagados", JsonArray(off.sorted().map(::JsonPrimitive))) }.toString()).off()
 
-    private fun JsonObject.games(): List<Game> = (this["juegos"] as? JsonArray).orEmpty().mapNotNull { e ->
-        (e as? JsonObject)?.let { Game(it.str("id"), it.str("titulo"), it.str("origen"), it.str("activo") == "true") }
-    }
+    private fun JsonObject.off(): Set<String>? =
+        (this["apagados"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull }?.toSet()
 
     fun offers(link: PcLink): Offers = call(link, "GET", "/ofertas", null).offers()
 

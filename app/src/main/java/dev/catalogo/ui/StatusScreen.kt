@@ -301,24 +301,21 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 
 /** One switch per game: what is off is never played, and no article is kept for it. */
 @Composable
-fun GamesPanel(vm: MainViewModel, games: List<dev.catalogo.data.Desk.Game>, online: Boolean) {
+fun GamesPanel(vm: MainViewModel, off: Set<String>) {
+    val groups = listOf(
+        Triple("ava", "Juegos AVA", "Grupo de WhatsApp"),
+        Triple("likes", "Juego de Likes", "Grupo de WhatsApp"),
+        Triple("discord", "Juegos de Discord", "Servidor de Discord"),
+    )
     Tile {
-        Text("Juegos", style = MaterialTheme.typography.titleMedium)
-        Muted(
-            when {
-                games.isNotEmpty() -> "Los apagados no se juegan"
-                online -> "Reinicia el programa del PC para verlos"
-                else -> "Aparecen cuando el PC responda"
-            },
-            Modifier.padding(top = 2.dp), maxLines = 1,
-        )
-        games.forEach { g ->
+        Muted("Si apagas uno, no se juega ninguno de ese grupo", maxLines = 1)
+        groups.forEach { (kind, title, origin) ->
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text(g.title, style = MaterialTheme.typography.bodyLarge)
-                    Muted(g.origin)
+                    Text(title, style = MaterialTheme.typography.bodyLarge)
+                    Muted(origin)
                 }
-                androidx.compose.material3.Switch(checked = g.on, onCheckedChange = { vm.setGame(g.id, it) })
+                androidx.compose.material3.Switch(checked = kind !in off, onCheckedChange = { vm.setGame(kind, it) })
             }
         }
     }

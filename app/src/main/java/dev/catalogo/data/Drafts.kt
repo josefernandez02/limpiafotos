@@ -52,8 +52,6 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     val pc: StateFlow<Pc> = _pc.asStateFlow()
     private val _offers = MutableStateFlow<Desk.Offers?>(null)
     val offers: StateFlow<Desk.Offers?> = _offers.asStateFlow()
-    private val _games = MutableStateFlow<List<Desk.Game>>(emptyList())
-    val games: StateFlow<List<Desk.Game>> = _games.asStateFlow()
     private val _incidents = MutableStateFlow<List<Desk.Incident>>(emptyList())
     val incidents: StateFlow<List<Desk.Incident>> = _incidents.asStateFlow()
 
@@ -343,7 +341,11 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             _pc.value = Pc(status, null, System.currentTimeMillis())
             // An older PC program has no offers: that is not an error.
             runCatching { repo.desk.offers(link) }.onSuccess { _offers.value = it }
-            runCatching { repo.desk.games(link) }.onSuccess { _games.value = it }      // an older PC program has no games list
+            // The phone decides which game groups are played; the PC is told whenever it differs (older programs: nothing).
+            runCatching {
+                val onPc = repo.desk.gamesOff(link)
+                if (onPc != null && onPc != repo.state.gamesOff) repo.desk.setGamesOff(link, repo.state.gamesOff)
+            }
             runCatching { checkIncidents(link, status.incidents, status.lastIncident) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
                 logSent = System.currentTimeMillis()
@@ -537,19 +539,12 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         return status
     }
 
-    /** Turns a game on or off; the switch answers at once and the PC's list replaces it. */
-    suspend fun setGame(id: String, on: Boolean) {
-        val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val before = _games.value
-        _games.value = before.map { if (it.id == id) it.copy(on = on) else it }
-        try {
-            _games.value = withContext(Dispatchers.IO) { repo.desk.setGame(link, id, on) }
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            _games.value = before
-            throw e
-        }
+    /** Turns a game group on or off. It is saved here at once; the PC hears it now or on its next check. */
+    suspend fun setGame(kind: String, on: Boolean) {
+        val off = if (on) repo.state.gamesOff - kind else repo.state.gamesOff + kind
+        repo.setGamesOff(off)
+        val link = repo.state.pc ?: return
+        runCatching { withContext(Dispatchers.IO) { repo.desk.setGamesOff(link, off) } }
     }
 
     suspend fun offersControl(action: String): Desk.Offers {

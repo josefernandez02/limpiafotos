@@ -83,6 +83,10 @@ class Repo(context: Context) {
         }
     }
 
+    suspend fun setGamesOff(off: Set<String>) {
+        store.update { it.copy(gamesOff = off) }
+    }
+
     suspend fun setPc(link: dev.catalogo.core.PcLink?) {
         store.update { it.copy(pc = link) }
     }
