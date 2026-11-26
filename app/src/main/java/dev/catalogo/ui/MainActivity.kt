@@ -106,7 +106,6 @@ private fun App(vm: MainViewModel) {
                 parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
                 parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
                 parent != null && top is Screen.Photos -> PhotosScreen(vm, parent, top.number, top.deviceId)
-                parent != null && top is Screen.Vinted -> VintedScreen(vm, parent, top.auto)
                 parent != null && top == Screen.Sales -> SalesScreen(vm, parent)
                 parent != null && top is Screen.Sale -> SaleScreen(vm, parent, top.id)
                 parent != null && top == Screen.Lots -> LotsScreen(vm, parent)

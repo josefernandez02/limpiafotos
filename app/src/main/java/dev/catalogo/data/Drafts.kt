@@ -476,7 +476,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 withContext(Dispatchers.IO) { repo.desk.setState(link, d.ref, d.pending, d.mode, d.url, p.self.account) }
             }.onSuccess {
                 repo.heard(d.ref)
-                AppLog.i("cola", "${d.ref} PC enterado: vendido")
+                AppLog.i("cola", "${d.ref} PC enterado: fuera")
             }.onFailure { AppLog.w("cola", "${d.ref} pendiente de avisar al PC: ${it.message}") }
         }
     }

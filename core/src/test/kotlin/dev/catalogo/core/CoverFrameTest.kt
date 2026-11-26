@@ -424,7 +424,11 @@ class CoverFrameTest {
         val m = trousers(120, 160, top = 22, bottom = 138)
         val p = assertNotNull(CoverFrame.place(m, 3000, 4000))
         assertTrue(!p.tight, "must not give up and keep the photo as it is")
-        assertTrue(p.scale < CoverFrame.coverScale(3000, 4000, 0f) - 0.02f, "the photo is moved away a little: scale ${p.scale}")
+        val cover = CoverFrame.coverScale(3000, 4000, 0f)
+        val safeSize = CoverFrame.SAFE_H * CoverFrame.FRAME_H * 3000 / ((138 - 22 + 1) * 25f)   // the scale that gives the safe height
+        assertTrue(p.scale < cover - 0.01f, "the photo is moved away a little: scale ${p.scale}")
+        // a centred garment may grow up to 2 % over that size so the strip to fill stays unnoticeable
+        assertTrue(p.scale <= safeSize * 1.021f, "scale ${p.scale}, safe size $safeSize")
         assertTrue(CoverFrame.fillDepth(p, 3000, 4000) <= 0.056f, "the strip to fill is thin: ${CoverFrame.fillDepth(p, 3000, 4000)}")
         // the garment's bottom stays above the label band of the 4:5 preview (and the top below the crop of the 2:3 one)
         val b = box(m)

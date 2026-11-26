@@ -30,6 +30,24 @@ private fun ParentState.article(n: Int) = Catalog.article(this, n)
 private fun ParentState.only() = sales.single()
 
 class SaleStatesTest {
+    @Test
+    fun `deleting an article the PC has tells the PC to leave it`() {
+        for (status in listOf("publicado", "borrador", "pendiente", "enviando", "error")) {
+            val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = status))
+            val job = Catalog.delete(s, 0).retired.single()
+            assertEquals("SH0000-x" to "fuera", job.ref to job.pending, status)
+        }
+    }
+
+    @Test
+    fun `deleting an article that never left the phone says nothing to the PC`() {
+        assertTrue(Catalog.delete(shop(), 1).retired.isEmpty())
+        for (status in listOf(Desk.PREPARING, Desk.REVIEW)) {
+            val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = status))
+            assertTrue(Catalog.delete(s, 0).retired.isEmpty(), status)
+        }
+    }
+
 
     @Test
     fun `a registered sale holds the article and its number`() {
@@ -199,34 +217,48 @@ class VintedSalesTest {
         VintedSales.apply(this, "p", o, d, now)
 
     @Test
-    fun `the order list is read with prices, dates and states`() {
-        val body = """{"my_orders":[
-            {"transaction_id":24000000001,"title":"A","price":{"amount":"16.20","currency_code":"EUR"},"status":"Enviado","date":"2026-11-26T09:36:36Z","photo_url":"https://images1.vinted.net/a.jpg","transaction_user_status":"waiting"},
-            {"transaction_id":24000000002,"title":"B","price":{"amount":"25.0"},"status":"Fin","date":"2026-11-14T06:17:36+01:00","photo_url":null,"transaction_user_status":"completed"},
-            {"transaction_id":24000000003,"title":"C","price":{"amount":"5"},"status":"Cancelado","date":"2026-11-01T00:00:00Z","transaction_user_status":"failed"},
-            {"transaction_id":24000000004,"title":"D","price":{"amount":"7"},"status":"?","date":"2026-11-01T00:00:00Z","transaction_user_status":"needs_action"}],
-            "pagination":{"current_page":1,"total_pages":3}}"""
-        val page = VintedSales.parseList(body)
-        assertEquals(3, page.pages)
-        assertEquals(listOf("24000000001", "24000000002", "24000000003", "24000000004"), page.orders.map { it.id })
-        assertEquals(listOf(1_620L, 2_500L, 500L, 700L), page.orders.map { it.price })
-        assertEquals(listOf(SaleStatus.PENDING, SaleStatus.COMPLETED, SaleStatus.CANCELLED, SaleStatus.PENDING), page.orders.map { it.status },
-            "an unknown state is never taken as final")
-        assertEquals(java.time.Instant.parse("2026-11-26T09:36:36Z").toEpochMilli(), page.orders[0].date)
-        assertEquals("", page.orders[1].photo)
-        assertFailsWith<CatalogException> { VintedSales.parseList("<html>") }
-        assertFailsWith<CatalogException> { VintedSales.parseList("""{"x":1}""") }
+    fun `what the PC read is understood`() {
+        val body = """{"modo":"trabajando","esperando":"el programa del PC está detenido","pendientes":3,"pedidos":[
+            {"id":"u1","titulo":"A","precio":1620,"estado":"en_curso","detalle":"Enviado","fecha":2000,"items":[{"id":"900","codigo":"SH0000"}]},
+            {"id":"u2","titulo":"B","precio":2500,"estado":"completada","detalle":"Pedido finalizado","fecha":1000,"items":[]},
+            {"id":"u3","titulo":"C","precio":500,"estado":"cancelada","detalle":"Cancelado","fecha":3000,"items":[]},
+            {"id":"u4","titulo":"D","precio":700,"estado":"algo nuevo","detalle":"?","fecha":4000,"items":[{"id":"7","codigo":""}]}]}"""
+        val r = VintedSales.parsePc(body)
+        assertTrue(r.working)
+        assertEquals("el programa del PC está detenido", r.waiting)
+        assertEquals(3, r.pending)
+        assertEquals(listOf("u2", "u1", "u3", "u4"), r.orders.map { it.first.id }, "oldest first")
+        assertEquals(listOf(SaleStatus.COMPLETED, SaleStatus.PENDING, SaleStatus.CANCELLED, SaleStatus.PENDING),
+            r.orders.map { it.first.status }, "an unknown state is never taken as final")
+        assertEquals(VintedSales.Order("u1", "A", 1_620, SaleStatus.PENDING, "Enviado", 2_000, ""), r.orders[1].first)
+        assertNull(r.orders[0].second, "no garment was looked up")
+        assertEquals(VintedSales.Deal("", 2_000, listOf(VintedSales.Item("900", null, "", "#SH0000"))), r.orders[1].second)
+        assertEquals("", r.orders[3].second!!.items.single().description)
+        assertFailsWith<CatalogException> { VintedSales.parsePc("<html>") }
+        assertFailsWith<CatalogException> { VintedSales.parsePc("""{"error":"no existe"}""") }
     }
 
     @Test
-    fun `the order detail is read`() {
-        val d = VintedSales.parseDeal(
-            """{"seller_id":111,"sold_at":"2026-11-26T10:36:39+01:00","items":[{"id":900,"title":"A","price":"16.2","description":"x #SH0000"}]}""",
-        )
-        assertEquals("111", d.sellerId)
-        assertEquals(java.time.Instant.parse("2026-11-26T09:36:39Z").toEpochMilli(), d.soldAt)
-        assertEquals(listOf(VintedSales.Item("900", 1_620, "A", "x #SH0000")), d.items)
-        assertFailsWith<CatalogException> { VintedSales.parseDeal("""{"items":[]}""") }
+    fun `bringing in the same reading twice changes nothing`() {
+        val body = """{"modo":"parado","esperando":"","pendientes":0,"pedidos":[
+            {"id":"u1","titulo":"A","precio":1620,"estado":"en_curso","detalle":"Enviado","fecha":${29 * DAY},"items":[{"id":"900","codigo":"SH0000"}]}]}"""
+        val orders = VintedSales.parsePc(body).orders
+        val (once, counts) = VintedSales.applyAll(shop(), "p", orders, 40 * DAY)
+        assertEquals(mapOf(VintedSales.Kind.NEW_PENDING to 1), counts)
+        assertTrue(once.article(0)!!.held)
+        val (twice, again) = VintedSales.applyAll(once, "p", orders, 50 * DAY)
+        assertEquals(once, twice)
+        assertTrue(again.isEmpty())
+    }
+
+    @Test
+    fun `what to ask the PC for`() {
+        val s = shop()
+        assertEquals(listOf("SH", "SA"), VintedSales.prefixes(s))
+        assertEquals(10 * DAY, VintedSales.since(s, 99 * DAY))
+        assertEquals(99 * DAY, VintedSales.since(ParentState(self = samsung), 99 * DAY), "nothing in stock: only new sales matter")
+        val held = Sales.register(s, 0, "m1", "p", 1_700, null, 28 * DAY)
+        assertEquals(10 * DAY, VintedSales.since(held, 99 * DAY), "a sale in progress still counts")
     }
 
     @Test
@@ -409,21 +441,7 @@ class VintedSalesTest {
     }
 
     @Test
-    fun `Vinted is only asked about orders that can move something`() {
-        val s = shop()
-        assertTrue(VintedSales.needsLookup(s, order("1")))
-        assertFalse(VintedSales.needsLookup(s, order("2", SaleStatus.COMPLETED, date = 2 * DAY)), "older than everything in stock")
-        assertFalse(VintedSales.needsLookup(s, order("3", SaleStatus.CANCELLED)))
-        assertFalse(VintedSales.needsLookup(s.sync(order("1"), one("SH0000")).first, order("1")), "already known")
-        assertFalse(VintedSales.needsLookup(ParentState(self = samsung), order("1")))
-        val manual = Sales.register(s, 0, "m1", "p", 1_700, null, 28 * DAY)
-        assertTrue(VintedSales.needsLookup(manual, order("3", SaleStatus.CANCELLED)))
-        assertFalse(VintedSales.needsLookup(manual.copy(articles = emptyList()), order("4", SaleStatus.COMPLETED, date = -5 * DAY)),
-            "long before that sale was registered")
-    }
-
-    @Test
-    fun `history is recorded without asking`() {
+    fun `a sale without a looked up garment is recorded as it comes`() {
         val (s, kind) = shop().sync(order("9", SaleStatus.COMPLETED, date = 2 * DAY))
         assertEquals(VintedSales.Kind.NEW_COMPLETED, kind)
         assertEquals("Vaqueros", s.only().title)

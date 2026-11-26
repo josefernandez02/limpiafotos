@@ -4,7 +4,7 @@ App Android para catalogar artículos con fotos sin metadatos, repartidas entre 
 
 - **Principal** (cámara): crea artículos con el primer número libre, hace las fotos con la cámara del sistema y las guarda limpias en el álbum `<prefijo><número>` de cada móvil.
 - **Secundarios**: se vinculan al principal y reciben sus álbumes por conexión directa (Nearby Connections, sin internet), cifrada y autenticada.
-- **Ventas**: se leen de «Mis pedidos › Ventas» de Vinted; el artículo se reconoce por el último hashtag de la descripción (`#SH0012`). Nada del comprador ni del chat sale de la página.
+- **Ventas**: las lee el **PC** en «Mis pedidos › Ventas» (accesibilidad de Windows y ratón humano); el móvil solo las pide y las apunta. El artículo se reconoce por el último hashtag de la descripción (`#SH0012`). La conversación con el comprador no se lee.
   - *En curso*: la prenda sale del stock pero conserva número, datos y fotos; se puede anular (a mano o porque Vinted la cancele).
   - *Completada* (pedido finalizado): definitiva; se borran sus fotos y el número queda libre.
 

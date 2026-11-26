@@ -137,7 +137,8 @@ object Sales {
         )
     }
 
-    private fun free(s: ParentState, a: Article): ParentState {
+    /** The article goes: its number is free and the PC, if it knows the job, is to drop it. */
+    internal fun free(s: ParentState, a: Article): ParentState {
         val job = a.desk?.takeIf { it.status !in ON_PHONE }?.copy(pending = OFF)
         return s.copy(
             articles = s.articles.filter { it.number != a.number },

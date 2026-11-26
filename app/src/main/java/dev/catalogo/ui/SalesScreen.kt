@@ -18,14 +18,17 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -41,7 +44,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Garments
 import dev.catalogo.core.Money
@@ -52,6 +58,7 @@ import dev.catalogo.core.Sales
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.YearMonth
@@ -126,6 +133,19 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
     val inPeriod = remember(p, view.period) { Stats.within(p.sales, view.period, now) }
     val summary = remember(inPeriod) { Stats.summary(inPeriod) }
     val current = remember(p) { Stats.summary(p.sales) }
+    val reading by vm.reading.collectAsStateWithLifecycle()
+    val working = reading?.working == true
+
+    // While the tab is on screen, what the PC reads comes in by itself.
+    val owner = LocalLifecycleOwner.current
+    LaunchedEffect(owner) {
+        owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                vm.refreshSales()
+                delay(if (vm.reading.value?.working == true) 8_000 else 30_000)
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -134,7 +154,10 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
                 else -> "${current.pending} en curso$GAP${current.sold} completadas"
             }
             Header("Ventas", subtitle) {
-                IconButton(onClick = { vm.go(Screen.Vinted(auto = true)) }) { Icon(Icons.Default.Refresh, contentDescription = "Sincronizar con Vinted") }
+                IconButton(onClick = { vm.readSales(!working) }) {
+                    if (working) Icon(Icons.Default.Close, contentDescription = "Parar la lectura de ventas")
+                    else Icon(Icons.Default.Refresh, contentDescription = "Pedir al PC que lea mis ventas")
+                }
                 IconButton(onClick = { vm.go(Screen.Settings) }) { Icon(Icons.Default.Settings, contentDescription = "Ajustes") }
             }
         },
@@ -147,7 +170,8 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Muted("Aún no hay ventas")
-                BigButton("Traer mis ventas de Vinted", onClick = { vm.go(Screen.Vinted(auto = true)) })
+                reading?.let { ReadingCard(it) }
+                BigButton(if (working) "Parar" else "Que el PC lea mis ventas", onClick = { vm.readSales(!working) })
             }
             return@Scaffold
         }
@@ -165,6 +189,7 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            reading?.let { r -> item(key = "reading") { ReadingCard(r) } }
             item(key = "mode") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Choice("Ventas", !view.stats) { vm.showSales(view.copy(stats = false)) }
@@ -206,6 +231,17 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
                 item(key = "month-$month") { MonthTitle(month, Stats.summary(sales)) }
                 items(sales, key = { it.id }) { SaleCard(vm, p, it) }
             }
+        }
+    }
+}
+
+/** What the PC is doing about the sales. */
+@Composable
+private fun ReadingCard(reading: MainViewModel.SalesReading) {
+    Tile {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(reading.text, style = MaterialTheme.typography.bodyMedium)
+            if (reading.working) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
     }
 }

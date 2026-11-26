@@ -114,6 +114,17 @@ class Desk(private val resolver: ContentResolver) {
             })
     }
 
+    /** The sales the PC has read in Vinted, as it sends them (see VintedSales.parsePc). */
+    fun sales(link: PcLink): String = call(link, "GET", "/ventas", null).toString()
+
+    /** "mandar" or "parar". [prefixes]: the article codes to recognise; [since]: older finished orders are not looked into. */
+    fun salesControl(link: PcLink, action: String, prefixes: List<String>, since: Long): String = call(link, "POST", "/ventas",
+        buildJsonObject {
+            put("accion", action)
+            put("prefijos", JsonArray(prefixes.map(::JsonPrimitive)))
+            put("desde", since)
+        }.toString()).toString()
+
     fun incidents(link: PcLink): List<Incident> =
         (call(link, "GET", "/incidencias", null)["incidencias"] as? JsonArray).orEmpty().mapNotNull { e ->
             (e as? JsonObject)?.let {
@@ -232,7 +243,9 @@ class Desk(private val resolver: ContentResolver) {
             return when (code) {
                 in 200..299 -> o
                 401 -> throw CatalogException("El PC no acepta la clave: revísala en Ajustes")
-                404 -> throw CatalogException("El PC no conoce este artículo")
+                404 -> throw CatalogException(
+                    if (path == "/ventas") "El programa del PC es antiguo: ciérralo y vuelve a abrirlo" else "El PC no conoce este artículo",
+                )
                 else -> throw CatalogException("PC: ${o.str("error").ifBlank { "error $code" }}")
             }
         } catch (e: CatalogException) {

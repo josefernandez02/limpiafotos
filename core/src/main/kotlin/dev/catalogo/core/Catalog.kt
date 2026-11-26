@@ -200,7 +200,8 @@ object Catalog {
     fun delete(s: ParentState, number: Int): ParentState {
         val a = article(s, number) ?: return s
         if (a.held) throw CatalogException("Tiene una venta en curso: anúlala primero")
-        return s.copy(articles = s.articles.filter { it.number != number })
+        // Its number becomes free, and the PC, if it has it, must drop it.
+        return Sales.free(s, a)
     }
 
     fun confirmRelease(s: ParentState, number: Int, childId: String): ParentState {

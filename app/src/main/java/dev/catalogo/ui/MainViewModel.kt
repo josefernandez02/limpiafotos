@@ -14,11 +14,12 @@ import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
 import dev.catalogo.core.ParentState
 import dev.catalogo.data.AppLog
-import dev.catalogo.core.SalesSync
+import dev.catalogo.core.VintedSales
 import dev.catalogo.core.VintedSales.Kind
 import dev.catalogo.core.Sales as SalesRules
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import dev.catalogo.core.Device
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Money
@@ -50,8 +51,6 @@ sealed interface Screen {
     data class Template(val deviceId: String) : Screen
     /** Order, cover and crop of [deviceId]'s photos of [number]. */
     data class Photos(val number: Int, val deviceId: String) : Screen
-    /** Reads sales and wardrobes in Vinted; with [auto] it starts as soon as the page is ready. */
-    data class Vinted(val auto: Boolean = false) : Screen
 }
 
 private const val VINTED_PACKAGE = "fr.vinted"
@@ -376,83 +375,76 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         done()
     }
 
-    // ---------- Vinted sales ----------
+    // ---------- Vinted sales: the PC reads them, the phone asks and writes them down ----------
 
-    /** Progress and result of the synchronisation, one line each. */
-    data class VintedCheck(val running: Boolean, val lines: List<String>)
+    /** How the PC's reading goes; null when there is nothing to say. */
+    data class SalesReading(val working: Boolean, val text: String)
 
-    private val _vinted = MutableStateFlow<VintedCheck?>(null)
-    val vinted: StateFlow<VintedCheck?> = _vinted.asStateFlow()
-    private var syncing: kotlinx.coroutines.Job? = null
+    private val _reading = MutableStateFlow<SalesReading?>(null)
+    val reading: StateFlow<SalesReading?> = _reading.asStateFlow()
+    private val readingLock = Mutex()
 
-    /** Brings in the sales of the account signed in to the [page], with requests made by that page. */
-    fun syncSales(page: SalesSync.Page) {
-        if (syncing?.isActive == true) return
-        syncing = viewModelScope.launch {
-            if (repo.state.parent == null) return@launch
-            // Gallery originals of finished sales: one question for all of them at the end.
-            val originals = ArrayList<Uri>()
-            try {
-                val book = object : SalesSync.Book {
-                    override fun state() = repo.catalog()
-                    override suspend fun change(block: (ParentState) -> ParentState) {
-                        // Never cut between deleting photos and saving the state.
-                        withContext(NonCancellable) { originals += repo.changeSales(block) }
-                    }
-                }
-                _vinted.value = VintedCheck(true, listOf("Leyendo tus ventas…"))
-                val lines = try {
-                    val report = SalesSync(page, book) { System.currentTimeMillis() }.run { _vinted.value = VintedCheck(true, listOf(it)) }
-                    AppLog.i("ventas", "leídas ${report.read}, cambios ${report.counts}, quedan ${report.left}, fallos ${report.failed}, parada ${report.stop}")
-                    summary(report)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: CatalogException) {
-                    listOf(e.message.orEmpty())
-                } catch (e: Exception) {
-                    AppLog.w("ventas", "error: ${e.message ?: e.javaClass.simpleName}")
-                    listOf("Error al leer las ventas (${e.message ?: e.javaClass.simpleName})")
-                }
-                _vinted.value = VintedCheck(false, lines)
-            } finally {
-                // Left half way: no half-way progress stays behind.
-                if (!isActive && syncing === coroutineContext[kotlinx.coroutines.Job]) _vinted.value = null
-                askToDelete(originals)
-                app.drafts.kick()
-                refresh()
-                viewModelScope.launch { app.drafts.tellPc() }
-            }
+    /** Asks the PC to read the sales in Vinted, or to stop. */
+    fun readSales(start: Boolean) = run {
+        val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
+        val p = repo.state.parent ?: return@run
+        val since = VintedSales.since(p, System.currentTimeMillis())
+        val answer = withContext(Dispatchers.IO) {
+            repo.desk.salesControl(link, if (start) "mandar" else "parar", VintedSales.prefixes(p), since)
+        }
+        takeSales(VintedSales.parsePc(answer))
+    }
+
+    /** Takes what the PC has read so far. */
+    suspend fun refreshSales() {
+        val link = repo.state.pc ?: return
+        try {
+            takeSales(VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) }))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: CatalogException) {
+            _reading.value = SalesReading(false, e.message.orEmpty())
+        } catch (e: Exception) {
+            AppLog.w("ventas", "error: ${e.message ?: e.javaClass.simpleName}")
+            _reading.value = SalesReading(false, "No se pudieron apuntar las ventas (${e.message ?: e.javaClass.simpleName})")
         }
     }
 
-    private fun summary(r: SalesSync.Report): List<String> {
-        fun n(count: Int, one: String, many: String) = if (count == 0) null else "$count ${if (count == 1) one else many}"
+    private suspend fun takeSales(read: VintedSales.Reading) = readingLock.withLock {
+        _reading.value = when {
+            !read.working -> null
+            read.waiting.isNotBlank() -> SalesReading(true, "PC: ${read.waiting}")
+            read.pending > 0 -> SalesReading(true, "El PC está leyendo tus ventas$GAP quedan ${read.pending}")
+            else -> SalesReading(true, "El PC está leyendo tus ventas…")
+        }
+        val before = repo.state.parent ?: return@withLock
+        val now = System.currentTimeMillis()
+        val (after, counts) = VintedSales.applyAll(before, before.self.id, read.orders, now)
+        if (after == before) return@withLock
+        // Never cut between deleting photos and saving the state.
+        val originals = withContext(NonCancellable) {
+            repo.changeSales { VintedSales.applyAll(it, it.self.id, read.orders, now).first }
+        }
+        AppLog.i("ventas", "del PC ${read.orders.size}, cambios $counts, quedan ${read.pending}")
+        summary(counts)?.let { _message.value = it }
+        askToDelete(originals)
+        app.drafts.kick()
+        refresh()
+        viewModelScope.launch { app.drafts.tellPc() }
+    }
+
+    private fun summary(counts: Map<Kind, Int>): String? {
+        fun n(kind: Kind, one: String, many: String) = counts[kind]?.let { "$it ${if (it == 1) one else many}" }
         val changes = listOfNotNull(
-            n(r.count(Kind.NEW_PENDING), "venta nueva en curso", "ventas nuevas en curso"),
-            n(r.count(Kind.NEW_COMPLETED), "venta nueva completada", "ventas nuevas completadas"),
-            n(r.count(Kind.COMPLETED), "completada", "completadas"),
-            n(r.count(Kind.CANCELLED), "anulada por Vinted", "anuladas por Vinted"),
-            n(r.count(Kind.NEW_CANCELLED), "cancelada antigua", "canceladas antiguas"),
-            n(r.count(Kind.REOPENED), "recuperada", "recuperadas"),
-            n(r.count(Kind.CONFLICT), "para que la revises", "para que las revises"),
+            n(Kind.NEW_PENDING, "venta nueva en curso", "ventas nuevas en curso"),
+            n(Kind.NEW_COMPLETED, "venta completada nueva", "ventas completadas nuevas"),
+            n(Kind.COMPLETED, "completada", "completadas"),
+            n(Kind.CANCELLED, "anulada por Vinted", "anuladas por Vinted"),
+            n(Kind.NEW_CANCELLED, "cancelada antigua", "canceladas antiguas"),
+            n(Kind.REOPENED, "recuperada", "recuperadas"),
+            n(Kind.CONFLICT, "para que la revises", "para que las revises"),
         )
-        val lines = ArrayList<String>()
-        lines += "Ventas de ${r.account}: ${if (changes.isEmpty()) "sin novedades" else changes.joinToString(", ")}"
-        if (r.left > 0) {
-            val why = when (r.stop) {
-                SalesSync.Stop.LIMIT -> "Vinted pide ir más despacio: vuelve a pulsar en unos minutos"
-                SalesSync.Stop.LOGIN -> "inicia sesión arriba y vuelve a pulsar"
-                else -> "vuelve a pulsar para reintentarlo"
-            }
-            lines += "Faltan ${r.left} por revisar: $why"
-        }
-        return lines
-    }
-
-    /** Leaving the screen ends the synchronisation: its requests need the page. */
-    fun leaveVinted() {
-        syncing?.cancel()
-        _vinted.value = null
+        return if (changes.isEmpty()) null else "Ventas: ${changes.joinToString(", ")}"
     }
 
     // ---------- sales ----------
@@ -472,8 +464,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun acceptSale(id: String) = sale("Venta completada") { SalesRules.accept(it, id, System.currentTimeMillis()) }
     fun assignSale(id: String, number: Int) = sale("Artículo asignado") { SalesRules.assign(it, id, number) }
 
-    /** A sale picture: the one kept from the article, or Vinted's, downloaded once. */
-    suspend fun saleImage(sale: dev.catalogo.core.Sale): java.io.File? = repo.saleImages.get(sale.id, sale.photo)
+    /** The picture kept from a sold article, if any. */
+    suspend fun saleImage(sale: dev.catalogo.core.Sale): java.io.File? = repo.saleImages.get(sale.id)
 
     private fun sale(done: String, change: (ParentState) -> ParentState) = run {
         askToDelete(repo.changeSales(change))
@@ -611,6 +603,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteArticle(number: Int) = run {
         askToDelete(repo.deleteArticle(number))
         back()
+        app.drafts.tellPc()
     }
 
     // ---------- settings ----------
