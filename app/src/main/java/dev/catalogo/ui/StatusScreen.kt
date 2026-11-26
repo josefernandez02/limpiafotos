@@ -81,7 +81,7 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "pc") { PcPanel(vm, pc) }
-            if (games.isNotEmpty()) item(key = "juegos") { GamesPanel(vm, games) }
+            item(key = "juegos") { GamesPanel(vm, games, online = pc.error == null && pc.status != null) }
             offers?.let { o -> item(key = "ofertas") { OffersPanel(vm, o) } }
             pc.status?.let { s -> if (s.health != null || s.today.isNotEmpty()) item(key = "salud") { HealthTile(s.health, s.today, incidents) } }
             if (incidents.isNotEmpty()) {
@@ -227,11 +227,11 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
             Text(headline, style = MaterialTheme.typography.titleMedium, color = tone, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         val sub = when {
-            pc.error != null -> "Comprueba que está encendido y con el programa abierto"
+            pc.error != null -> "Comprueba que el PC esté encendido"
             waiting -> "Sigue solo cuando dejes de usarlo"
             else -> status?.next?.takeIf { it.isNotBlank() }
         }
-        if (sub != null) Muted(sub, Modifier.padding(top = 2.dp), maxLines = 2)
+        if (sub != null) Muted(sub, Modifier.padding(top = 2.dp), maxLines = 1)
         val queue = status?.queue?.filterValues { it > 0 }?.takeIf { it.isNotEmpty() }?.let { q ->
             val names = mapOf("pendiente" to "en cola", "en_curso" to "creando", "borrador" to "borradores",
                 "publicado" to "sin jugar", "revisar" to "a revisar", "error" to "con error")
@@ -239,7 +239,7 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
         }
         val checked = if (pc.at > 0) "a las " + SimpleDateFormat("HH:mm", Locale.ROOT).format(Date(pc.at)) else null
         val foot = listOfNotNull(queue?.takeIf { it.isNotBlank() }, checked?.let { "visto $it" }).joinToString(GAP)
-        if (foot.isNotBlank()) Muted(foot, Modifier.padding(top = 4.dp), maxLines = 2)
+        if (foot.isNotBlank()) Muted(foot, Modifier.padding(top = 4.dp), maxLines = 1)
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OutlinedButton(
                 onClick = { asking = true; vm.refreshPc() },
@@ -303,10 +303,17 @@ private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
 
 /** One switch per game: what is off is never played, and no article is kept for it. */
 @Composable
-private fun GamesPanel(vm: MainViewModel, games: List<dev.catalogo.data.Desk.Game>) {
+private fun GamesPanel(vm: MainViewModel, games: List<dev.catalogo.data.Desk.Game>, online: Boolean) {
     Tile {
         Text("Juegos", style = MaterialTheme.typography.titleMedium)
-        Muted("Los apagados no se juegan nunca. Cada artículo va al siguiente juego encendido.", Modifier.padding(top = 2.dp), maxLines = 3)
+        Muted(
+            when {
+                games.isNotEmpty() -> "Los apagados no se juegan"
+                online -> "Reinicia el programa del PC para verlos"
+                else -> "Aparecen cuando el PC responda"
+            },
+            Modifier.padding(top = 2.dp), maxLines = 1,
+        )
         games.forEach { g ->
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
