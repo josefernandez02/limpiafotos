@@ -48,7 +48,7 @@ import dev.catalogo.core.Sales
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
 
-private enum class Ask { CANCEL, COMPLETE, ACCEPT }
+private enum class Ask { CANCEL, COMPLETE, ACCEPT, RELEASE, UNPAY }
 
 /** One sale: what it was, where it is, and what can still be done with it. */
 @Composable
@@ -81,7 +81,7 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
             Text(saleTitle(sale), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
 
             Tile {
-                val (title, text) = explain(sale, article)
+                val (title, text) = explain(p, sale, article)
                 Text(title, style = MaterialTheme.typography.titleSmall, color = saleTone(sale).first)
                 Muted(text)
                 if (sale.detail.isNotBlank()) Muted("En Vinted: ${sale.detail}", Modifier.padding(top = 4.dp))
@@ -122,10 +122,13 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
     when (ask) {
         Ask.CANCEL -> Confirm(
             title = "Anular la venta",
-            text = if (number != null) {
-                "La prenda $number vuelve a estar en stock con sus fotos, sus datos y su número, como antes de venderse. " +
+            text = when {
+                number != null -> "La prenda $number vuelve a estar en stock con sus fotos, sus datos y su número, como antes de venderse. " +
                     "Úsalo si se cancela, se pierde el paquete o te la devuelven."
-            } else "La venta queda anulada y no cuenta en ningún número.",
+                sale.numberFreed -> "La venta queda anulada y no cuenta. Su número ya se liberó, así que la prenda no vuelve sola: " +
+                    "si la sigues teniendo, dala de alta otra vez."
+                else -> "La venta queda anulada y no cuenta en ningún número."
+            },
             confirm = "Anular venta",
             destructive = true,
             onConfirm = { vm.cancelSale(id) },
@@ -133,11 +136,28 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
         )
         Ask.COMPLETE, Ask.ACCEPT -> Confirm(
             title = "Dar por completada",
-            text = "Es definitivo: el dinero cuenta como cobrado" +
+            text = "El dinero cuenta como cobrado" +
                 (if (number != null) ", se borran las fotos de la prenda $number y su número queda libre" else "") +
-                ". Después no se puede anular.",
+                if (sale.order.isBlank()) ". Podrás volverla a pendiente, pero la prenda no vuelve al inventario."
+                else ". Es definitivo: después no se puede anular.",
             confirm = "Completar",
             onConfirm = { if (ask == Ask.ACCEPT) vm.acceptSale(id) else vm.completeSale(id) },
+            onDismiss = { ask = null },
+        )
+        Ask.RELEASE -> Confirm(
+            title = "Liberar el número",
+            text = "Se borran las fotos de la prenda $number y su número queda libre para otra. La venta sigue en curso. " +
+                "No se puede deshacer: si luego se anula, la prenda no vuelve sola.",
+            confirm = "Liberar",
+            destructive = true,
+            onConfirm = { vm.releaseSale(id) },
+            onDismiss = { ask = null },
+        )
+        Ask.UNPAY -> Confirm(
+            title = "Volver a pendiente de cobro",
+            text = "La venta vuelve a estar en curso y el dinero deja de contar como cobrado.",
+            confirm = "Volver",
+            onConfirm = { vm.unpaySale(id) },
             onDismiss = { ask = null },
         )
         null -> Unit
@@ -145,16 +165,27 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
     if (assigning) AssignDialog(vm, p, sale, onDismiss = { assigning = false })
 }
 
-private fun explain(sale: Sale, article: Article?): Pair<String, String> = when {
+private fun explain(p: ParentState, sale: Sale, article: Article?): Pair<String, String> = when {
     sale.conflict -> "Hay que revisarla" to "Aquí está anulada, pero Vinted dice otra cosa. Si el dinero ha entrado, confírmala."
-    sale.status == SaleStatus.PENDING -> "En curso: aún puede anularse" to
-        if (article != null) "La prenda está guardada con su número. Cuando Vinted la dé por finalizada se completará sola al sincronizar."
-        else if (sale.listedAt == null) "No sé qué prenda es: asígnala para que salga del stock."
-        else "Se completará al sincronizar cuando Vinted la dé por finalizada."
-    sale.status == SaleStatus.COMPLETED -> "Completada" to "El dinero ya entró. Es definitiva y no se puede deshacer."
+    sale.status == SaleStatus.PENDING -> "En curso: aún puede anularse" to when {
+        article != null -> "La prenda está guardada con su número. " +
+            if (sale.order.isBlank()) "Márcala como cobrada cuando llegue el dinero."
+            else "Cuando Vinted la dé por finalizada se completará sola."
+        sale.order.isBlank() -> "Márcala como cobrada cuando llegue el dinero."
+        sale.listedAt == null && reused(p, sale) -> "Su prenda ya no está en el inventario (el número ahora es de otra). No tienes que hacer nada."
+        sale.listedAt == null -> "No sé qué prenda es: si sigue en el inventario, asígnala para que salga del stock."
+        else -> "Cuando Vinted la dé por finalizada se completará sola."
+    }
+    sale.status == SaleStatus.COMPLETED -> "Completada" to
+        if (sale.order.isBlank()) "El dinero ya entró." else "El dinero ya entró. Es definitiva y no se puede deshacer."
     sale.byHand -> "Anulada por ti" to "No cuenta en los números."
+    sale.order.isBlank() -> "Anulada" to "No cuenta en los números."
     else -> "Cancelada en Vinted" to "No cuenta en los números."
 }
+
+/** The number in the sale's code belongs now to a garment made after the sale. */
+private fun reused(p: ParentState, sale: Sale): Boolean =
+    sale.code.isNotBlank() && Catalog.article(p, sale.number)?.let { it.createdAt > sale.soldAt } == true
 
 @Composable
 private fun Fact(label: String, value: String) {
@@ -169,7 +200,9 @@ private fun SaleActions(vm: MainViewModel, p: ParentState, sale: Sale, onAsk: (A
     val unlinked = sale.listedAt == null && sale.status != SaleStatus.CANCELLED && p.articles.any { it.inStock }
     val manual = sale.status == SaleStatus.PENDING && sale.order.isBlank()
     val reopen = Sales.canReopen(p, sale)
-    if (sale.status == SaleStatus.COMPLETED && !unlinked && !sale.conflict) return
+    val byHandPaid = sale.status == SaleStatus.COMPLETED && sale.order.isBlank()
+    val holding = sale.status == SaleStatus.PENDING && Sales.article(p, sale)?.soldIn == sale.id
+    if (sale.status == SaleStatus.COMPLETED && !unlinked && !sale.conflict && !byHandPaid) return
     if (sale.status == SaleStatus.CANCELLED && !reopen && !sale.conflict) return
     BottomActions {
         if (sale.conflict) BigButton("Confirmar venta", onClick = { onAsk(Ask.ACCEPT) })
@@ -178,7 +211,17 @@ private fun SaleActions(vm: MainViewModel, p: ParentState, sale: Sale, onAsk: (A
                 Text("Asignar artículo")
             }
         }
-        if (manual) BigButton("Marcar como completada", onClick = { onAsk(Ask.COMPLETE) })
+        if (manual) BigButton("Marcar como cobrada", onClick = { onAsk(Ask.COMPLETE) })
+        if (holding) {
+            FilledTonalButton(onClick = { onAsk(Ask.RELEASE) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp)) {
+                Text("Liberar su número")
+            }
+        }
+        if (byHandPaid) {
+            OutlinedButton(onClick = { onAsk(Ask.UNPAY) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp)) {
+                Text("Volver a pendiente de cobro")
+            }
+        }
         if (reopen) {
             FilledTonalButton(onClick = { vm.reopenSale(sale.id) }, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(18.dp)) {
                 Text("Recuperar venta")

@@ -1,6 +1,7 @@
 package dev.catalogo.ui
 
 import android.os.Bundle
+import android.os.SystemClock
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -34,6 +35,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -50,6 +52,22 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 vm.consent.collect { sender ->
                     if (sender != null) deleteConsent.launch(IntentSenderRequest.Builder(sender).build())
+                }
+            }
+        }
+        // Sales come in by themselves while the app is on screen (asking to delete the
+        // photos of a finished one needs it): at once on opening, then now and again.
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                var last: Long? = null
+                while (true) {
+                    val every = vm.salesEvery()
+                    val now = SystemClock.elapsedRealtime()
+                    if (every != null && (last == null || now - last >= every)) {
+                        vm.refreshSales()
+                        last = SystemClock.elapsedRealtime()
+                    }
+                    delay(2_000)
                 }
             }
         }

@@ -424,7 +424,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             initialCost = Money.input(cost),
             costHint = Ledger.lot(p, article.lotId)?.let { "Coste por prenda de ${it.name}" },
             onDismiss = { selling = false },
-            onConfirm = { price, c -> vm.registerSale(number, price, c, soldBy) },
+            onConfirm = { price, c, paid, free -> vm.registerSale(number, price, c, soldBy, paid, free) },
             extra = if (Catalog.devices(p).size > 1) {
                 {
                     Muted("Vendido en")

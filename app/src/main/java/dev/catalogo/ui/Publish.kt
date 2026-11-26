@@ -1,6 +1,10 @@
 package dev.catalogo.ui
 
 import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Checkbox
+import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -141,32 +145,52 @@ fun MoneyField(value: String, onChange: (String) -> Unit, label: String, modifie
     )
 }
 
-/** Sale dialog: price, plus cost on the main phone (prefilled from lot or manual cost). */
+/** Sale dialog: price and cost (prefilled from lot or manual cost), whether it is paid and what happens to the number. */
 @Composable
 fun SellDialog(
     title: String,
     initialCost: String?,
     costHint: String?,
     onDismiss: () -> Unit,
-    onConfirm: (price: String, cost: String) -> Unit,
+    onConfirm: (price: String, cost: String, paid: Boolean, freeNumber: Boolean) -> Unit,
     initialPrice: String = "",
     extra: (@Composable () -> Unit)? = null,
 ) {
     var price by remember { mutableStateOf(initialPrice) }
     var cost by remember { mutableStateOf(initialCost ?: "") }
+    var paid by remember { mutableStateOf(false) }
+    var free by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Muted("Queda como venta en curso y se puede anular. Sus fotos se borran cuando se complete.")
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 MoneyField(price, { price = it }, "Precio de venta")
                 if (initialCost != null) MoneyField(cost, { cost = it }, "Coste", hint = costHint)
                 extra?.invoke()
+                Muted("¿Te ha llegado el dinero?")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Choice("Aún no", !paid) { paid = false }
+                    Choice("Ya cobrado", paid) { paid = true }
+                }
+                if (!paid) {
+                    Row(Modifier.fillMaxWidth().clickable { free = !free }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = free, onCheckedChange = { free = it })
+                        Text("Liberar su número ya", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Muted(
+                    when {
+                        paid -> "Queda completada: se borran sus fotos y el número queda libre."
+                        free -> "Se borran sus fotos y el número queda libre. La venta sigue en curso; si la anulas, la prenda no vuelve sola."
+                        else -> "Queda en curso: la prenda se guarda con su número y, si la anulas, vuelve como estaba."
+                    },
+                )
+                Muted("Si la has vendido fuera de Vinted, borra allí su anuncio.")
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDismiss(); onConfirm(price, cost) }, enabled = price.isNotBlank()) {
+            TextButton(onClick = { onDismiss(); onConfirm(price, cost, paid, !paid && free) }, enabled = price.isNotBlank()) {
                 Text("Vendido", color = MaterialTheme.colorScheme.error)
             }
         },

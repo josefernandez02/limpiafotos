@@ -6,7 +6,7 @@ package dev.catalogo.core
  * article's pending desk state say what is to be done).
  *
  *  - PENDING: sold, but the order can still be cancelled. The article stays, out of
- *    stock, with its number, data and photos.
+ *    stock, with its number, data and photos, unless the user frees the number early.
  *  - COMPLETED: final. The article is gone and its number is free.
  *  - CANCELLED: the article is back in stock.
  */
@@ -45,6 +45,23 @@ object Sales {
         return free(done, a)
     }
 
+    /** The garment has left before the money is in: its number is free now and the sale stays in progress. */
+    fun release(s: ParentState, id: String): ParentState {
+        val sale = required(s, id)
+        val a = article(s, sale)?.takeIf { sale.status == SaleStatus.PENDING && it.soldIn == id }
+            ?: throw CatalogException("Esa venta no guarda ningún número")
+        return free(replace(s, sale.copy(numberFreed = true)), a)
+    }
+
+    /** A sale registered by hand and given as paid too soon. Its article, gone already, does not come back. */
+    fun unpay(s: ParentState, id: String): ParentState {
+        val sale = required(s, id)
+        if (sale.status != SaleStatus.COMPLETED || sale.order.isNotEmpty()) {
+            throw CatalogException("Solo una venta apuntada a mano y cobrada puede volver a pendiente")
+        }
+        return replace(s, sale.copy(status = SaleStatus.PENDING, closedAt = null, numberFreed = sale.listedAt != null))
+    }
+
     /** The order fell through (cancelled, lost, returned): everything goes back to how it was. */
     fun cancel(s: ParentState, id: String, now: Long, byHand: Boolean = true): ParentState {
         val sale = required(s, id)
@@ -55,9 +72,9 @@ object Sales {
         return restore(done, a)
     }
 
-    /** Whether a cancelled sale can go back to «in progress»: its article, if it had one, is still free. */
+    /** Whether a cancelled sale can go back to «in progress»: its article, if it still keeps one, is still free. */
     fun canReopen(s: ParentState, sale: Sale): Boolean =
-        sale.status == SaleStatus.CANCELLED && (sale.listedAt == null || article(s, sale)?.held == false)
+        sale.status == SaleStatus.CANCELLED && (sale.listedAt == null || sale.numberFreed || article(s, sale)?.held == false)
 
     fun reopen(s: ParentState, id: String): ParentState {
         val sale = required(s, id)

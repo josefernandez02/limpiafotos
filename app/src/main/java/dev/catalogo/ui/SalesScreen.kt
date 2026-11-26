@@ -18,6 +18,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import java.time.ZoneOffset
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
@@ -28,7 +36,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -44,10 +51,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Garments
 import dev.catalogo.core.Money
@@ -58,7 +62,6 @@ import dev.catalogo.core.Sales
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.YearMonth
@@ -121,7 +124,18 @@ fun SaleImage(vm: MainViewModel, p: ParentState, sale: Sale, modifier: Modifier,
         value = source?.let { uri -> withContext(Dispatchers.IO) { runCatching { loadPhoto(context, uri, edge) }.getOrNull() } }
     }
     Box(modifier.background(MaterialTheme.colorScheme.surfaceContainerHighest)) {
-        bitmap?.let { Image(it, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()) }
+        val picture = bitmap
+        if (picture != null) {
+            Image(picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+        } else {
+            // Its photos are gone: the code is what recognises it.
+            saleCode(p, sale)?.let {
+                Text(
+                    it, style = Mono.copy(fontSize = 12.sp), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, softWrap = false, modifier = Modifier.align(Alignment.Center),
+                )
+            }
+        }
     }
 }
 
@@ -135,17 +149,6 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
     val current = remember(p) { Stats.summary(p.sales) }
     val reading by vm.reading.collectAsStateWithLifecycle()
     val working = reading?.working == true
-
-    // While the tab is on screen, what the PC reads comes in by itself.
-    val owner = LocalLifecycleOwner.current
-    LaunchedEffect(owner) {
-        owner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            while (true) {
-                vm.refreshSales()
-                delay(if (vm.reading.value?.working == true) 8_000 else 30_000)
-            }
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -171,6 +174,7 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
             ) {
                 Muted("Aún no hay ventas")
                 reading?.let { ReadingCard(it) }
+                StartDate(p.salesFrom, onChange = { vm.setSalesFrom(it) })
                 BigButton(if (working) "Parar" else "Que el PC lea mis ventas", onClick = { vm.readSales(!working) })
             }
             return@Scaffold
@@ -190,6 +194,7 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             reading?.let { r -> item(key = "reading") { ReadingCard(r) } }
+            item(key = "from") { StartDate(p.salesFrom, onChange = { vm.setSalesFrom(it) }) }
             item(key = "mode") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Choice("Ventas", !view.stats) { vm.showSales(view.copy(stats = false)) }
@@ -243,6 +248,38 @@ private fun ReadingCard(reading: MainViewModel.SalesReading) {
             Text(reading.text, style = MaterialTheme.typography.bodyMedium)
             if (reading.working) LinearProgressIndicator(Modifier.fillMaxWidth())
         }
+    }
+}
+
+/** «Vinted: finalizadas desde el 1 nov 2026»: older finished orders are not brought in. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun StartDate(from: Long, onChange: (Long) -> Unit) {
+    if (from <= 0) return
+    var choosing by remember { mutableStateOf(false) }
+    Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Muted("De Vinted: las en curso y las finalizadas desde el ${longDate(from)}", Modifier.weight(1f))
+        TextButton(onClick = { choosing = true }) { Text("Cambiar") }
+    }
+    if (choosing) {
+        // The picker speaks in UTC midnights.
+        val zone = ZoneId.systemDefault()
+        val picker = rememberDatePickerState(
+            initialSelectedDateMillis = date(from).toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { choosing = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    choosing = false
+                    picker.selectedDateMillis?.let {
+                        val day = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
+                        onChange(day.atStartOfDay(zone).toInstant().toEpochMilli())
+                    }
+                }) { Text("Aceptar") }
+            },
+            dismissButton = { TextButton(onClick = { choosing = false }) { Text("Cancelar") } },
+        ) { DatePicker(state = picker) }
     }
 }
 

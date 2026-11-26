@@ -180,6 +180,33 @@ class SaleStatesTest {
     }
 
     @Test
+    fun `the number can be freed while the money is still on its way`() {
+        val held = Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY)
+        val s = Sales.release(held, "m1")
+        assertNull(s.article(0))
+        assertEquals(0, Catalog.nextFree(s))
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertEquals("fuera", s.retired.single().pending, "the PC is told to leave it")
+        assertEquals(SaleStatus.COMPLETED, Sales.complete(s, "m1", 25 * DAY).only().status)
+        val cancelled = Sales.cancel(s, "m1", 22 * DAY)
+        assertNull(cancelled.article(0), "the garment does not come back on its own")
+        assertTrue(Sales.canReopen(cancelled, cancelled.only()))
+        assertEquals(SaleStatus.PENDING, Sales.reopen(cancelled, "m1").only().status)
+        assertFailsWith<CatalogException> { Sales.release(s, "m1") }
+    }
+
+    @Test
+    fun `a hand sale given as paid can go back to waiting for the money`() {
+        val paid = Sales.complete(Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY), "m1", 21 * DAY)
+        val s = Sales.unpay(paid, "m1")
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertNull(s.only().closedAt)
+        assertEquals(SaleStatus.CANCELLED, Sales.cancel(s, "m1", 22 * DAY).only().status)
+        val fromVinted = paid.copy(sales = listOf(paid.only().copy(order = "7")))
+        assertFailsWith<CatalogException> { Sales.unpay(fromVinted, "m1") }
+    }
+
+    @Test
     fun `lot and totals only count money that came in`() {
         var s = Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY)
         s = Sales.complete(Sales.register(s, 1, "m2", "p", 1_500, null, 20 * DAY), "m2", 21 * DAY)
@@ -255,10 +282,83 @@ class VintedSalesTest {
     fun `what to ask the PC for`() {
         val s = shop()
         assertEquals(listOf("SH", "SA"), VintedSales.prefixes(s))
-        assertEquals(10 * DAY, VintedSales.since(s, 99 * DAY))
-        assertEquals(99 * DAY, VintedSales.since(ParentState(self = samsung), 99 * DAY), "nothing in stock: only new sales matter")
-        val held = Sales.register(s, 0, "m1", "p", 1_700, null, 28 * DAY)
-        assertEquals(10 * DAY, VintedSales.since(held, 99 * DAY), "a sale in progress still counts")
+        val noon = java.time.Instant.parse("2026-11-26T12:00:00Z").toEpochMilli()
+        assertEquals(java.time.Instant.parse("2026-11-01T00:00:00Z").toEpochMilli(),
+            VintedSales.defaultFrom(noon, java.time.ZoneOffset.UTC), "the first day of the month")
+    }
+
+    @Test
+    fun `how the PC is doing comes with its reading`() {
+        val r = VintedSales.parsePc("""{"modo":"parado","pedidos":[],"desde":5,"leida":7,"proxima":9,"enMarcha":false}""")
+        assertEquals(listOf(5L, 7L, 9L), listOf(r.from, r.lastRead, r.next))
+        assertFalse(r.running)
+    }
+
+    @Test
+    fun `only orders in progress and finished ones from the start date are brought in`() {
+        val orders = listOf(
+            order("old-open", date = 2 * DAY) to null,
+            order("old-done", SaleStatus.COMPLETED, date = 3 * DAY) to null,
+            order("new-done", SaleStatus.COMPLETED, date = 25 * DAY) to null,
+        )
+        val (s, counts) = VintedSales.applyAll(shop().copy(salesFrom = 20 * DAY), "p", orders, 40 * DAY)
+        assertEquals(listOf("old-open", "new-done"), s.sales.map { it.order })
+        assertEquals(mapOf(VintedSales.Kind.NEW_PENDING to 1, VintedSales.Kind.NEW_COMPLETED to 1), counts)
+        // Followed here while in progress: it stays when it finishes, however old.
+        val done = VintedSales.applyAll(s, "p", listOf(order("old-open", SaleStatus.COMPLETED, date = 2 * DAY) to null), 41 * DAY).first
+        assertEquals(listOf(SaleStatus.COMPLETED, SaleStatus.COMPLETED), done.sales.map { it.status })
+        assertEquals(done, VintedSales.applyAll(done, "p", emptyList(), 42 * DAY).first)
+    }
+
+    @Test
+    fun `history brought in before is dropped and nothing else`() {
+        var s = shop().sync(order("old-done", SaleStatus.COMPLETED, date = 3 * DAY)).first
+        s = s.sync(order("old-cancel", SaleStatus.CANCELLED, date = 25 * DAY)).first
+        s = s.sync(order("new-done", SaleStatus.COMPLETED, date = 25 * DAY)).first
+        s = s.sync(order("followed", date = 4 * DAY), now = 30 * DAY).first
+        s = s.sync(order("followed", SaleStatus.COMPLETED, date = 4 * DAY), now = 31 * DAY).first
+        s = Sales.register(s, 1, "m1", "p", 500, null, 5 * DAY)
+        val after = VintedSales.applyAll(s.copy(salesFrom = 20 * DAY), "p", emptyList(), 40 * DAY).first
+        assertEquals(listOf("new-done", "followed", ""), after.sales.map { it.order })
+    }
+
+    @Test
+    fun `two orders with the same code are told apart by their listing`() {
+        // Number 0 was sold as listing 500, reused, and the new garment sold as listing 900.
+        val base = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-y", status = "jugado", itemId = "900"))
+        val orders = listOf(
+            order("1", date = 9 * DAY) to deal("500" to "#SH0000", soldAt = 9 * DAY + DAY / 2),
+            order("2", date = 20 * DAY) to deal("900" to "#SH0000", soldAt = 20 * DAY),
+        )
+        val (s, _) = VintedSales.applyAll(base.copy(salesFrom = DAY), "p", orders, 40 * DAY)
+        assertEquals(listOf(null, 10 * DAY), s.sales.map { it.listedAt })
+        assertEquals("2", Sales.sale(s, s.article(0)!!.soldIn)!!.order)
+    }
+
+    @Test
+    fun `an order kept apart takes its article once the listing is known`() {
+        var s = shop().sync(order("1"), deal("901" to null)).first
+        assertEquals(-1, s.only().number)
+        s = Catalog.setDesk(s, 1, Desk(ref = "r", status = "publicado", itemId = "901"))
+        s = s.sync(order("1")).first
+        assertEquals(1, s.only().number)
+        assertTrue(s.article(1)!!.held)
+    }
+
+    @Test
+    fun `a number reused right after a sale is not taken by the older order`() {
+        // The garment that has number 0 now is another listing, made hours after the old one was sold.
+        val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = "publicado", itemId = "900"))
+        val (after, _) = s.sync(order("1"), deal("555" to "#SH0000", soldAt = 10 * DAY - DAY / 2))
+        assertNull(after.only().listedAt)
+        assertTrue(after.article(0)!!.inStock)
+    }
+
+    @Test
+    fun `a cancelled order never seen before is not a sale`() {
+        val (s, counts) = VintedSales.applyAll(shop(), "p", listOf(order("1", SaleStatus.CANCELLED) to null), 40 * DAY)
+        assertTrue(s.sales.isEmpty())
+        assertTrue(counts.isEmpty())
     }
 
     @Test

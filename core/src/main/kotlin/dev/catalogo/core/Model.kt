@@ -191,6 +191,8 @@ data class ParentState(
     val configVersion: Long = 1,
     val lots: List<Lot> = emptyList(),
     val sales: List<Sale> = emptyList(),
+    /** Finished orders of Vinted count from here on (0 = not chosen yet). Orders in progress always count. */
+    val salesFrom: Long = 0,
     /** Jobs of sold articles that no longer exist here, still to be taken off the PC. */
     val retired: List<Desk> = emptyList(),
 )

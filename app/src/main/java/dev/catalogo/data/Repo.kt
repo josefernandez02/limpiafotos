@@ -296,11 +296,26 @@ class Repo(context: Context) {
         return consent
     }
 
-    /** A sale registered by hand: it stays in progress until completed or cancelled. */
-    suspend fun registerSale(number: Int, price: Long, cost: Long?, account: String? = null): List<Uri> {
+    /**
+     * A sale registered by hand. Not [paid] yet, it stays in progress until completed or
+     * cancelled, keeping the article unless [freeNumber] gives its number away at once.
+     */
+    suspend fun registerSale(number: Int, price: Long, cost: Long?, account: String?, paid: Boolean, freeNumber: Boolean): List<Uri> {
         val id = Ids.newId()
         val now = System.currentTimeMillis()
-        return changeSales { Sales.register(it, number, id, account ?: it.self.id, price, cost, now) }
+        return changeSales {
+            val sold = Sales.register(it, number, id, account ?: it.self.id, price, cost, now)
+            when {
+                paid -> Sales.complete(sold, id, now)
+                freeNumber -> Sales.release(sold, id)
+                else -> sold
+            }
+        }
+    }
+
+    /** From when finished Vinted orders count. */
+    suspend fun setSalesFrom(at: Long) {
+        store.update { s -> s.parent?.let { s.copy(parent = it.copy(salesFrom = at)) } ?: s }
     }
 
     suspend fun ensureSaleIds() {

@@ -16,6 +16,11 @@ import dev.catalogo.core.ParentState
 import dev.catalogo.data.AppLog
 import dev.catalogo.core.VintedSales
 import dev.catalogo.core.VintedSales.Kind
+import dev.catalogo.core.PcLink
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import dev.catalogo.core.Sales as SalesRules
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
@@ -384,22 +389,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val reading: StateFlow<SalesReading?> = _reading.asStateFlow()
     private val readingLock = Mutex()
 
-    /** Asks the PC to read the sales in Vinted, or to stop. */
+    /** Asks the PC to read the sales in Vinted now, or to stop. */
     fun readSales(start: Boolean) = run {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val p = repo.state.parent ?: return@run
-        val since = VintedSales.since(p, System.currentTimeMillis())
-        val answer = withContext(Dispatchers.IO) {
-            repo.desk.salesControl(link, if (start) "mandar" else "parar", VintedSales.prefixes(p), since)
+        takeSales(tellSales(link, if (start) "mandar" else "parar"))
+    }
+
+    /**
+     * How often to ask the PC for the sales on the screen shown now; null while photos are
+     * being taken or something is being edited, so that nothing changes under the user.
+     */
+    fun salesEvery(): Long? {
+        val top = stack.value.last()
+        return when {
+            repo.state.parent?.session != null || top is Screen.Editor || top is Screen.Photos || top is Screen.Template -> null
+            reading.value?.working == true -> 8_000
+            top == Screen.Sales || top is Screen.Sale -> 30_000
+            else -> 5 * 60_000
         }
-        takeSales(VintedSales.parsePc(answer))
     }
 
     /** Takes what the PC has read so far. */
     suspend fun refreshSales() {
         val link = repo.state.pc ?: return
+        if (repo.state.parent == null) return
         try {
-            takeSales(VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) }))
+            ensureSalesFrom()
+            var read = VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) })
+            // The start date is chosen here: the PC reads on its own with the last one it heard.
+            if (read.from != repo.state.parent?.salesFrom) read = tellSales(link, "ajustar")
+            takeSales(read)
         } catch (e: CancellationException) {
             throw e
         } catch (e: CatalogException) {
@@ -410,13 +429,25 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun setSalesFrom(at: Long) = run {
+        repo.setSalesFrom(at)
+        refreshSales()
+    }
+
+    private suspend fun ensureSalesFrom() {
+        if (repo.state.parent?.salesFrom == 0L) repo.setSalesFrom(VintedSales.defaultFrom(System.currentTimeMillis()))
+    }
+
+    private suspend fun tellSales(link: PcLink, action: String): VintedSales.Reading {
+        ensureSalesFrom()
+        val p = repo.state.parent ?: throw CatalogException("No hay catálogo")
+        return VintedSales.parsePc(withContext(Dispatchers.IO) {
+            repo.desk.salesControl(link, action, VintedSales.prefixes(p), p.salesFrom)
+        })
+    }
+
     private suspend fun takeSales(read: VintedSales.Reading) = readingLock.withLock {
-        _reading.value = when {
-            !read.working -> null
-            read.waiting.isNotBlank() -> SalesReading(true, "PC: ${read.waiting}")
-            read.pending > 0 -> SalesReading(true, "El PC está leyendo tus ventas$GAP quedan ${read.pending}")
-            else -> SalesReading(true, "El PC está leyendo tus ventas…")
-        }
+        _reading.value = readingText(read)
         val before = repo.state.parent ?: return@withLock
         val now = System.currentTimeMillis()
         val (after, counts) = VintedSales.applyAll(before, before.self.id, read.orders, now)
@@ -433,6 +464,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.drafts.tellPc() }
     }
 
+    private fun readingText(read: VintedSales.Reading): SalesReading {
+        if (read.working) {
+            return SalesReading(true, when {
+                read.waiting.isNotBlank() -> "PC: ${read.waiting}"
+                read.pending > 0 -> "El PC está leyendo tus ventas$GAP quedan ${read.pending}"
+                else -> "El PC está leyendo tus ventas…"
+            })
+        }
+        val last = if (read.lastRead > 0) "Última lectura: ${shortTime(read.lastRead)}" else "Aún no ha terminado ninguna lectura"
+        val then = when {
+            !read.running -> "El programa del PC está detenido: no se actualiza hasta que pulses «Iniciar»."
+            read.next > System.currentTimeMillis() -> "El PC vuelve a mirar solo sobre las ${shortTime(read.next)}."
+            else -> "El PC mirará en cuanto tenga un hueco."
+        }
+        return SalesReading(false, "$last\n$then")
+    }
+
+    /** «22:10», with the day in front when it is not today. */
+    private fun shortTime(at: Long): String {
+        val t = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
+        val pattern = if (t.toLocalDate() == LocalDate.now()) "HH:mm" else "d/M HH:mm"
+        return t.format(DateTimeFormatter.ofPattern(pattern))
+    }
+
     private fun summary(counts: Map<Kind, Int>): String? {
         fun n(kind: Kind, one: String, many: String) = counts[kind]?.let { "$it ${if (it == 1) one else many}" }
         val changes = listOfNotNull(
@@ -440,7 +495,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             n(Kind.NEW_COMPLETED, "venta completada nueva", "ventas completadas nuevas"),
             n(Kind.COMPLETED, "completada", "completadas"),
             n(Kind.CANCELLED, "anulada por Vinted", "anuladas por Vinted"),
-            n(Kind.NEW_CANCELLED, "cancelada antigua", "canceladas antiguas"),
             n(Kind.REOPENED, "recuperada", "recuperadas"),
             n(Kind.CONFLICT, "para que la revises", "para que las revises"),
         )
@@ -459,7 +513,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun completeSale(id: String) = sale("Venta completada") { SalesRules.complete(it, id, System.currentTimeMillis()) }
-    fun cancelSale(id: String) = sale("Venta anulada: todo vuelve como estaba") { SalesRules.cancel(it, id, System.currentTimeMillis()) }
+    fun cancelSale(id: String) = sale("Venta anulada") { SalesRules.cancel(it, id, System.currentTimeMillis()) }
+    fun releaseSale(id: String) = sale("Número libre: la venta sigue en curso") { SalesRules.release(it, id) }
+    fun unpaySale(id: String) = sale("Venta en curso: pendiente de cobro") { SalesRules.unpay(it, id) }
     fun reopenSale(id: String) = sale("Venta recuperada: en curso") { SalesRules.reopen(it, id) }
     fun acceptSale(id: String) = sale("Venta completada") { SalesRules.accept(it, id, System.currentTimeMillis()) }
     fun assignSale(id: String, number: Int) = sale("Artículo asignado") { SalesRules.assign(it, id, number) }
@@ -583,11 +639,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** [account]: the phone whose Vinted account sold it (the main phone when null). */
-    fun registerSale(number: Int, priceText: String, costText: String, account: String? = null) = run {
+    fun registerSale(number: Int, priceText: String, costText: String, account: String?, paid: Boolean, freeNumber: Boolean) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
         val cost = if (costText.isBlank()) null else Money.parse(costText) ?: throw CatalogException("Coste no válido")
-        askToDelete(repo.registerSale(number, price, cost, account))
-        _message.value = "Venta en curso. Cuando llegue el dinero quedará completada"
+        askToDelete(repo.registerSale(number, price, cost, account, paid, freeNumber))
+        _message.value = when {
+            paid -> "Venta completada: número libre"
+            freeNumber -> "Venta en curso y número libre. Márcala como cobrada cuando llegue el dinero"
+            else -> "Venta en curso. Márcala como cobrada cuando llegue el dinero"
+        }
         back()
         app.drafts.tellPc()
     }

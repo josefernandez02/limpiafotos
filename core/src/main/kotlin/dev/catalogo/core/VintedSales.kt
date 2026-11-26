@@ -1,5 +1,7 @@
 package dev.catalogo.core
 
+import java.time.Instant
+import java.time.ZoneId
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -12,9 +14,10 @@ import kotlin.math.abs
 /**
  * Bringing in what the PC read in «Mis pedidos › Ventas». The phone never talks to
  * Vinted: it asks the PC, which reads the pages, and takes the result from it. An
- * order is a sale; the article it was is the one named by the last hashtag of its
- * listing's description (SH0012 = article 0012 of the account with prefix SH).
- * Nothing about the buyer or the chat comes.
+ * order is a sale. The article it was is the one with that listing; without one
+ * known, the one named by the last hashtag of its description (SH0012 = article 0012
+ * of the account with prefix SH). Numbers are reused, so two orders may well carry
+ * the same code. Nothing about the buyer or the chat comes.
  */
 object VintedSales {
     private const val DAY = 86_400_000L
@@ -31,8 +34,13 @@ object VintedSales {
     /**
      * What the PC says: whether it is reading ([working]), why it has not started ([waiting]),
      * how many orders it still has to look into ([pending]) and the ones already read, oldest first.
+     * [from] is the start date it has, [lastRead] and [next] when it read and will read on its own
+     * (0 = unknown), and [running] whether its program is started at all.
      */
-    data class Reading(val working: Boolean, val waiting: String, val pending: Int, val orders: List<Pair<Order, Deal?>>)
+    data class Reading(
+        val working: Boolean, val waiting: String, val pending: Int, val orders: List<Pair<Order, Deal?>>,
+        val from: Long = 0, val lastRead: Long = 0, val next: Long = 0, val running: Boolean = true,
+    )
 
     enum class Kind { NEW_PENDING, NEW_COMPLETED, NEW_CANCELLED, COMPLETED, CANCELLED, REOPENED, CONFLICT, UNCHANGED }
 
@@ -63,27 +71,66 @@ object VintedSales {
             }
             order to items.takeIf { it.isNotEmpty() }?.let { Deal("", date, it) }
         }.sortedBy { it.first.date }
-        return Reading(root.str("modo") == "trabajando", root.str("esperando").orEmpty(), root.str("pendientes")?.toIntOrNull() ?: 0, orders)
+        fun time(key: String) = root.str(key)?.toLongOrNull() ?: 0
+        return Reading(
+            root.str("modo") == "trabajando", root.str("esperando").orEmpty(), root.str("pendientes")?.toIntOrNull() ?: 0, orders,
+            time("desde"), time("leida"), time("proxima"), root.str("enMarcha") != "false",
+        )
     }
 
     /** The article prefixes the PC must recognise in the hashtags. */
     fun prefixes(s: ParentState): List<String> = Catalog.devices(s).map { it.prefix }
 
-    /**
-     * Since when a finished order can be about an article of the app: the creation of the
-     * oldest one still here ([now] without any). Older ones are recorded without looking.
-     */
-    fun since(s: ParentState, now: Long): Long = s.articles.filter { !it.released }.minOfOrNull { it.createdAt } ?: now
+    /** The start date until the user chooses one: the first day of this month. */
+    fun defaultFrom(now: Long, zone: ZoneId = ZoneId.systemDefault()): Long =
+        Instant.ofEpochMilli(now).atZone(zone).toLocalDate().withDayOfMonth(1).atStartOfDay(zone).toInstant().toEpochMilli()
 
-    /** Brings in a whole reading and counts what happened to the orders that changed. */
+    /**
+     * Brings in a whole reading and counts what happened to the orders that changed. A new
+     * order counts if it is in progress, or finished and not older than [ParentState.salesFrom];
+     * one already cancelled when first seen was never a sale.
+     */
     fun applyAll(s: ParentState, accountId: String, orders: List<Pair<Order, Deal?>>, now: Long): Pair<ParentState, Map<Kind, Int>> {
         val counts = LinkedHashMap<Kind, Int>()
-        val state = orders.fold(s) { state, (order, deal) ->
+        val start = forgetHistory(if (s.salesFrom > 0) s else s.copy(salesFrom = defaultFrom(now)))
+        val state = orders.fold(start) { state, (order, deal) ->
+            val counted = state.sales.any { it.order == order.id } || when (order.status) {
+                SaleStatus.PENDING -> true
+                SaleStatus.COMPLETED -> order.date >= state.salesFrom
+                SaleStatus.CANCELLED -> false
+            }
+            if (!counted) return@fold state
             val (next, kind) = apply(state, accountId, order, deal, now)
             if (kind != Kind.UNCHANGED) counts[kind] = (counts[kind] ?: 0) + 1
             next
         }
         return state to counts
+    }
+
+    /**
+     * Drops the orders that were already over when first read and do not count (earlier
+     * versions brought them in). Anything followed here, linked or touched by hand stays.
+     */
+    private fun forgetHistory(s: ParentState): ParentState {
+        val kept = s.sales.filterNot { v ->
+            v.order.isNotEmpty() && v.listedAt == null && !v.byHand && !v.conflict && v.status != SaleStatus.PENDING &&
+                v.closedAt == v.soldAt && (v.status == SaleStatus.CANCELLED || v.soldAt < s.salesFrom)
+        }
+        return if (kept.size == s.sales.size) s else s.copy(sales = kept)
+    }
+
+    /** The listings known to be [this] article's. */
+    private fun Article.listings(): List<String> = (vinted.values.map { it.id } + desk?.itemId.orEmpty()).filter { it.isNotBlank() }
+
+    private fun byListing(s: ParentState, itemId: String): Article? =
+        if (itemId.isBlank()) null else s.articles.firstOrNull { !it.released && itemId in it.listings() }
+
+    /** An order kept apart takes its article as soon as the listing is known to be one of the app's. */
+    private fun relink(s: ParentState, id: String): ParentState {
+        val sale = Sales.sale(s, id) ?: return s
+        if (sale.status != SaleStatus.PENDING || sale.listedAt != null) return s
+        val a = byListing(s, sale.itemId)?.takeIf { it.inStock } ?: return s
+        return Sales.assign(s, id, a.number)
     }
 
     /** The account and article number of the last hashtag, if it is one of the app's codes. */
@@ -99,7 +146,7 @@ object VintedSales {
             var state = s
             var kind = Kind.UNCHANGED
             for (sale in known) {
-                val (next, k) = update(state, sale.id, order, now)
+                val (next, k) = update(relink(state, sale.id), sale.id, order, now)
                 state = next
                 if (k != Kind.UNCHANGED) kind = k
             }
@@ -123,12 +170,11 @@ object VintedSales {
     ): Pair<ParentState, Kind> {
         val soldAt = deal?.soldAt ?: order.date
         val code = item.description?.let { code(it, s) }
-        // An article created after the sale only shares the number of the one sold.
-        fun Article.couldBeSold() = !released && createdAt <= soldAt + DAY
-        val found = if (deal == null) null else code?.let { (_, n) -> Catalog.article(s, n)?.takeIf { it.couldBeSold() } }
-            ?: s.articles.firstOrNull { a ->
-                a.couldBeSold() && item.id.isNotEmpty() && (a.desk?.itemId == item.id || a.vinted.values.any { it.id == item.id })
-            }
+        // The listing says which article it was for certain. The code only says its number, and
+        // numbers are reused: not an article made after the sale, nor one with another listing.
+        val found = if (deal == null) null else byListing(s, item.id) ?: code?.let { (_, n) ->
+            Catalog.article(s, n)?.takeIf { !it.released && it.createdAt <= soldAt + DAY && it.listings().isEmpty() }
+        }
         val account = Catalog.devices(s).firstOrNull { it.vintedId.isNotBlank() && it.vintedId == deal?.sellerId }?.id
             ?: code?.first?.id ?: accountId
         val codeText = code?.let { (d, n) -> Sku.format(d.prefix, n, s.digits) }.orEmpty()

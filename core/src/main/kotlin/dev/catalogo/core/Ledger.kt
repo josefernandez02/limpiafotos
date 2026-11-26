@@ -55,6 +55,8 @@ data class Sale(
     val conflict: Boolean = false,
     /** When it was completed or cancelled. */
     val closedAt: Long? = null,
+    /** The user freed the article's number before the sale was over: the article does not come back. */
+    val numberFreed: Boolean = false,
 )
 
 object Money {
