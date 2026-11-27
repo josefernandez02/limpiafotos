@@ -210,6 +210,8 @@ data class AppState(
     val gamesOff: Set<String> = emptySet(),
     /** The shipping labels this phone last asked the PC for. */
     val labels: LabelJob = LabelJob(),
+    /** The label PDFs saved here, until their sales are paid and they are deleted. */
+    val labelPdfs: List<LabelFile> = emptyList(),
 ) {
     companion object {
         /** Folders where galleries list albums; the app picks one per phone automatically. */

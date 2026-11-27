@@ -31,4 +31,13 @@ class LabelFiles(private val resolver: ContentResolver) {
         }
         return uri
     }
+
+    /** True when [uri] is no longer there. The app needs no permission for a PDF it saved itself. */
+    fun delete(uri: Uri): Boolean = try {
+        resolver.delete(uri, null, null)
+        true
+    } catch (e: Exception) {
+        AppLog.w("etiquetas", "no se pudo borrar un PDF ya cobrado: ${e.message ?: e.javaClass.simpleName}")
+        false
+    }
 }

@@ -579,7 +579,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     // Another lot took its place meanwhile: the next question tells.
                     if (pdf.lot != lot) null else repo.labelFiles.save(pdf.name, pdf.bytes)
                 } ?: return
-                repo.setLabels(LabelJob(file = file.toString(), count = step.done.labels, warnings = step.done.warnings))
+                repo.keepLabels(LabelJob(file = file.toString(), count = step.done.labels, warnings = step.done.warnings), reply.ready)
                 AppLog.i("etiquetas", "PDF con ${step.done.labels}, avisos ${step.done.warnings.size}")
                 _message.value = "PDF de etiquetas guardado en Descargas"
             }

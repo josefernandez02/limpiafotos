@@ -12,6 +12,7 @@ import dev.catalogo.core.Ledger
 import dev.catalogo.core.Listing
 import dev.catalogo.core.ListingText
 import dev.catalogo.core.Ids
+import dev.catalogo.core.Labels
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sales
 import dev.catalogo.core.Session
@@ -95,6 +96,22 @@ class Repo(context: Context) {
 
     suspend fun setLabels(job: dev.catalogo.core.LabelJob) {
         store.update { it.copy(labels = job) }
+    }
+
+    /** The finished [job] with the PDF just saved, and the [orders] inside it. */
+    suspend fun keepLabels(job: dev.catalogo.core.LabelJob, orders: List<String>) {
+        store.update { Labels.saved(it, job, orders) }
+    }
+
+    /** Deletes from Descargas the label PDFs whose sales are paid. One that resists is tried again later. */
+    suspend fun discardSpentLabels() {
+        val p = state.parent ?: return
+        val spent = Labels.spent(p, state.labelPdfs)
+        if (spent.isEmpty()) return
+        val gone = withContext(Dispatchers.IO) { spent.filter { labelFiles.delete(Uri.parse(it.file)) } }
+        if (gone.isEmpty()) return
+        store.update { Labels.discard(it, gone) }
+        AppLog.i("etiquetas", "borrados ${gone.size} PDF de ventas completadas")
     }
 
     suspend fun setPc(link: dev.catalogo.core.PcLink?) {
@@ -298,6 +315,7 @@ class Repo(context: Context) {
             consent += deleteLocalForParent(number)
         }
         store.update { s -> s.copy(parent = block(s.parent!!)) }
+        discardSpentLabels()
         return consent
     }
 

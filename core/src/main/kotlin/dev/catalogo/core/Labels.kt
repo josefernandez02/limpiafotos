@@ -16,6 +16,10 @@ import kotlinx.serialization.json.contentOrNull
 @Serializable
 data class LabelJob(val lot: Long = 0, val file: String = "", val count: Int = 0, val warnings: List<String> = emptyList())
 
+/** A label PDF saved on this phone and the orders whose labels are inside. */
+@Serializable
+data class LabelFile(val file: String, val orders: List<String>)
+
 /**
  * Shipping labels. The PC takes them out of Vinted, crops them upright and joins them into
  * one PDF; the phone only says which sales, takes the PDF and hands it to the printer app.
@@ -27,8 +31,14 @@ object Labels {
     /** The lot the PC finished: its file ("" when no label came out) and what the user must know. */
     data class Done(val lot: Long, val file: String, val labels: Int, val warnings: List<String>)
 
-    /** What the PC says about the lot it was last asked for. [left] labels still to be taken out. */
-    data class Reply(val working: Boolean, val waiting: String, val lot: Long, val left: Int, val done: Done?)
+    /**
+     * What the PC says about the lot it was last asked for. [left] labels still to be taken
+     * out; [ready], the orders whose label is already out.
+     */
+    data class Reply(
+        val working: Boolean, val waiting: String, val lot: Long, val left: Int, val done: Done?,
+        val ready: List<String> = emptyList(),
+    )
 
     class Pdf(val lot: Long, val name: String, val bytes: ByteArray)
 
@@ -97,9 +107,40 @@ object Labels {
                 (d["avisos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonPrimitive)?.contentOrNull },
             )
         }
+        val asked = list.mapNotNull { it as? JsonObject }
         return Reply(
             root.str("modo") == "trabajando", root.str("esperando").orEmpty(), root.str("lote")?.toLongOrNull() ?: 0,
-            list.count { (it as? JsonObject)?.str("estado") == "pendiente" }, done,
+            asked.count { it.str("estado") == "pendiente" }, done,
+            asked.filter { it.str("estado") == "lista" }.mapNotNull { it.str("id") },
+        )
+    }
+
+    /** The PDF [job] ended in, saved with the labels of [orders]. */
+    fun saved(state: AppState, job: LabelJob, orders: List<String>): AppState =
+        state.copy(labels = job, labelPdfs = state.labelPdfs + LabelFile(job.file, orders))
+
+    /**
+     * The saved PDFs with nothing left to send: one of their sales paid and none still
+     * open. A sale cancelled by hand, in doubt or unknown here keeps its PDF.
+     */
+    fun spent(s: ParentState, files: List<LabelFile>): List<LabelFile> {
+        val sales = s.sales.groupBy { it.order }
+        return files.filter { pdf ->
+            val inside = pdf.orders.map { sales[it].orEmpty() }
+            inside.all { order -> order.isNotEmpty() && order.all(::over) } &&
+                inside.any { order -> order.any { it.status == SaleStatus.COMPLETED } }
+        }
+    }
+
+    private fun over(sale: Sale): Boolean =
+        !sale.conflict && (sale.status == SaleStatus.COMPLETED || sale.status == SaleStatus.CANCELLED && !sale.byHand)
+
+    /** Forgets the PDFs [gone], and puts away the card that was offering one of them. */
+    fun discard(state: AppState, gone: List<LabelFile>): AppState {
+        val files = gone.map { it.file }.toSet()
+        return state.copy(
+            labels = if (state.labels.file in files) LabelJob() else state.labels,
+            labelPdfs = state.labelPdfs.filter { it.file !in files },
         )
     }
 

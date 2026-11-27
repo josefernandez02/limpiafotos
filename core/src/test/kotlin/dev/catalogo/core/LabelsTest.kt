@@ -136,6 +136,72 @@ class LabelsTest {
         assertEquals("x y.exe.pdf", pdf.name)
     }
 
+    private fun pdf(vararg orders: String) = LabelFile("content://descargas/${orders.joinToString("-")}", orders.toList())
+
+    private fun spent(s: ParentState, vararg files: LabelFile) = Labels.spent(s, files.toList())
+
+    @Test
+    fun `a PDF is spent once its sale is paid`() {
+        val a = pdf("a")
+        assertEquals(emptyList(), spent(shop(sale("a")), a))
+        assertEquals(listOf(a), spent(shop(sale("a", status = SaleStatus.COMPLETED)), a))
+    }
+
+    @Test
+    fun `a joint PDF waits for every sale still in progress`() {
+        val both = pdf("a", "b")
+        val alone = pdf("a")
+        val one = shop(sale("a", status = SaleStatus.COMPLETED), sale("b"))
+        assertEquals(listOf(alone), spent(one, both, alone))
+        val two = shop(sale("a", status = SaleStatus.COMPLETED), sale("b", status = SaleStatus.COMPLETED))
+        assertEquals(listOf(both, alone), spent(two, both, alone))
+    }
+
+    @Test
+    fun `a cancelled sale neither spends a PDF nor holds it back`() {
+        val both = pdf("a", "b")
+        val cancelled = sale("b", status = SaleStatus.CANCELLED)
+        assertEquals(emptyList(), spent(shop(sale("a", status = SaleStatus.CANCELLED), cancelled), both))
+        assertEquals(listOf(both), spent(shop(sale("a", status = SaleStatus.COMPLETED), cancelled), both))
+    }
+
+    @Test
+    fun `a PDF is kept while there is any doubt`() {
+        val both = pdf("a", "b")
+        val paid = sale("a", status = SaleStatus.COMPLETED)
+        // Cancelled here, not by Vinted: the parcel may still have to be sent.
+        val byHand = sale("b", status = SaleStatus.CANCELLED).copy(byHand = true)
+        assertEquals(emptyList(), spent(shop(paid, byHand), both))
+        assertEquals(emptyList(), spent(shop(paid, sale("b", status = SaleStatus.COMPLETED, conflict = true)), both))
+        assertEquals(emptyList(), spent(shop(paid), both)) // b is not known here
+        assertEquals(emptyList(), spent(shop(paid), pdf()))
+    }
+
+    @Test
+    fun `remembers each PDF saved and forgets the spent ones with their card`() {
+        val first = Labels.saved(AppState("p"), LabelJob(file = "content://1", count = 1), listOf("a"))
+        val second = Labels.saved(first, LabelJob(file = "content://2", count = 1), listOf("b"))
+        assertEquals(listOf(LabelFile("content://1", listOf("a")), LabelFile("content://2", listOf("b"))), second.labelPdfs)
+        assertEquals("content://2", second.labels.file)
+        // The card shows the second: forgetting the first leaves it alone.
+        val kept = Labels.discard(second, listOf(second.labelPdfs[0]))
+        assertEquals(second.labels, kept.labels)
+        assertEquals(listOf(second.labelPdfs[1]), kept.labelPdfs)
+        val none = Labels.discard(kept, kept.labelPdfs)
+        assertEquals(LabelJob(), none.labels)
+        assertEquals(emptyList(), none.labelPdfs)
+    }
+
+    @Test
+    fun `reads which orders came out`() {
+        val r = reply(
+            done = done(labels = 1),
+            entries = """{"id":"a","codigo":"SH0006","titulo":"x","estado":"lista","motivo":""},
+                {"id":"b","codigo":"SH0007","titulo":"y","estado":"error","motivo":"no"}""",
+        )
+        assertEquals(listOf("a"), r.ready)
+    }
+
     @Test
     fun `finds the printer app`() {
         val apps = listOf("com.google.drive" to "Drive", "com.xinye.barcode4" to "4Barcode", "a.b" to "4Barcode Pro")
