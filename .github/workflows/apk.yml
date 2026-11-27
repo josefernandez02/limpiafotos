@@ -1,8 +1,9 @@
 name: APK
 
+# main: prueba, compila y publica la APK. reorganizacion: lo mismo sin publicar.
 on:
   push:
-    branches: [main]
+    branches: [main, reorganizacion]
     paths: ["app/**", "core/**", "*.gradle.kts", "gradle/**", "gradle.properties", ".github/workflows/apk.yml"]
   workflow_dispatch:
 
@@ -10,7 +11,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: apk
+  group: apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -36,6 +37,11 @@ jobs:
             echo "SIGNED=1" >> "$GITHUB_ENV"
           fi
 
+      - name: Pruebas
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --console=plain :core:test 2>&1 | tee build.log
+
       - name: Compilar
         env:
           VERSION_CODE: ${{ github.run_number }}
@@ -44,11 +50,11 @@ jobs:
           set -o pipefail
           ./gradlew --no-daemon --console=plain :app:assembleRelease 2>&1 | tee build.log
 
-      # Compiler errors as annotations, readable from the commit's check run.
+      # Compiler and test errors as annotations, readable from the commit's check run.
       - name: Errores
         if: failure()
         run: |
-          { grep -iE "^e: |: error:|Error: |What went wrong|Could not" build.log; find app/build -name "lint-results*.txt" -exec grep -A3 "Error:" {} \; ; } | head -80 > errors.txt || true
+          { grep -iE "^e: |: error:|Error: |FAILED|AssertionFailedError| at .*Test\.kt|What went wrong|Could not" build.log; find app/build -name "lint-results*.txt" -exec grep -A3 "Error:" {} \; ; } | head -80 > errors.txt || true
           split -l 8 errors.txt chunk_ || true
           for f in chunk_*; do
             [ -f "$f" ] || continue
@@ -57,7 +63,7 @@ jobs:
           done
 
       - name: Publicar
-        if: env.SIGNED == '1'
+        if: env.SIGNED == '1' && github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
