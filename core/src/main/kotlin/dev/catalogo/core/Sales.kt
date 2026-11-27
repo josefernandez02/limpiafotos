@@ -107,14 +107,30 @@ object Sales {
     /** The PC confirmed it dropped the job [ref]. */
     fun heard(s: ParentState, ref: String): ParentState = s.copy(retired = s.retired.filter { it.ref != ref })
 
-    /** The order [id] and the hand record it looks like are one sale: Vinted's data, the hand record's cost. */
+    /**
+     * Orders about a garment already sold by hand. Hand records are sales outside Vinted, so
+     * this should not happen: nothing is joined or cancelled here, the user is only told.
+     */
+    fun doubts(s: ParentState): List<Pair<Sale, Sale>> {
+        val byHand = s.sales.filter { it.order.isEmpty() && it.status != SaleStatus.CANCELLED }
+        return s.sales.filter { it.order.isNotEmpty() && it.status != SaleStatus.CANCELLED }
+            .mapNotNull { order -> byHand.firstOrNull { sameGarment(s, order, it) }?.let { order to it } }
+    }
+
+    /** Only certainties: the same listing, or the very same article. Codes and prices repeat. */
+    private fun sameGarment(s: ParentState, order: Sale, hand: Sale): Boolean {
+        val listing = order.itemId.isNotBlank() &&
+            (order.itemId == hand.itemId || order.itemId in hand.listings || article(s, hand)?.listings()?.contains(order.itemId) == true)
+        return listing || (order.listedAt != null && order.listedAt == hand.listedAt && order.number == hand.number)
+    }
+
+    /** The user says that order and that hand record are one sale: Vinted's data, the hand record's cost. */
     fun merge(s: ParentState, id: String): ParentState {
-        val order = required(s, id)
-        val hand = sale(s, order.twin) ?: throw CatalogException("Esa venta no tiene posible repetida")
+        val (order, hand) = doubts(s).firstOrNull { it.first.id == id } ?: throw CatalogException("Esa venta no tiene posible repetida")
         // The article assigned to the order, if any; else the one the hand record was about.
         val about = if (order.listedAt != null || hand.listedAt == null) order else hand
         val joined = order.copy(
-            id = hand.id, twin = "",
+            id = hand.id,
             number = about.number,
             listedAt = about.listedAt,
             cost = hand.cost ?: order.cost,
@@ -122,20 +138,17 @@ object Sales {
             brand = hand.brand.ifBlank { order.brand },
             type = hand.type.ifBlank { order.type },
             title = order.title.ifBlank { hand.title },
-            numberFreed = about.listedAt != null && article(s, order) == null,
+            listings = (hand.listings + order.listings).distinct(),
+            numberFreed = about.listedAt != null && article(s, about)?.soldIn.let { it != hand.id && it != id },
         )
-        return s.copy(
+        val next = s.copy(
             sales = s.sales.mapNotNull { if (it.id == hand.id) joined else it.takeIf { v -> v.id != id } },
             articles = s.articles.map { if (it.soldIn == id) it.copy(soldIn = hand.id) else it },
         )
+        // A finished order takes its article away.
+        val kept = article(next, joined)?.takeIf { it.soldIn == joined.id }
+        return if (joined.status == SaleStatus.COMPLETED && kept != null) free(next, kept) else next
     }
-
-    /** Each order that might repeat a hand record, with that record: for the user to say. */
-    fun doubts(s: ParentState): List<Pair<Sale, Sale>> = s.sales.filter { it.twin.isNotEmpty() && it.status != SaleStatus.CANCELLED }
-        .mapNotNull { order -> sale(s, order.twin)?.takeIf { it.status != SaleStatus.CANCELLED }?.let { order to it } }
-
-    /** The user says they are two different sales. */
-    fun separate(s: ParentState, id: String): ParentState = replace(s, required(s, id).copy(twin = ""))
 
     /** Vinted finished it: nothing changes it any more. */
     internal fun settle(s: ParentState, id: String): ParentState = replace(s, required(s, id).copy(settled = true))
@@ -159,6 +172,7 @@ object Sales {
         return sale.copy(
             // The listing is only certain when the article has a single one.
             itemId = sale.itemId.ifBlank { a.listings().distinct().singleOrNull().orEmpty() },
+            listings = (sale.listings + a.listings()).distinct(),
             title = sale.title.ifBlank { Catalog.listingText(s, a.number, account)?.title.orEmpty() },
             number = a.number,
             listedAt = a.createdAt,

@@ -7,7 +7,6 @@ import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
-import kotlin.math.abs
 
 /**
  * Bringing in what the PC read in «Mis pedidos › Ventas». The phone never talks to
@@ -102,7 +101,9 @@ object VintedSales {
     private fun relink(s: ParentState, id: String): ParentState {
         val sale = Sales.sale(s, id) ?: return s
         if (sale.status != SaleStatus.PENDING || sale.listedAt != null) return s
-        val a = byListing(s, sale.itemId)?.takeIf { it.inStock } ?: return s
+        // A cancelled hand sale may be the only one that knows which article the listing was.
+        val dropped = s.sales.filter { it.order.isEmpty() && it.status == SaleStatus.CANCELLED && sale.itemId in it.listings }
+        val a = (byListing(s, sale.itemId) ?: dropped.firstNotNullOfOrNull { Sales.article(s, it) })?.takeIf { it.inStock } ?: return s
         return Sales.assign(s, id, a.number)
     }
 
@@ -152,22 +153,12 @@ object VintedSales {
             ?: code?.first?.id ?: accountId
         val codeText = code?.let { (d, n) -> Sku.format(d.prefix, n, s.digits) }.orEmpty()
 
-        val (manual, twin) = byHand(s, item.id, found, code?.second, price, soldAt)
-        if (manual != null) {
-            val joined = manual.copy(
-                order = order.id, itemId = item.id, code = codeText, title = item.title.ifBlank { order.title },
-                photo = order.photo, price = price, deviceId = account, detail = order.detail,
-            )
-            val (next, k) = update(Sales.replace(s, joined), manual.id, order, now)
-            return next to k
-        }
-
         var sale = Sale(
             found?.number ?: code?.second ?: -1, account, price, null, null, soldAt, id = id, status = order.status,
             order = order.id, itemId = item.id, code = codeText, title = item.title.ifBlank { order.title },
             photo = order.photo, detail = order.detail,
             closedAt = if (order.status == SaleStatus.PENDING) null else order.date,
-            settled = order.status == SaleStatus.COMPLETED, twin = twin,
+            settled = order.status == SaleStatus.COMPLETED,
         )
         // An article already held by another sale is not taken from it.
         val free = found?.takeIf { it.inStock }
@@ -176,31 +167,13 @@ object VintedSales {
             SaleStatus.COMPLETED -> Kind.NEW_COMPLETED
             SaleStatus.CANCELLED -> Kind.NEW_CANCELLED
         }
-        if (free == null) return s.copy(sales = s.sales + sale) to kind
+        if (free == null) return heard(s, found, item.id).let { it.copy(sales = it.sales + sale) } to kind
         // A cancelled order only remembers which article it was about.
         if (order.status == SaleStatus.CANCELLED) return s.copy(sales = s.sales + Sales.link(s, sale, free)) to kind
         sale = Sales.link(s, sale, free).copy(status = SaleStatus.PENDING, closedAt = null)
         var next = Sales.hold(s.copy(sales = s.sales + sale), free.number, id)
         if (order.status == SaleStatus.COMPLETED) next = Sales.settle(Sales.complete(next, id, now), id)
         return next to kind
-    }
-
-    /**
-     * The sale registered here (by hand or by an earlier version) that is this same order, or
-     * else the id of one that only might be: the user decides about that one.
-     */
-    private fun byHand(s: ParentState, itemId: String, found: Article?, number: Int?, price: Long, soldAt: Long): Pair<Sale?, String> {
-        val manual = s.sales.filter { it.order.isEmpty() && it.status != SaleStatus.CANCELLED }
-        if (itemId.isNotBlank()) manual.firstOrNull { it.itemId == itemId }?.let { return it to "" }
-        // One written down for another listing is another sale.
-        val unsure = manual.filter { it.itemId.isBlank() || itemId.isBlank() }
-        // With the article still here, only a sale of that very article is this one.
-        if (found != null) return unsure.firstOrNull { it.number == found.number && it.listedAt == found.createdAt } to ""
-        if (number == null) return null to ""
-        // Its article is gone already: same number around the same days; the same money makes it certain.
-        val near = unsure.filter { it.number == number && abs(it.soldAt - soldAt) < 30 * DAY && Sales.article(s, it) == null }
-        near.firstOrNull { it.price == price }?.let { return it to "" }
-        return null to near.firstOrNull { v -> s.sales.none { it.twin == v.id } }?.id.orEmpty()
     }
 
     private fun update(s: ParentState, id: String, order: Order, now: Long): Pair<ParentState, Kind> {
@@ -242,6 +215,12 @@ object VintedSales {
                 else -> Sales.settle(Sales.complete(Sales.reopen(state, id), id, now), id) to Kind.COMPLETED
             }
         }
+    }
+
+    /** The order is about an article a hand sale keeps: that sale learns the listing, so it can warn. */
+    private fun heard(s: ParentState, a: Article?, itemId: String): ParentState {
+        val hand = a?.let { Sales.sale(s, it.soldIn) }?.takeIf { it.order.isEmpty() && itemId.isNotBlank() } ?: return s
+        return Sales.replace(s, hand.copy(listings = (hand.listings + itemId).distinct()))
     }
 
     /** Splits the money of a bundle by the garments' prices (equally without them); the cents add up. */

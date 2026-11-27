@@ -42,6 +42,8 @@ data class Sale(
     val order: String = "",
     /** Vinted's listing id of the garment. */
     val itemId: String = "",
+    /** Every listing id its article had when the sale took it: how a later order is told to be about it. */
+    val listings: List<String> = emptyList(),
     /** The code read in the listing's description, e.g. SH0012. */
     val code: String = "",
     /** Listing title and photo, as the order shows them. */
@@ -59,8 +61,6 @@ data class Sale(
     val numberFreed: Boolean = false,
     /** Vinted itself finished it: nothing changes it again. */
     val settled: Boolean = false,
-    /** The hand sale this order may be the same as, until the user says. */
-    val twin: String = "",
 )
 
 object Money {
@@ -124,7 +124,7 @@ object Ledger {
 
     /** A lot's numbers: only finished sales have recovered money. */
     fun stats(s: ParentState, lot: Lot): LotStats {
-        val sales = counted(s.sales).filter { it.lotId == lot.id }
+        val sales = s.sales.filter { it.lotId == lot.id }
         val done = sales.filter { it.status == SaleStatus.COMPLETED }
         val recovered = done.sumOf { it.price }
         val inStock = s.articles.count { it.lotId == lot.id && it.inStock }
@@ -132,20 +132,14 @@ object Ledger {
         return LotStats(done.size, lot.quantity, inStock, recovered, recovered - lot.price, pending)
     }
 
-    /** [sales] without the hand records that may repeat an order: until the user says, they count once. */
-    fun counted(sales: List<Sale>): List<Sale> {
-        val repeated = sales.filter { it.twin.isNotEmpty() && it.status != SaleStatus.CANCELLED }.map { it.twin }.toSet()
-        return if (repeated.isEmpty()) sales else sales.filter { it.id !in repeated }
-    }
-
     /** Money of the finished ones among [sales]; the profit only counts those whose cost is known. */
     fun totals(sales: List<Sale>): Totals {
-        val done = counted(sales).filter { it.status == SaleStatus.COMPLETED }
+        val done = sales.filter { it.status == SaleStatus.COMPLETED }
         val known = done.filter { it.cost != null }
         val cost = known.sumOf { it.cost!! }
         return Totals(done.size, done.sumOf { it.price }, cost, known.sumOf { it.price } - cost)
     }
 
     fun totalsBetween(s: ParentState, from: Long, until: Long): Totals =
-        totals(counted(s.sales).filter { it.soldAt in from until until })
+        totals(s.sales.filter { it.soldAt in from until until })
 }

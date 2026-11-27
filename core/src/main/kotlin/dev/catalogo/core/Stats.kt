@@ -81,8 +81,7 @@ object Stats {
         val pendingProfit: Long = 0,
     )
 
-    fun summary(all: List<Sale>): Summary {
-        val sales = Ledger.counted(all)
+    fun summary(sales: List<Sale>): Summary {
         val done = sales.filter { it.status == SaleStatus.COMPLETED }
         val pending = sales.filter { it.status == SaleStatus.PENDING }
         val totals = Ledger.totals(done)
@@ -103,9 +102,8 @@ object Stats {
 
     fun kpis(s: ParentState, now: Long, zone: ZoneId = ZoneId.systemDefault(), months: Int = 6): Kpis {
         val stock = s.articles.filter { it.inStock }
-        val counted = Ledger.counted(s.sales)
-        val sales = counted.filter { it.status == SaleStatus.COMPLETED }
-        val pending = counted.filter { it.status == SaleStatus.PENDING }
+        val sales = s.sales.filter { it.status == SaleStatus.COMPLETED }
+        val pending = s.sales.filter { it.status == SaleStatus.PENDING }
         val totals = Ledger.totals(sales)
         val costOfSold = totals.cost
         val revenue = totals.revenue

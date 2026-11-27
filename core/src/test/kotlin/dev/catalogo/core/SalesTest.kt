@@ -305,76 +305,88 @@ class VintedSalesTest {
     private fun paidByHand(price: Long = 1_620, base: ParentState = shop()) =
         Sales.complete(Sales.register(base, 0, "m1", "p", price, null, 28 * DAY), "m1", 28 * DAY)
 
+    /** The same, with the listing of article 0 known to the app. */
+    private fun listed(item: String = "900") = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = item))
+
+    /** What an earlier version left: a hand sale already joined to the order "1". */
+    private fun joinedBefore() = paidByHand().let { it.copy(sales = listOf(it.only().copy(order = "1"))) }
+
+    private fun ParentState.hand() = Sales.sale(this, "m1")!!
+
     @Test
-    fun `Vinted says whether the money of a hand sale is in`() {
-        var s = paidByHand().sync(order("1"), one("SH0000")).first
+    fun `sales an earlier version joined and left as paid go back to waiting`() {
+        var (s, counts) = VintedSales.applyAll(joinedBefore(), "p", listOf(order("1") to one("SH0000")), 40 * DAY)
         assertEquals(SaleStatus.PENDING, s.only().status)
         assertNull(s.only().closedAt)
         assertTrue(s.only().numberFreed)
+        assertEquals(mapOf(VintedSales.Kind.UNPAID to 1), counts)
         s = s.sync(order("1", SaleStatus.COMPLETED), now = 41 * DAY).first
         assertEquals(SaleStatus.COMPLETED, s.only().status)
         assertTrue(s.only().settled)
         assertEquals(s.only().status, s.sync(order("1"), now = 42 * DAY).first.only().status, "finished in Vinted is final")
+        assertEquals(SaleStatus.CANCELLED, joinedBefore().sync(order("1", SaleStatus.CANCELLED)).first.only().status)
     }
 
     @Test
-    fun `sales the previous version joined and left as paid go back to waiting`() {
-        val joined = paidByHand().let { it.copy(sales = listOf(it.only().copy(order = "1"))) }
-        val (s, counts) = VintedSales.applyAll(joined, "p", listOf(order("1") to one("SH0000")), 40 * DAY)
-        assertEquals(SaleStatus.PENDING, s.only().status)
-        assertEquals(mapOf(VintedSales.Kind.UNPAID to 1), counts)
-        val cancelled = joined.sync(order("1", SaleStatus.CANCELLED)).first
-        assertEquals(SaleStatus.CANCELLED, cancelled.only().status)
-    }
-
-    @Test
-    fun `a hand sale knows its listing and joins its order whatever the price`() {
-        val listed = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = "900"))
-        val s = paidByHand(1_500, listed)
-        assertEquals("900", s.only().itemId)
-        val after = s.sync(order("1"), one("SH0000")).first
-        assertEquals("m1", after.only().id)
-        assertEquals(1_620, after.only().price)
-    }
-
-    @Test
-    fun `a hand sale of another listing is a different sale`() {
-        val listed = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = "500"))
-        val s = paidByHand(1_620, listed).sync(order("1"), one("SH0000")).first
+    fun `a sale by hand is one outside Vinted, whatever code and price an order has`() {
+        val before = paidByHand(1_620)
+        val s = before.sync(order("1"), one("SH0000")).first
         assertEquals(2, s.sales.size)
-        assertTrue(s.sales.all { it.twin == "" })
-    }
-
-    private fun doubtful() = paidByHand(1_500).sync(order("1"), one("SH0000")).first
-
-    @Test
-    fun `a possible repeat waits for the user and counts once`() {
-        val s = doubtful()
-        assertEquals(listOf("", "m1"), s.sales.map { it.twin })
+        assertEquals(before.hand(), s.hand())
+        assertTrue(Sales.doubts(s).isEmpty())
         val sum = Stats.summary(s.sales)
-        assertEquals(0 to 1, sum.sold to sum.pending)
-        assertEquals(1_620, sum.pendingRevenue)
-        assertEquals(0, Ledger.stats(s, s.lots.single()).sold)
+        assertEquals(1 to 1, sum.sold to sum.pending)
     }
 
     @Test
-    fun `saying it is the same sale joins them and keeps the cost`() {
-        val s = Sales.merge(doubtful(), "v1")
+    fun `an order of another listing raises no warning`() {
+        val s = paidByHand(1_620, listed("500")).sync(order("1"), one("SH0000")).first
+        assertEquals(2, s.sales.size)
+        assertTrue(Sales.doubts(s).isEmpty())
+    }
+
+    private fun soldTwice() = paidByHand(1_500, listed()).sync(order("1"), one("SH0000")).first
+
+    @Test
+    fun `Vinted selling a listing already sold by hand only warns`() {
+        val s = soldTwice()
+        assertEquals(paidByHand(1_500, listed()).hand(), s.hand())
+        assertEquals(listOf("v1" to "m1"), Sales.doubts(s).map { it.first.id to it.second.id })
+    }
+
+    @Test
+    fun `a hand sale remembers every listing of its garment`() {
+        val title = Catalog.listingText(shop(), 0, samsung)!!.title
+        val two = VintedWardrobe.apply(listed("950"), "p", listOf(VintedWardrobe.Remote("900", title, 2_500, 1, 1, "active")), 15 * DAY).first
+        val sold = paidByHand(1_500, two)
+        assertEquals(setOf("900", "950"), sold.hand().listings.toSet())
+        for (item in listOf("900", "950")) {
+            assertEquals(1, Sales.doubts(sold.sync(order("1"), one("SH0000", item)).first).size, item)
+        }
+    }
+
+    @Test
+    fun `cancelling that order in Vinted leaves the hand sale as it was`() {
+        val twice = soldTwice()
+        val s = twice.sync(order("1", SaleStatus.CANCELLED)).first
+        assertEquals(twice.hand(), s.hand())
+        assertTrue(Sales.doubts(s).isEmpty())
+        assertNull(s.article(0))
+    }
+
+    @Test
+    fun `saying it is the same sale joins them with Vinted's data and the hand cost`() {
+        val s = Sales.merge(soldTwice(), "v1")
         assertEquals("m1", s.only().id)
         assertEquals("1", s.only().order)
         assertEquals(1_620, s.only().price)
         assertEquals(1_000, s.only().cost)
+        assertEquals(0, s.only().number)
         assertEquals(SaleStatus.PENDING, s.only().status)
-        assertEquals(s, VintedSales.applyAll(s, "p", listOf(order("1") to one("SH0000")), 40 * DAY).first.let { it.copy(sales = it.sales.map { v -> v.copy(detail = s.only().detail) }) })
+        assertTrue(s.only().numberFreed)
+        assertTrue(Sales.doubts(s).isEmpty())
+        assertEquals(1, s.sync(order("1")).first.sales.size)
         assertFailsWith<CatalogException> { Sales.merge(s, "m1") }
-    }
-
-    @Test
-    fun `saying they are two keeps and counts both`() {
-        val s = Sales.separate(doubtful(), "v1")
-        assertEquals(2, s.sales.size)
-        val sum = Stats.summary(s.sales)
-        assertEquals(1 to 1, sum.sold to sum.pending)
     }
 
     @Test
@@ -551,30 +563,49 @@ class VintedSalesTest {
         assertFailsWith<CatalogException> { Sales.assign(s, s.only().id, 1) }
     }
 
+    /** Article 0 sold by hand and still kept, with no listing the app knows. */
+    private fun heldByHand() = Sales.register(shop(), 0, "m1", "p", 1_700, null, 28 * DAY)
+
     @Test
-    fun `a sale registered by hand is joined to its order, not repeated`() {
-        val manual = Sales.register(shop(), 0, "m1", "p", 1_700, null, 28 * DAY)
-        val (s, _) = manual.sync(order("1"), one("SH0000"))
-        assertEquals("1", s.only().order)
-        assertEquals("m1", s.only().id)
-        assertEquals(1_620, s.only().price, "Vinted knows the real price")
-        assertTrue(s.article(0)!!.held)
+    fun `an order for an article sold by hand does not take it, and warns`() {
+        val s = heldByHand().sync(order("1"), one("SH0000")).first
+        assertEquals(2, s.sales.size)
+        assertEquals(1_700, s.hand().price)
+        assertEquals("m1", s.article(0)!!.soldIn)
+        assertEquals(listOf("v1" to "m1"), Sales.doubts(s).map { it.first.id to it.second.id })
     }
 
     @Test
-    fun `a manual sale already finished is recognised too`() {
-        val done = Sales.complete(Sales.register(shop(), 0, "m1", "p", 1_620, null, 28 * DAY), "m1", 28 * DAY)
-        val (s, _) = done.sync(order("1", SaleStatus.COMPLETED), one("SH0000"))
-        assertEquals("1", s.only().order)
+    fun `joining a finished order frees the article the hand sale kept`() {
+        val twice = heldByHand().sync(order("1", SaleStatus.COMPLETED), one("SH0000")).first
+        val s = Sales.merge(twice, "v1")
+        assertEquals(SaleStatus.COMPLETED, s.only().status)
+        assertTrue(s.only().settled)
+        assertNull(s.article(0))
     }
 
     @Test
-    fun `a sale saved by an earlier version is recognised instead of repeated`() {
+    fun `joining an order in progress keeps the article held`() {
+        val s = Sales.merge(heldByHand().sync(order("1"), one("SH0000")).first, "v1")
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertEquals("m1", s.article(0)!!.soldIn)
+    }
+
+    @Test
+    fun `cancelling the hand sale lets the order take the article`() {
+        val twice = heldByHand().sync(order("1"), one("SH0000")).first
+        val s = Sales.cancel(twice, "m1", 41 * DAY).sync(order("1")).first
+        assertEquals("v1", s.article(0)!!.soldIn)
+        assertTrue(Sales.doubts(s).isEmpty())
+    }
+
+    @Test
+    fun `a sale saved by an earlier version is left alone`() {
         val old = Sale(0, "p", 1_620, 1_000, "L1", 28 * DAY, id = "a0")
         val gone = Catalog.delete(shop(), 0).copy(sales = listOf(old))
         val (s, _) = gone.sync(order("1", SaleStatus.COMPLETED), one("SH0000"))
-        assertEquals("1", s.only().order)
-        assertEquals("a0", s.only().id)
+        assertEquals(old, s.sales.first())
+        assertEquals(2, s.sales.size)
     }
 
     @Test

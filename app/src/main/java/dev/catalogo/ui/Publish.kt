@@ -186,7 +186,7 @@ fun SellDialog(
                         else -> "Queda en curso: la prenda se guarda con su número y, si la anulas, vuelve como estaba."
                     },
                 )
-                Muted("Si la has vendido fuera de Vinted, borra allí su anuncio.")
+                Muted("Solo para ventas fuera de Vinted: las de Vinted las apunta el PC. Borra allí su anuncio.")
             }
         },
         confirmButton = {

@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Garments
-import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sale
@@ -143,7 +142,7 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
     val view by vm.salesView.collectAsStateWithLifecycle()
     val reading by vm.reading.collectAsStateWithLifecycle()
     val working = reading?.working == true
-    val sales = remember(p) { Ledger.counted(p.sales) }
+    val sales = p.sales
     val total = remember(p) { Stats.summary(p.sales) }
     val doubts = remember(p) { Sales.doubts(p) }
 
@@ -231,11 +230,11 @@ private fun costNote(sales: List<Sale>, status: SaleStatus): String {
     return if (unknown == 0) "descontado el coste" else "$unknown sin coste, fuera"
 }
 
-/** A Vinted order and a sale written by hand that may be one and the same: only the user knows. */
+/** A Vinted order about a garment already sold by hand: the user is told, nothing is touched. */
 @Composable
 fun DoubtCard(vm: MainViewModel, p: ParentState, order: Sale, hand: Sale) {
     Tile {
-        Text("¿Es la misma venta?", style = MaterialTheme.typography.titleMedium, color = Tone.Warn.color)
+        Text("Ya la marcaste como vendida", style = MaterialTheme.typography.titleMedium, color = Tone.Warn.color)
         Text(saleTitle(order), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
         for ((from, sale) in listOf("En Vinted" to order, "Apuntada a mano" to hand)) {
             Row(Modifier.fillMaxWidth()) {
@@ -243,9 +242,9 @@ fun DoubtCard(vm: MainViewModel, p: ParentState, order: Sale, hand: Sale) {
                 Text(Money.format(sale.price), style = Mono.copy(fontSize = 14.sp), maxLines = 1, softWrap = false)
             }
         }
-        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            FilledTonalButton(onClick = { vm.mergeSale(order.id) }, modifier = Modifier.weight(1f)) { Text("Es la misma", maxLines = 1) }
-            OutlinedButton(onClick = { vm.separateSale(order.id) }, modifier = Modifier.weight(1f)) { Text("Son dos", maxLines = 1) }
+        Muted("Si la vendiste fuera, cancela el pedido en Vinted: el aviso se quitará cuando el PC lo lea.")
+        FilledTonalButton(onClick = { vm.mergeSale(order.id) }, modifier = Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            Text("Es la misma", maxLines = 1)
         }
     }
 }
@@ -308,7 +307,7 @@ private fun SaleCard(vm: MainViewModel, p: ParentState, sale: Sale) {
 fun SalesStatsScreen(vm: MainViewModel, p: ParentState) {
     val view by vm.salesView.collectAsStateWithLifecycle()
     val now = remember(p) { System.currentTimeMillis() }
-    val inPeriod = remember(p, view.period) { Stats.within(Ledger.counted(p.sales), view.period, now) }
+    val inPeriod = remember(p, view.period) { Stats.within(p.sales, view.period, now) }
     val summary = remember(inPeriod) { Stats.summary(inPeriod) }
     val all = remember(p) { Stats.kpis(p, now) }
     val period = remember(p, inPeriod) { Stats.kpis(p.copy(sales = inPeriod), now) }

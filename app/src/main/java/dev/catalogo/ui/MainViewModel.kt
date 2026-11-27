@@ -520,7 +520,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun mergeSale(id: String) = sale("Unidas en una sola venta") { SalesRules.merge(it, id) }
-    fun separateSale(id: String) = sale("Quedan como dos ventas") { SalesRules.separate(it, id) }
     fun completeSale(id: String) = sale("Venta completada") { SalesRules.complete(it, id, System.currentTimeMillis()) }
     fun cancelSale(id: String) = sale("Venta anulada") { SalesRules.cancel(it, id, System.currentTimeMillis()) }
     fun releaseSale(id: String) = sale("Número libre: la venta sigue en curso") { SalesRules.release(it, id) }

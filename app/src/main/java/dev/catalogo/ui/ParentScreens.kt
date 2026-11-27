@@ -332,11 +332,7 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 Tile {
                     Text("Vendido en Vinted", style = MaterialTheme.typography.titleMedium)
                     Muted(listOfNotNull(Catalog.device(p, deviceId)?.label, item.price?.let(Money::format)).joinToString(GAP))
-                    FilledTonalButton(
-                        onClick = { selling = true },
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        shape = RoundedCornerShape(14.dp),
-                    ) { Text("Registrar la venta") }
+                    Muted("No hace falta marcarla: el PC la apunta al leer tus ventas.")
                 }
             }
 
