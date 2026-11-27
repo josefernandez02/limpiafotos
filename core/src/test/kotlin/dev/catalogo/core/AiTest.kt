@@ -78,7 +78,7 @@ class AiTest {
     @Test
     fun `listing text uses ai titles only while the data they were written for is unchanged`() {
         val samsung = Device("p", "Samsung", "SH")
-        val poco = Device("c1", "Poco", "SA", "s1", style = 1)
+        val poco = Device("c1", "Poco", "SA", style = 1)
         var (s, n) = Catalog.create(ParentState(self = samsung, children = listOf(poco)), 0)
         val listing = levis.copy(type = "jeans")
         val ai = AiResult(Ai.basis(listing), titles = mapOf("p" to "AI SH", "c1" to "AI SA"))

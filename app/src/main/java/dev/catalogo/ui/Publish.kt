@@ -1,6 +1,5 @@
 package dev.catalogo.ui
 
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Checkbox
@@ -8,20 +7,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -29,7 +23,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -42,7 +35,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.catalogo.core.ListingText
 
 /** Bottom tabs of the main phone. */
 @Composable
@@ -84,50 +76,6 @@ fun MainTabs(vm: MainViewModel, current: Screen) {
             label = { Text("Inventario") },
             colors = colors,
         )
-    }
-}
-
-/** Title + description ready to publish, with copy and open-Vinted actions. */
-@Composable
-fun ListingCard(vm: MainViewModel, text: ListingText?, onComplete: (() -> Unit)? = null) {
-    Tile {
-        if (text == null) {
-            Muted("Sin datos del anuncio")
-            if (onComplete != null) {
-                FilledTonalButton(
-                    onClick = onComplete,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    shape = RoundedCornerShape(14.dp),
-                ) { Text("Completar datos") }
-            }
-            return@Tile
-        }
-        Text(text.title, style = MaterialTheme.typography.titleMedium)
-        Text(
-            text.description,
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 8.dp),
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilledTonalButton(
-                onClick = { vm.copy("Título", text.title) },
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-            ) { Text("Copiar título", maxLines = 1, softWrap = false) }
-            FilledTonalButton(
-                onClick = { vm.copyDescription(text.description) },
-                modifier = Modifier.weight(1f).height(48.dp),
-                shape = RoundedCornerShape(14.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp),
-            ) { Text("Copiar descripción", maxLines = 1, softWrap = false) }
-        }
-        OutlinedButton(
-            onClick = { vm.openVinted() },
-            modifier = Modifier.fillMaxWidth().padding(top = 4.dp).height(48.dp),
-            shape = RoundedCornerShape(14.dp),
-        ) { Text("Abrir Vinted") }
     }
 }
 

@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 private val main = Device("p", "Samsung", "SH", account = "tienda", vintedId = "111")
-private val other = Device("c1", "Poco", "SA", "s", style = 1, vintedId = "222")
+private val other = Device("c1", "Poco", "SA", style = 1, vintedId = "222")
 
 private fun sale(
     order: String, detail: String = "Pago realizado correctamente", status: SaleStatus = SaleStatus.PENDING,

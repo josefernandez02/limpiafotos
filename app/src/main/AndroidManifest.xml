@@ -15,7 +15,6 @@
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <queries>
-        <package android:name="fr.vinted" />
         <!-- The label printer's app (4BarCode), and any app that takes a PDF in case it is another one -->
         <package android:name="com.xinye.barcode4" />
         <intent>

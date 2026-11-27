@@ -8,7 +8,7 @@ import kotlin.test.assertNull
 class LedgerTest {
 
     private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA", "s", style = 1)
+    private val poco = Device("c1", "Poco", "SA", style = 1)
 
     private fun withLot(): ParentState {
         var s = ParentState(self = samsung, children = listOf(poco))
@@ -65,7 +65,6 @@ class LedgerTest {
         assertEquals(3_500, all.revenue)
         assertEquals(1_400, all.cost)
         assertEquals(2_100, all.profit)
-        assertEquals(1, Ledger.totalsBetween(s, 0, 10).count)
     }
 
     @Test

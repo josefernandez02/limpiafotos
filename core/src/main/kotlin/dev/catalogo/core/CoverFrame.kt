@@ -535,23 +535,6 @@ object CoverFrame {
         return Box(x0, y0, x1, y1)
     }
 
-    /** How alike the silhouette is to its own mirror image (1 = identical), about the middle of its width. */
-    fun symmetry(m: Mask): Float {
-        val box = bounds(m) ?: return 0f
-        val sum = box.x0 + box.x1
-        var both = 0
-        var either = 0
-        for (y in box.y0..box.y1) {
-            for (x in box.x0..box.x1) {
-                val a = m.on[y * m.w + x]
-                val b = m.at(sum - x, y)
-                if (a && b) both++
-                if (a || b) either++
-            }
-        }
-        return if (either == 0) 0f else both.toFloat() / either
-    }
-
     /** The cells on the silhouette's outline (a photo's edge is not the garment's edge), as their centres. */
     private fun outlinePoints(m: Mask): Pair<FloatArray, FloatArray> {
         val xs = ArrayList<Float>()

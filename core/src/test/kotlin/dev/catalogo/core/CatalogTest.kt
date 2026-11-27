@@ -9,8 +9,8 @@ import kotlin.test.assertTrue
 class CatalogTest {
 
     private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA", "s1")
-    private val third = Device("c2", "Tercero", "SB", "s2")
+    private val poco = Device("c1", "Poco", "SA")
+    private val third = Device("c2", "Tercero", "SB")
 
     private fun state(vararg children: Device) = ParentState(self = samsung, children = children.toList())
 
@@ -48,74 +48,12 @@ class CatalogTest {
     }
 
     @Test
-    fun `released number stays taken until every child confirms`() {
-        var s = state(poco, third)
-        repeat(3) { s = s.create().first }
-        s = Catalog.release(s, 1)
-        assertEquals(3, Catalog.nextFree(s), "1 is still pending on children")
-        assertEquals(listOf(1), Catalog.releasesFor(s, "c1"))
-        assertEquals(listOf(1), Catalog.releasesFor(s, "c2"))
-
-        s = Catalog.confirmRelease(s, 1, "c1")
-        assertEquals(3, Catalog.nextFree(s))
-        assertEquals(emptyList(), Catalog.releasesFor(s, "c1"))
-
-        s = Catalog.confirmRelease(s, 1, "c2")
-        assertEquals(1, Catalog.nextFree(s), "free once both confirmed")
-        assertNull(Catalog.article(s, 1))
-    }
-
-    @Test
-    fun `release without children frees immediately`() {
-        var s = state()
-        s = s.create().first
-        s = Catalog.release(s, 0)
-        assertEquals(0, Catalog.nextFree(s))
-    }
-
-    @Test
-    fun `release originated on a child skips that child`() {
-        var s = state(poco, third)
-        s = s.create().first
-        s = Catalog.release(s, 0, confirmedBy = "c1")
-        assertEquals(emptyList(), Catalog.releasesFor(s, "c1"))
-        assertEquals(listOf(0), Catalog.releasesFor(s, "c2"))
-        s = Catalog.confirmRelease(s, 0, "c2")
-        assertEquals(0, Catalog.nextFree(s))
-    }
-
-    @Test
-    fun `child release after parent release just confirms`() {
-        var s = state(poco)
-        s = s.create().first
-        s = Catalog.release(s, 0)
-        s = Catalog.release(s, 0, confirmedBy = "c1")
-        assertEquals(0, Catalog.nextFree(s))
-    }
-
-    @Test
-    fun `release of unknown number is ignored`() {
-        val s = state(poco)
-        assertEquals(s, Catalog.release(s, 42))
-        assertEquals(s, Catalog.confirmRelease(s, 42, "c1"))
-    }
-
-    @Test
     fun `removing a child unblocks its pending releases`() {
         var s = state(poco)
-        s = s.create().first
-        s = Catalog.release(s, 0)
+        // as saved by earlier versions: sold, waiting for another phone to confirm
+        s = s.copy(articles = listOf(Article(0, 0, released = true, pendingRelease = setOf("c1"))))
         s = Catalog.removeChild(s, "c1")
         assertEquals(0, Catalog.nextFree(s))
-    }
-
-    @Test
-    fun `delivered counts accumulate and reset on release`() {
-        var s = state(poco)
-        s = s.create().first
-        s = Catalog.markDelivered(s, 0, "c1", 5)
-        s = Catalog.markDelivered(s, 0, "c1", 2)
-        assertEquals(7, Catalog.article(s, 0)!!.delivered["c1"])
     }
 
     @Test
@@ -128,7 +66,6 @@ class CatalogTest {
         val renamed = Catalog.renameDevice(s, "c1", " Poco F3 ", "sx")
         assertEquals("Poco F3", renamed.children.single().name)
         assertEquals("SX", renamed.children.single().prefix)
-        assertTrue(renamed.configVersion > s.configVersion, "children learn renames on next sync")
     }
 
     @Test
@@ -147,7 +84,7 @@ class CatalogTest {
         repeat(1000) { s = s.create().first }
         assertNull(Catalog.nextFree(s))
         assertFailsWith<CatalogException> { s.create() }
-        s = Catalog.release(s, 500)
+        s = Catalog.delete(s, 500)
         assertEquals(500, Catalog.nextFree(s))
     }
 

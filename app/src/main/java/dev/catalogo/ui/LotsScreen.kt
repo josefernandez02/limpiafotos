@@ -44,7 +44,6 @@ import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.height
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.style.TextOverflow
 

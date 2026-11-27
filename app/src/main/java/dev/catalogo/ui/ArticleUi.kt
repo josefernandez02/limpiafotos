@@ -37,8 +37,6 @@ import androidx.compose.ui.unit.sp
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.Desk
-import dev.catalogo.core.Device
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sizes

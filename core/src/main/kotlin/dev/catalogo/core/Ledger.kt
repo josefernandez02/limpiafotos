@@ -139,7 +139,4 @@ object Ledger {
         val cost = known.sumOf { it.cost!! }
         return Totals(done.size, done.sumOf { it.price }, cost, known.sumOf { it.price } - cost)
     }
-
-    fun totalsBetween(s: ParentState, from: Long, until: Long): Totals =
-        totals(s.sales.filter { it.soldAt in from until until })
 }

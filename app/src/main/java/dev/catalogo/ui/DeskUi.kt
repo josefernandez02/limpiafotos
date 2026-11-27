@@ -10,11 +10,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import dev.catalogo.core.Sku
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -53,14 +51,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Desk
 import dev.catalogo.core.Mode
 import dev.catalogo.core.Stage
-import dev.catalogo.core.Draft
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.PcLink
 import dev.catalogo.core.Sizes
@@ -521,7 +517,7 @@ fun PcSettingsTile(vm: MainViewModel, saved: PcLink?) {
             )
             return@Tile
         }
-        Muted("Dirección del PC con el puerto (Tailscale o wifi de casa), p. ej. 100.112.139.110:8765, y la clave de config.toml")
+        Muted("Dirección del PC con el puerto (Tailscale o wifi de casa), p. ej. 100.64.0.1:8765, y la clave de config.toml")
         OutlinedTextField(
             value = url,
             onValueChange = { url = it.trim().take(80) },

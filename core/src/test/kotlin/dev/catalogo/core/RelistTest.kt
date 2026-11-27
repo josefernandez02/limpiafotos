@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 class RelistTest {
 
     private val samsung = Device("p", "Samsung", "SH", account = "shiorawear")
-    private val poco = Device("c1", "Poco", "SA", "s1", account = "otra")
+    private val poco = Device("c1", "Poco", "SA", account = "otra")
     private val levis = Listing(type = "jeans", brand = "Levi's", model = "501", size = "W32 L34", gender = Gender.MEN, notes = "Tiene un roto")
     private val oldTags = listOf("levis", "levis501", "jeans", "vaqueros", "straightjeans", "vaquerosrectos", "90s", "vintage", "levisvintage", "denim")
 
@@ -99,7 +99,7 @@ class RelistTest {
     @Test
     fun `a sold or deleted article is not re-listed`() {
         val (s, n) = published()
-        val gone = Catalog.release(s, n)
+        val gone = Catalog.delete(s, n)
         assertEquals(gone, Catalog.relist(gone, n))
         assertEquals(s, Catalog.relist(s, 99))
     }

@@ -8,7 +8,6 @@ data class Device(
     val id: String,
     val name: String,
     val prefix: String,
-    val secret: String = "",
     /** Listing style (vocabulary and phrasing family) used for this phone's texts. */
     val style: Int = 0,
     /** Description template; blank means the style's default. */
@@ -31,7 +30,6 @@ data class VintedItem(
     val favourites: Int? = null,
     /** "active", "reserved", "hidden" or "sold". */
     val status: String = "active",
-    val checkedAt: Long = 0,
 )
 
 /**
@@ -188,7 +186,6 @@ data class ParentState(
     val children: List<Device> = emptyList(),
     val articles: List<Article> = emptyList(),
     val session: Session? = null,
-    val configVersion: Long = 1,
     val lots: List<Lot> = emptyList(),
     val sales: List<Sale> = emptyList(),
     /** When the PC last finished reading the sales, as it told this phone (0 = never). */

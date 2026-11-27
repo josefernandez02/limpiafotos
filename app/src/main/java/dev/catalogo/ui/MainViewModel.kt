@@ -31,14 +31,10 @@ import kotlinx.coroutines.sync.withLock
 import dev.catalogo.core.Device
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Money
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Intent
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.withContext
@@ -61,8 +57,6 @@ sealed interface Screen {
     /** Order, cover and crop of [deviceId]'s photos of [number]. */
     data class Photos(val number: Int, val deviceId: String) : Screen
 }
-
-private const val VINTED_PACKAGE = "fr.vinted"
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val app = application as CatalogoApp
@@ -676,28 +670,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         back()
     }
 
-    // ---------- publishing helpers ----------
-
-    fun copy(label: String, text: String) {
-        val clipboard = getApplication<Application>().getSystemService(ClipboardManager::class.java)
-        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
-        _message.value = "$label copiado"
-    }
-
-    fun copyDescription(text: String) {
-        copy("Descripción", text)
-        _message.value = "Descripción copiada"
-    }
-
-    fun openVinted() {
-        val context = getApplication<Application>()
-        val intent = context.packageManager.getLaunchIntentForPackage(VINTED_PACKAGE)
-        if (intent == null) {
-            _message.value = "Vinted no está instalada"
-            return
-        }
-        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    }
+    // ---------- camera session ----------
 
     fun startSession(number: Int, deviceId: String, openCamera: () -> Unit) = run {
         repo.startSession(number, deviceId)

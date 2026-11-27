@@ -9,7 +9,7 @@ import kotlin.test.assertTrue
 class StatsTest {
     private val day = 86_400_000L
     private val samsung = Device("p", "Samsung", "SH", account = "shiorawear")
-    private val poco = Device("c1", "Poco", "SA", "s1", style = 1)
+    private val poco = Device("c1", "Poco", "SA", style = 1)
 
     @Test
     fun `kpis count stock, sales, speed and age`() {
@@ -51,7 +51,7 @@ class StatsTest {
 
 class AccountsTest {
     private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA", "s1", style = 1)
+    private val poco = Device("c1", "Poco", "SA", style = 1)
 
     @Test
     fun `chosen accounts drive what is left to upload`() {

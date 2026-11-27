@@ -148,7 +148,7 @@ object Catalog {
         if (s.children.none { it.style == s.self.style }) return s
         val other = (s.self.style + 1) % Garments.STYLES
         val children = s.children.map { c -> if (c.style != s.self.style) c else c.copy(style = other) }
-        return s.copy(children = children, configVersion = s.configVersion + 1)
+        return s.copy(children = children)
     }
 
     /** Style for a newly paired phone: never the main phone's own style. */
@@ -161,7 +161,6 @@ object Catalog {
         } else {
             s.copy(
                 children = s.children.map { if (it.id == id) it.copy(style = style.mod(Garments.STYLES), template = clean) else it },
-                configVersion = s.configVersion + 1,
             )
         }
     }
@@ -183,17 +182,6 @@ object Catalog {
     }
 
     /**
-     * Marks [number] as sold. Every child must confirm, except [confirmedBy]
-     * (the child that originated the release, already done there).
-     */
-    fun release(s: ParentState, number: Int, confirmedBy: String? = null): ParentState {
-        val a = article(s, number) ?: return s
-        val done = setOfNotNull(confirmedBy)
-        val pending = if (a.released) a.pendingRelease - done else s.children.map { it.id }.toSet() - done
-        return settle(s, a.copy(released = true, pendingRelease = pending, delivered = emptyMap()))
-    }
-
-    /**
      * Removes an article added by mistake, without a sale: its number is free at
      * once (other accounts have no phone of their own left to confirm anything).
      */
@@ -202,22 +190,6 @@ object Catalog {
         if (a.held) throw CatalogException("Tiene una venta en curso: anúlala primero")
         // Its number becomes free, and the PC, if it has it, must drop it.
         return Sales.free(s, a)
-    }
-
-    fun confirmRelease(s: ParentState, number: Int, childId: String): ParentState {
-        val a = article(s, number) ?: return s
-        if (!a.released) return s
-        return settle(s, a.copy(pendingRelease = a.pendingRelease - childId))
-    }
-
-    fun releasesFor(s: ParentState, childId: String): List<Int> =
-        s.articles.filter { it.released && childId in it.pendingRelease }.map { it.number }
-
-    fun markDelivered(s: ParentState, number: Int, childId: String, count: Int): ParentState {
-        val a = article(s, number) ?: return s
-        if (a.released) return s
-        val total = (a.delivered[childId] ?: 0) + count
-        return replace(s, a.copy(delivered = a.delivered + (childId to total)))
     }
 
     fun addChild(s: ParentState, device: Device): ParentState {
@@ -242,7 +214,7 @@ object Catalog {
             s.copy(self = s.self.copy(name = cleanName, prefix = cleanPrefix))
         } else {
             val children = s.children.map { if (it.id == id) it.copy(name = cleanName, prefix = cleanPrefix) else it }
-            s.copy(children = children, configVersion = s.configVersion + 1)
+            s.copy(children = children)
         }
     }
 
@@ -252,7 +224,7 @@ object Catalog {
      * member id is taken. A link without a name fills the name too.
      */
     fun setAccount(s: ParentState, id: String, account: String, profile: String): ParentState {
-        val link = VintedWardrobe.profile(profile)
+        val link = VintedProfile.parse(profile)
         if (profile.isNotBlank() && link == null) throw CatalogException("Enlace de perfil no válido")
         val name = account.trim().removePrefix("@").ifBlank { link?.second.orEmpty() }
         if (name.length > 40) throw CatalogException("Nombre de cuenta demasiado largo")
@@ -261,7 +233,7 @@ object Catalog {
         }
         fun Device.update() = copy(account = name, vintedId = link?.first.orEmpty())
         return if (id == s.self.id) s.copy(self = s.self.update())
-        else s.copy(children = s.children.map { if (it.id == id) it.update() else it }, configVersion = s.configVersion + 1)
+        else s.copy(children = s.children.map { if (it.id == id) it.update() else it })
     }
 
     fun setDigits(s: ParentState, digits: Int): ParentState {
@@ -269,7 +241,7 @@ object Catalog {
         val highest = s.articles.maxOfOrNull { it.number } ?: -1
         if (highest > Sku.maxNumber(digits)) throw CatalogException("Hay artículos que no caben en $digits dígitos")
         if (digits == s.digits) return s
-        return s.copy(digits = digits, configVersion = s.configVersion + 1)
+        return s.copy(digits = digits)
     }
 
     fun validateDevice(s: ParentState, id: String, name: String, prefix: String) {

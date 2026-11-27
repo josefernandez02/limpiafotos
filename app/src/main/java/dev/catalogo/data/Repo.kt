@@ -10,14 +10,12 @@ import dev.catalogo.core.CatalogException
 import dev.catalogo.core.Device
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Listing
-import dev.catalogo.core.ListingText
 import dev.catalogo.core.Ids
 import dev.catalogo.core.Labels
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sales
 import dev.catalogo.core.Session
 import dev.catalogo.core.Sku
-import dev.catalogo.core.VintedWardrobe
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -38,8 +36,6 @@ class Repo(context: Context) {
 
     private fun parent(): ParentState = state.parent ?: throw CatalogException("Este móvil no es el principal")
 
-    /** The main phone's catalogue as it is now. */
-    fun catalog(): ParentState = parent()
 
     fun sku(device: Device, number: Int, digits: Int) = Sku.format(device.prefix, number, digits)
 
@@ -189,27 +185,10 @@ class Repo(context: Context) {
         store.update { s -> s.copy(parent = Catalog.setAccount(s.parent!!, id, account, profile)) }
     }
 
-    /** Applies one account's Vinted wardrobe to the catalogue. */
-    suspend fun applyWardrobe(deviceId: String, items: List<VintedWardrobe.Remote>): VintedWardrobe.Result {
-        var result = VintedWardrobe.Result(0, 0, emptyList(), emptyList())
-        store.update { s ->
-            val (next, r) = VintedWardrobe.apply(s.parent!!, deviceId, items, System.currentTimeMillis())
-            result = r
-            s.copy(parent = next)
-        }
-        return result
-    }
-
     // ---------- photo editing (order, cover, crop) ----------
 
     /** One photo of the edited list: kept as it is, or replaced by new JPEG bytes (a crop). */
     data class EditedPhoto(val source: Uri, val bytes: ByteArray? = null)
-
-    /** Whether [deviceId]'s photos of [number] are on this phone and can be edited here. */
-    fun editable(number: Int, deviceId: String): Boolean {
-        val p = state.parent ?: return false
-        return if (deviceId == p.self.id) true else outbox.count(deviceId, number) > 0
-    }
 
     /**
      * Rewrites the photos of [number] for [deviceId] in the given order, with
@@ -287,11 +266,6 @@ class Repo(context: Context) {
         endSession()
         if (target.id == p.self.id) refreshCopies(session.number)
         return photos
-    }
-
-    fun ownCount(number: Int): Int {
-        val p = state.parent ?: return 0
-        return gallery.albumPhotos(base, sku(p.self, number, p.digits)).size
     }
 
     // ---------- sales ----------

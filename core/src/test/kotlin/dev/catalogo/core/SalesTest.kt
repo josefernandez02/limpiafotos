@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
 private const val DAY = 86_400_000L
 
 private val samsung = Device("p", "Samsung", "SH", account = "tienda", vintedId = "111")
-private val poco = Device("c1", "Poco", "SA", "s", style = 1, vintedId = "222")
+private val poco = Device("c1", "Poco", "SA", style = 1, vintedId = "222")
 
 /** Three articles (0, 1, 2) created on day 10; 0 is published and on the PC. */
 private fun shop(): ParentState {
@@ -100,7 +100,7 @@ class SaleStatesTest {
     @Test
     fun `cancelling clears the sold mark of the wardrobe`() {
         var s = shop()
-        s = VintedWardrobe.apply(s, "p", listOf(VintedWardrobe.Remote("900", Catalog.listingText(s, 0, samsung)!!.title, 2_500, 1, 1, "sold")), 15 * DAY).first
+        s = inVinted(s, 0, "p", "900", 2_500, "sold")
         s = Sales.cancel(Sales.register(s, 0, "m1", "p", 2_500, null, 20 * DAY), "m1", 21 * DAY)
         assertEquals("active", s.article(0)!!.vinted["p"]!!.status)
     }
@@ -161,15 +161,12 @@ class SaleStatesTest {
     }
 
     @Test
-    fun `an article in a sale cannot be deleted, re-listed or changed by the wardrobe`() {
+    fun `an article in a sale cannot be deleted, re-listed or changed`() {
         val s = Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY)
         assertFailsWith<CatalogException> { Catalog.delete(s, 0) }
         assertEquals(s, Catalog.relist(s, 0))
         assertEquals(s, Catalog.setUploaded(s, 0, "p", false))
         assertEquals(s, Catalog.setAccounts(s, 0, setOf("c1")))
-        val title = Catalog.listingText(s, 0, samsung)!!.title
-        val after = VintedWardrobe.apply(s, "p", listOf(VintedWardrobe.Remote("900", title, 1, 1, 1, "active")), 30 * DAY).first
-        assertEquals(s.article(0), after.article(0))
     }
 
     @Test
@@ -356,8 +353,7 @@ class VintedSalesTest {
 
     @Test
     fun `a hand sale remembers every listing of its garment`() {
-        val title = Catalog.listingText(shop(), 0, samsung)!!.title
-        val two = VintedWardrobe.apply(listed("950"), "p", listOf(VintedWardrobe.Remote("900", title, 2_500, 1, 1, "active")), 15 * DAY).first
+        val two = inVinted(listed("950"), 0, "p", "900", 2_500, "active")
         val sold = paidByHand(1_500, two)
         assertEquals(setOf("900", "950"), sold.hand().listings.toSet())
         for (item in listOf("900", "950")) {
