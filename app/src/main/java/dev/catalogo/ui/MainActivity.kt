@@ -59,6 +59,7 @@ class MainActivity : ComponentActivity() {
         // photos of a finished one needs it): at once on opening, then now and again.
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
+                vm.salesOpened()
                 var last: Long? = null
                 while (true) {
                     val every = vm.salesEvery()
@@ -126,6 +127,7 @@ private fun App(vm: MainViewModel) {
                 parent != null && top is Screen.Photos -> PhotosScreen(vm, parent, top.number, top.deviceId)
                 parent != null && top == Screen.Sales -> SalesScreen(vm, parent)
                 parent != null && top is Screen.Sale -> SaleScreen(vm, parent, top.id)
+                parent != null && top == Screen.SalesStats -> SalesStatsScreen(vm, parent)
                 parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
                 parent != null && top == Screen.Status -> StatusScreen(vm, parent)
                 else -> ParentHome(vm, parent)

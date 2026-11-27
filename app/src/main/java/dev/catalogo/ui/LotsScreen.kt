@@ -81,31 +81,25 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item(key = "stock") {
-                Tile {
-                    Muted("Valor a la venta")
-                    Text(Money.format(k.stockValue), style = Mono.copy(fontSize = 38.sp), maxLines = 1, softWrap = false)
-                    val unpriced = p.articles.count { it.inStock && it.price == null }
-                    Muted(
-                        listOfNotNull(
-                            if (k.inStock == 1) "1 prenda" else "${k.inStock} prendas",
-                            if (unpriced > 0) "$unpriced sin precio" else null,
-                        ).joinToString(GAP),
-                        maxLines = 1,
-                    )
-                }
-            }
             item(key = "kpis") {
+                val unpriced = p.articles.count { it.inStock && it.price == null }
                 KpiGrid(
                     listOf(
+                        Triple(
+                            "En stock", if (k.inStock == 1) "1 prenda" else "${k.inStock} prendas",
+                            when {
+                                k.notUploaded > 0 -> "${k.notUploaded} por subir"
+                                k.aged30 > 0 -> "${k.aged30} de más de 30 días"
+                                else -> "ninguna de más de 30 días"
+                            },
+                        ),
+                        Triple("Valor a la venta", Money.format(k.stockValue), if (unpriced > 0) "$unpriced sin precio" else "a sus precios"),
                         Triple("Invertido", Money.format(k.stockCost), "coste en stock"),
-                        Triple("Por subir", "${k.notUploaded}", "en stock"),
-                        Triple("Favoritos", "${k.favourites}", "en tus anuncios"),
-                        Triple("En camino", "${k.pending}", Money.format(k.pendingRevenue)),
+                        Triple("Beneficio posible", Money.format(k.stockProfit), "si se vende a su precio"),
                     ),
                 )
             }
-            if (k.inStock > 0) {
+            if (k.aged30 > 0) {
                 item(key = "age") {
                     Tile {
                         Text("Antigüedad del stock", style = MaterialTheme.typography.titleMedium)
@@ -115,7 +109,7 @@ fun LotsScreen(vm: MainViewModel, p: ParentState) {
                                 Triple("De 31 a 60 días", k.aged30 - k.aged60, Color(0xFF7FA7E8)),
                                 Triple("De 61 a 90 días", k.aged60 - k.aged90, Color(0xFFE8B45C)),
                                 Triple("Más de 90 días", k.aged90, Color(0xFFE5484D)),
-                            ),
+                            ).filter { it.second > 0 },
                         )
                     }
                 }

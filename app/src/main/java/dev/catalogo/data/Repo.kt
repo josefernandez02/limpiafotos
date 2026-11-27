@@ -313,9 +313,9 @@ class Repo(context: Context) {
         }
     }
 
-    /** From when finished Vinted orders count. */
-    suspend fun setSalesFrom(at: Long) {
-        store.update { s -> s.parent?.let { s.copy(parent = it.copy(salesFrom = at)) } ?: s }
+    /** When the PC last read the sales: shown even when it cannot be reached. */
+    suspend fun salesRead(at: Long) {
+        store.update { s -> s.parent?.let { s.copy(parent = it.copy(salesReadAt = at)) } ?: s }
     }
 
     suspend fun ensureSaleIds() {

@@ -80,6 +80,9 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
             }
             Text(saleTitle(sale), style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 4.dp))
 
+            Sales.doubts(p).firstOrNull { it.first.id == sale.id || it.second.id == sale.id }
+                ?.let { (order, hand) -> DoubtCard(vm, p, order, hand) }
+
             Tile {
                 val (title, text) = explain(p, sale, article)
                 Text(title, style = MaterialTheme.typography.titleSmall, color = saleTone(sale).first)

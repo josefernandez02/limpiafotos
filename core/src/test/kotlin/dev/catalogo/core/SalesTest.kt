@@ -280,46 +280,110 @@ class VintedSalesTest {
 
     @Test
     fun `what to ask the PC for`() {
-        val s = shop()
-        assertEquals(listOf("SH", "SA"), VintedSales.prefixes(s))
-        val noon = java.time.Instant.parse("2026-11-26T12:00:00Z").toEpochMilli()
-        assertEquals(java.time.Instant.parse("2026-11-01T00:00:00Z").toEpochMilli(),
-            VintedSales.defaultFrom(noon, java.time.ZoneOffset.UTC), "the first day of the month")
+        assertEquals(listOf("SH", "SA"), VintedSales.prefixes(shop()))
     }
 
     @Test
     fun `how the PC is doing comes with its reading`() {
-        val r = VintedSales.parsePc("""{"modo":"parado","pedidos":[],"desde":5,"leida":7,"proxima":9,"enMarcha":false}""")
-        assertEquals(listOf(5L, 7L, 9L), listOf(r.from, r.lastRead, r.next))
-        assertFalse(r.running)
+        val r = VintedSales.parsePc("""{"modo":"parado","pedidos":[],"leida":7,"proxima":9}""")
+        assertEquals(listOf(7L, 9L), listOf(r.lastRead, r.next))
     }
 
     @Test
-    fun `only orders in progress and finished ones from the start date are brought in`() {
+    fun `every order the PC sends is brought in, however old, except one already cancelled`() {
         val orders = listOf(
-            order("old-open", date = 2 * DAY) to null,
-            order("old-done", SaleStatus.COMPLETED, date = 3 * DAY) to null,
-            order("new-done", SaleStatus.COMPLETED, date = 25 * DAY) to null,
+            order("done", SaleStatus.COMPLETED, date = 2 * DAY) to null,
+            order("open", date = 3 * DAY) to null,
+            order("gone", SaleStatus.CANCELLED, date = 25 * DAY) to null,
         )
-        val (s, counts) = VintedSales.applyAll(shop().copy(salesFrom = 20 * DAY), "p", orders, 40 * DAY)
-        assertEquals(listOf("old-open", "new-done"), s.sales.map { it.order })
-        assertEquals(mapOf(VintedSales.Kind.NEW_PENDING to 1, VintedSales.Kind.NEW_COMPLETED to 1), counts)
-        // Followed here while in progress: it stays when it finishes, however old.
-        val done = VintedSales.applyAll(s, "p", listOf(order("old-open", SaleStatus.COMPLETED, date = 2 * DAY) to null), 41 * DAY).first
-        assertEquals(listOf(SaleStatus.COMPLETED, SaleStatus.COMPLETED), done.sales.map { it.status })
-        assertEquals(done, VintedSales.applyAll(done, "p", emptyList(), 42 * DAY).first)
+        val (s, counts) = VintedSales.applyAll(shop(), "p", orders, 400 * DAY)
+        assertEquals(listOf("done", "open"), s.sales.map { it.order })
+        assertEquals(mapOf(VintedSales.Kind.NEW_COMPLETED to 1, VintedSales.Kind.NEW_PENDING to 1), counts)
+    }
+
+    /** Article 0 given as sold and paid by hand: it is gone. */
+    private fun paidByHand(price: Long = 1_620, base: ParentState = shop()) =
+        Sales.complete(Sales.register(base, 0, "m1", "p", price, null, 28 * DAY), "m1", 28 * DAY)
+
+    @Test
+    fun `Vinted says whether the money of a hand sale is in`() {
+        var s = paidByHand().sync(order("1"), one("SH0000")).first
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertNull(s.only().closedAt)
+        assertTrue(s.only().numberFreed)
+        s = s.sync(order("1", SaleStatus.COMPLETED), now = 41 * DAY).first
+        assertEquals(SaleStatus.COMPLETED, s.only().status)
+        assertTrue(s.only().settled)
+        assertEquals(s.only().status, s.sync(order("1"), now = 42 * DAY).first.only().status, "finished in Vinted is final")
     }
 
     @Test
-    fun `history brought in before is dropped and nothing else`() {
-        var s = shop().sync(order("old-done", SaleStatus.COMPLETED, date = 3 * DAY)).first
-        s = s.sync(order("old-cancel", SaleStatus.CANCELLED, date = 25 * DAY)).first
-        s = s.sync(order("new-done", SaleStatus.COMPLETED, date = 25 * DAY)).first
-        s = s.sync(order("followed", date = 4 * DAY), now = 30 * DAY).first
-        s = s.sync(order("followed", SaleStatus.COMPLETED, date = 4 * DAY), now = 31 * DAY).first
-        s = Sales.register(s, 1, "m1", "p", 500, null, 5 * DAY)
-        val after = VintedSales.applyAll(s.copy(salesFrom = 20 * DAY), "p", emptyList(), 40 * DAY).first
-        assertEquals(listOf("new-done", "followed", ""), after.sales.map { it.order })
+    fun `sales the previous version joined and left as paid go back to waiting`() {
+        val joined = paidByHand().let { it.copy(sales = listOf(it.only().copy(order = "1"))) }
+        val (s, counts) = VintedSales.applyAll(joined, "p", listOf(order("1") to one("SH0000")), 40 * DAY)
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertEquals(mapOf(VintedSales.Kind.UNPAID to 1), counts)
+        val cancelled = joined.sync(order("1", SaleStatus.CANCELLED)).first
+        assertEquals(SaleStatus.CANCELLED, cancelled.only().status)
+    }
+
+    @Test
+    fun `a hand sale knows its listing and joins its order whatever the price`() {
+        val listed = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = "900"))
+        val s = paidByHand(1_500, listed)
+        assertEquals("900", s.only().itemId)
+        val after = s.sync(order("1"), one("SH0000")).first
+        assertEquals("m1", after.only().id)
+        assertEquals(1_620, after.only().price)
+    }
+
+    @Test
+    fun `a hand sale of another listing is a different sale`() {
+        val listed = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = "500"))
+        val s = paidByHand(1_620, listed).sync(order("1"), one("SH0000")).first
+        assertEquals(2, s.sales.size)
+        assertTrue(s.sales.all { it.twin == "" })
+    }
+
+    private fun doubtful() = paidByHand(1_500).sync(order("1"), one("SH0000")).first
+
+    @Test
+    fun `a possible repeat waits for the user and counts once`() {
+        val s = doubtful()
+        assertEquals(listOf("", "m1"), s.sales.map { it.twin })
+        val sum = Stats.summary(s.sales)
+        assertEquals(0 to 1, sum.sold to sum.pending)
+        assertEquals(1_620, sum.pendingRevenue)
+        assertEquals(0, Ledger.stats(s, s.lots.single()).sold)
+    }
+
+    @Test
+    fun `saying it is the same sale joins them and keeps the cost`() {
+        val s = Sales.merge(doubtful(), "v1")
+        assertEquals("m1", s.only().id)
+        assertEquals("1", s.only().order)
+        assertEquals(1_620, s.only().price)
+        assertEquals(1_000, s.only().cost)
+        assertEquals(SaleStatus.PENDING, s.only().status)
+        assertEquals(s, VintedSales.applyAll(s, "p", listOf(order("1") to one("SH0000")), 40 * DAY).first.let { it.copy(sales = it.sales.map { v -> v.copy(detail = s.only().detail) }) })
+        assertFailsWith<CatalogException> { Sales.merge(s, "m1") }
+    }
+
+    @Test
+    fun `saying they are two keeps and counts both`() {
+        val s = Sales.separate(doubtful(), "v1")
+        assertEquals(2, s.sales.size)
+        val sum = Stats.summary(s.sales)
+        assertEquals(1 to 1, sum.sold to sum.pending)
+    }
+
+    @Test
+    fun `profit on the way and still in stock only counts known costs`() {
+        var s = Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY)
+        assertEquals(1_500, Stats.summary(s.sales).pendingProfit)
+        s = Catalog.updateArticle(s, 1, s.article(1)!!.listing!!, "L1", null)
+        s = s.copy(articles = s.articles.map { if (it.number == 1) it.copy(price = 1_800) else it })
+        assertEquals(800, Stats.kpis(s, 30 * DAY).stockProfit)
     }
 
     @Test
@@ -330,7 +394,7 @@ class VintedSalesTest {
             order("1", date = 9 * DAY) to deal("500" to "#SH0000", soldAt = 9 * DAY + DAY / 2),
             order("2", date = 20 * DAY) to deal("900" to "#SH0000", soldAt = 20 * DAY),
         )
-        val (s, _) = VintedSales.applyAll(base.copy(salesFrom = DAY), "p", orders, 40 * DAY)
+        val (s, _) = VintedSales.applyAll(base, "p", orders, 40 * DAY)
         assertEquals(listOf(null, 10 * DAY), s.sales.map { it.listedAt })
         assertEquals("2", Sales.sale(s, s.article(0)!!.soldIn)!!.order)
     }

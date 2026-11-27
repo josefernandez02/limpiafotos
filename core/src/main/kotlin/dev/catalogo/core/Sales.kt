@@ -88,9 +88,9 @@ object Sales {
     fun accept(s: ParentState, id: String, now: Long): ParentState {
         val sale = required(s, id)
         if (!sale.conflict) return s
-        if (canReopen(s, sale)) return complete(reopen(s, id), id, now)
+        if (canReopen(s, sale)) return settle(complete(reopen(s, id), id, now), id)
         // Its article is busy elsewhere or gone: the money is recorded, the article is not touched.
-        return replace(s, sale.copy(status = SaleStatus.COMPLETED, conflict = false, byHand = false, closedAt = now))
+        return replace(s, sale.copy(status = SaleStatus.COMPLETED, conflict = false, byHand = false, closedAt = now, settled = true))
     }
 
     /** Says which article an unlinked sale was. */
@@ -107,6 +107,39 @@ object Sales {
     /** The PC confirmed it dropped the job [ref]. */
     fun heard(s: ParentState, ref: String): ParentState = s.copy(retired = s.retired.filter { it.ref != ref })
 
+    /** The order [id] and the hand record it looks like are one sale: Vinted's data, the hand record's cost. */
+    fun merge(s: ParentState, id: String): ParentState {
+        val order = required(s, id)
+        val hand = sale(s, order.twin) ?: throw CatalogException("Esa venta no tiene posible repetida")
+        // The article assigned to the order, if any; else the one the hand record was about.
+        val about = if (order.listedAt != null || hand.listedAt == null) order else hand
+        val joined = order.copy(
+            id = hand.id, twin = "",
+            number = about.number,
+            listedAt = about.listedAt,
+            cost = hand.cost ?: order.cost,
+            lotId = hand.lotId ?: order.lotId,
+            brand = hand.brand.ifBlank { order.brand },
+            type = hand.type.ifBlank { order.type },
+            title = order.title.ifBlank { hand.title },
+            numberFreed = about.listedAt != null && article(s, order) == null,
+        )
+        return s.copy(
+            sales = s.sales.mapNotNull { if (it.id == hand.id) joined else it.takeIf { v -> v.id != id } },
+            articles = s.articles.map { if (it.soldIn == id) it.copy(soldIn = hand.id) else it },
+        )
+    }
+
+    /** Each order that might repeat a hand record, with that record: for the user to say. */
+    fun doubts(s: ParentState): List<Pair<Sale, Sale>> = s.sales.filter { it.twin.isNotEmpty() && it.status != SaleStatus.CANCELLED }
+        .mapNotNull { order -> sale(s, order.twin)?.takeIf { it.status != SaleStatus.CANCELLED }?.let { order to it } }
+
+    /** The user says they are two different sales. */
+    fun separate(s: ParentState, id: String): ParentState = replace(s, required(s, id).copy(twin = ""))
+
+    /** Vinted finished it: nothing changes it any more. */
+    internal fun settle(s: ParentState, id: String): ParentState = replace(s, required(s, id).copy(settled = true))
+
     /** Gives an id to the sales of earlier versions. */
     fun ensureIds(s: ParentState): ParentState {
         if (s.sales.none { it.id.isBlank() }) return s
@@ -122,7 +155,11 @@ object Sales {
     /** [sale] with everything it takes from its article. */
     internal fun link(s: ParentState, sale: Sale, a: Article): Sale {
         val l = a.listing
+        val account = Catalog.devices(s).firstOrNull { it.id == sale.deviceId } ?: s.self
         return sale.copy(
+            // The listing is only certain when the article has a single one.
+            itemId = sale.itemId.ifBlank { a.listings().distinct().singleOrNull().orEmpty() },
+            title = sale.title.ifBlank { Catalog.listingText(s, a.number, account)?.title.orEmpty() },
             number = a.number,
             listedAt = a.createdAt,
             cost = sale.cost ?: Ledger.costOf(s, a),
@@ -163,6 +200,9 @@ object Sales {
             session = s.session?.takeIf { it.number != a.number },
         )
     }
+
+    /** The listings known to be [this] article's. */
+    internal fun Article.listings(): List<String> = (vinted.values.map { it.id } + desk?.itemId.orEmpty()).filter { it.isNotBlank() }
 
     private fun required(s: ParentState, id: String): Sale = sale(s, id) ?: throw CatalogException("Venta no encontrada")
 

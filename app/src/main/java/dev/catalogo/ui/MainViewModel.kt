@@ -13,6 +13,7 @@ import dev.catalogo.core.Catalog
 import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
 import dev.catalogo.core.ParentState
+import dev.catalogo.data.Desk
 import dev.catalogo.data.AppLog
 import dev.catalogo.core.VintedSales
 import dev.catalogo.core.VintedSales.Kind
@@ -44,6 +45,7 @@ sealed interface Screen {
     /** Main tabs: articles, status, sales, inventory. */
     data object Home : Screen
     data object Sales : Screen
+    data object SalesStats : Screen
     data class Sale(val id: String) : Screen
     data object Lots : Screen
     data object Status : Screen
@@ -382,17 +384,28 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- Vinted sales: the PC reads them, the phone asks and writes them down ----------
 
-    /** How the PC's reading goes; null when there is nothing to say. */
+    /** How the PC's reading goes, in one line; null before knowing anything. */
     data class SalesReading(val working: Boolean, val text: String)
 
     private val _reading = MutableStateFlow<SalesReading?>(null)
     val reading: StateFlow<SalesReading?> = _reading.asStateFlow()
     private val readingLock = Mutex()
 
-    /** Asks the PC to read the sales in Vinted now, or to stop. */
+    /** What the PC has to be told about the sales and has not heard yet: kept until it answers. */
+    private var pendingAsk: String? = null
+
+    /** The app has come to the screen: the PC is to read again if its last reading is old. */
+    fun salesOpened() {
+        if (pendingAsk == null) pendingAsk = "refrescar"
+    }
+
+    /** Asks the PC to read the sales in Vinted now, or to stop. Without a connection it is told later. */
     fun readSales(start: Boolean) = run {
-        val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        takeSales(tellSales(link, if (start) "mandar" else "parar"))
+        if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
+        val action = if (start) "mandar" else "parar"
+        pendingAsk = action
+        refreshSales()
+        if (pendingAsk == action) _message.value = "Sin conexión con el PC: se lo pediré en cuanto vuelva"
     }
 
     /**
@@ -404,54 +417,49 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return when {
             repo.state.parent?.session != null || top is Screen.Editor || top is Screen.Photos || top is Screen.Template -> null
             reading.value?.working == true -> 8_000
-            top == Screen.Sales || top is Screen.Sale -> 30_000
+            top == Screen.Sales || top is Screen.Sale || pendingAsk != null -> 30_000
             else -> 5 * 60_000
         }
     }
 
-    /** Takes what the PC has read so far. */
+    /** Tells the PC what is pending and takes what it has read so far. */
     suspend fun refreshSales() {
         val link = repo.state.pc ?: return
         if (repo.state.parent == null) return
+        val ask = pendingAsk
         try {
-            ensureSalesFrom()
-            var read = VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) })
-            // The start date is chosen here: the PC reads on its own with the last one it heard.
-            if (read.from != repo.state.parent?.salesFrom) read = tellSales(link, "ajustar")
+            val read = if (ask != null) tellSales(link, ask)
+            else VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) })
+            if (pendingAsk == ask) pendingAsk = null
             takeSales(read)
         } catch (e: CancellationException) {
             throw e
         } catch (e: CatalogException) {
-            _reading.value = SalesReading(false, e.message.orEmpty())
+            val offline = e.message == Desk.UNREACHABLE
+            // An answer, even a bad one, means it heard: asking again would not change it.
+            if (!offline && pendingAsk == ask) pendingAsk = null
+            _reading.value = SalesReading(false, if (offline) offlineText() else e.message.orEmpty())
         } catch (e: Exception) {
             AppLog.w("ventas", "error: ${e.message ?: e.javaClass.simpleName}")
             _reading.value = SalesReading(false, "No se pudieron apuntar las ventas (${e.message ?: e.javaClass.simpleName})")
         }
     }
 
-    fun setSalesFrom(at: Long) = run {
-        repo.setSalesFrom(at)
-        refreshSales()
-    }
-
-    private suspend fun ensureSalesFrom() {
-        if (repo.state.parent?.salesFrom == 0L) repo.setSalesFrom(VintedSales.defaultFrom(System.currentTimeMillis()))
-    }
-
     private suspend fun tellSales(link: PcLink, action: String): VintedSales.Reading {
-        ensureSalesFrom()
         val p = repo.state.parent ?: throw CatalogException("No hay catálogo")
         return VintedSales.parsePc(withContext(Dispatchers.IO) {
-            repo.desk.salesControl(link, action, VintedSales.prefixes(p), p.salesFrom)
+            repo.desk.salesControl(link, action, VintedSales.prefixes(p))
         })
     }
 
     private suspend fun takeSales(read: VintedSales.Reading) = readingLock.withLock {
-        _reading.value = readingText(read)
         val before = repo.state.parent ?: return@withLock
+        if (read.lastRead > before.salesReadAt) repo.salesRead(read.lastRead)
+        _reading.value = readingText(read)
+        val current = repo.state.parent ?: return@withLock
         val now = System.currentTimeMillis()
-        val (after, counts) = VintedSales.applyAll(before, before.self.id, read.orders, now)
-        if (after == before) return@withLock
+        val (after, counts) = VintedSales.applyAll(current, current.self.id, read.orders, now)
+        if (after == current) return@withLock
         // Never cut between deleting photos and saving the state.
         val originals = withContext(NonCancellable) {
             repo.changeSales { VintedSales.applyAll(it, it.self.id, read.orders, now).first }
@@ -464,28 +472,26 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { app.drafts.tellPc() }
     }
 
-    private fun readingText(read: VintedSales.Reading): SalesReading {
-        if (read.working) {
-            return SalesReading(true, when {
-                read.waiting.isNotBlank() -> "PC: ${read.waiting}"
-                read.pending > 0 -> "El PC está leyendo tus ventas$GAP quedan ${read.pending}"
-                else -> "El PC está leyendo tus ventas…"
-            })
-        }
-        val last = if (read.lastRead > 0) "Última lectura: ${shortTime(read.lastRead)}" else "Aún no ha terminado ninguna lectura"
-        val then = when {
-            !read.running -> "El programa del PC está detenido: no se actualiza hasta que pulses «Iniciar»."
-            read.next > System.currentTimeMillis() -> "El PC vuelve a mirar solo sobre las ${shortTime(read.next)}."
-            else -> "El PC mirará en cuanto tenga un hueco."
-        }
-        return SalesReading(false, "$last\n$then")
-    }
+    private fun updated(): String =
+        repo.state.parent?.salesReadAt?.takeIf { it > 0 }?.let { "Actualizado ${shortTime(it)}" } ?: "Aún sin leer"
 
-    /** «22:10», with the day in front when it is not today. */
+    private fun offlineText(): String = "${updated()}$GAP· PC sin conexión"
+
+    private fun readingText(read: VintedSales.Reading): SalesReading = SalesReading(
+        read.working,
+        when {
+            !read.working -> updated()
+            read.waiting.isNotBlank() -> "PC: ${read.waiting}"
+            read.pending > 0 -> "Leyendo en el PC$GAP· quedan ${read.pending}"
+            else -> "Leyendo en el PC…"
+        },
+    )
+
+    /** «hoy 22:10», or «26/11 22:10». */
     private fun shortTime(at: Long): String {
         val t = Instant.ofEpochMilli(at).atZone(ZoneId.systemDefault())
-        val pattern = if (t.toLocalDate() == LocalDate.now()) "HH:mm" else "d/M HH:mm"
-        return t.format(DateTimeFormatter.ofPattern(pattern))
+        return if (t.toLocalDate() == LocalDate.now()) "hoy ${t.format(DateTimeFormatter.ofPattern("HH:mm"))}"
+        else t.format(DateTimeFormatter.ofPattern("d/M HH:mm"))
     }
 
     private fun summary(counts: Map<Kind, Int>): String? {
@@ -494,6 +500,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             n(Kind.NEW_PENDING, "venta nueva en curso", "ventas nuevas en curso"),
             n(Kind.NEW_COMPLETED, "venta completada nueva", "ventas completadas nuevas"),
             n(Kind.COMPLETED, "completada", "completadas"),
+            n(Kind.UNPAID, "vuelve a pendiente de cobro", "vuelven a pendiente de cobro"),
             n(Kind.CANCELLED, "anulada por Vinted", "anuladas por Vinted"),
             n(Kind.REOPENED, "recuperada", "recuperadas"),
             n(Kind.CONFLICT, "para que la revises", "para que las revises"),
@@ -512,6 +519,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _salesView.value = view
     }
 
+    fun mergeSale(id: String) = sale("Unidas en una sola venta") { SalesRules.merge(it, id) }
+    fun separateSale(id: String) = sale("Quedan como dos ventas") { SalesRules.separate(it, id) }
     fun completeSale(id: String) = sale("Venta completada") { SalesRules.complete(it, id, System.currentTimeMillis()) }
     fun cancelSale(id: String) = sale("Venta anulada") { SalesRules.cancel(it, id, System.currentTimeMillis()) }
     fun releaseSale(id: String) = sale("Número libre: la venta sigue en curso") { SalesRules.release(it, id) }

@@ -18,17 +18,11 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material3.DatePicker
-import androidx.compose.material3.DatePickerDialog
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberDatePickerState
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.setValue
-import java.time.ZoneOffset
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -44,6 +38,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -54,6 +51,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Garments
+import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
 import dev.catalogo.core.Sale
@@ -70,7 +68,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /** What the sales tab is showing; kept while a sale is open. */
-data class SalesView(val stats: Boolean = false, val period: Stats.Period = Stats.Period.ALL, val status: SaleStatus? = null)
+data class SalesView(val period: Stats.Period = Stats.Period.ALL, val status: SaleStatus? = null)
 
 private val SPANISH = Locale("es", "ES")
 private val DAY_FORMAT = DateTimeFormatter.ofPattern("d MMM", SPANISH)
@@ -139,24 +137,20 @@ fun SaleImage(vm: MainViewModel, p: ParentState, sale: Sale, modifier: Modifier,
     }
 }
 
-/** «Ventas»: the money first, then every sale by month; the numbers behind them in «Estadísticas». */
+/** «Ventas»: where the money is, what needs the user, and every sale. The numbers behind are in their own screen. */
 @Composable
 fun SalesScreen(vm: MainViewModel, p: ParentState) {
     val view by vm.salesView.collectAsStateWithLifecycle()
-    val now = remember(p) { System.currentTimeMillis() }
-    val inPeriod = remember(p, view.period) { Stats.within(p.sales, view.period, now) }
-    val summary = remember(inPeriod) { Stats.summary(inPeriod) }
-    val current = remember(p) { Stats.summary(p.sales) }
     val reading by vm.reading.collectAsStateWithLifecycle()
     val working = reading?.working == true
+    val sales = remember(p) { Ledger.counted(p.sales) }
+    val total = remember(p) { Stats.summary(p.sales) }
+    val doubts = remember(p) { Sales.doubts(p) }
 
     Scaffold(
         topBar = {
-            val subtitle = when {
-                current.pending == 0 -> if (current.sold == 1) "1 completada" else "${current.sold} completadas"
-                else -> "${current.pending} en curso$GAP${current.sold} completadas"
-            }
-            Header("Ventas", subtitle) {
+            Header("Ventas", reading?.text) {
+                IconButton(onClick = { vm.go(Screen.SalesStats) }) { Icon(StatsIcon, contentDescription = "Estadísticas") }
                 IconButton(onClick = { vm.readSales(!working) }) {
                     if (working) Icon(Icons.Default.Close, contentDescription = "Parar la lectura de ventas")
                     else Icon(Icons.Default.Refresh, contentDescription = "Pedir al PC que lea mis ventas")
@@ -166,23 +160,20 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
         },
         bottomBar = { MainTabs(vm, Screen.Sales) },
     ) { padding ->
-        if (p.sales.isEmpty()) {
+        if (sales.isEmpty()) {
             Column(
                 Modifier.padding(padding).fillMaxSize().padding(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Muted("Aún no hay ventas")
-                reading?.let { ReadingCard(it) }
-                StartDate(p.salesFrom, onChange = { vm.setSalesFrom(it) })
+                if (working) LinearProgressIndicator(Modifier.fillMaxWidth())
                 BigButton(if (working) "Parar" else "Que el PC lea mis ventas", onClick = { vm.readSales(!working) })
             }
             return@Scaffold
         }
-        // Sales in progress are today's business: they show whatever the period.
-        val listed = remember(p, inPeriod, view.status) {
-            (inPeriod + p.sales.filter { it.status == SaleStatus.PENDING }).distinctBy { it.id }
-                .filter { view.status == null || it.status == view.status }
+        val listed = remember(sales, view.status) {
+            sales.filter { view.status == null || it.status == view.status }
                 .sortedWith(compareByDescending<Sale> { it.conflict }.thenByDescending { it.soldAt })
         }
         val review = listed.filter { it.conflict }
@@ -193,37 +184,29 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            reading?.let { r -> item(key = "reading") { ReadingCard(r) } }
-            item(key = "from") { StartDate(p.salesFrom, onChange = { vm.setSalesFrom(it) }) }
-            item(key = "mode") {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Choice("Ventas", !view.stats) { vm.showSales(view.copy(stats = false)) }
-                    Choice("Estadísticas", view.stats) { vm.showSales(view.copy(stats = true)) }
-                }
+            if (working) item(key = "working") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+            item(key = "money") {
+                KpiGrid(
+                    listOf(
+                        Triple("En camino", Money.format(total.pendingRevenue), count(total.pending)),
+                        Triple("Cobrado", Money.format(total.revenue), count(total.sold)),
+                        Triple("Beneficio en camino", Money.format(total.pendingProfit), costNote(sales, SaleStatus.PENDING)),
+                        Triple("Beneficio cobrado", Money.format(total.profit), costNote(sales, SaleStatus.COMPLETED)),
+                    ),
+                )
             }
-            item(key = "periods") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(Stats.Period.entries, key = { it.name }) { period ->
-                        Choice(period.label, view.period == period) { vm.showSales(view.copy(period = period)) }
-                    }
-                }
-            }
-            item(key = "money") { MoneyCard(summary, current) }
-            if (view.stats) {
-                statistics(p, inPeriod, summary, now)
-                return@LazyColumn
-            }
+            items(doubts, key = { "doubt-${it.first.id}" }) { (order, hand) -> DoubtCard(vm, p, order, hand) }
             item(key = "statuses") {
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(top = 6.dp)) {
-                    item { Choice("Todas", view.status == null) { vm.showSales(view.copy(status = null)) } }
-                    items(SaleStatus.entries, key = { it.name }) { status ->
-                        val n = if (status == SaleStatus.PENDING) current.pending else inPeriod.count { it.status == status }
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (status in SaleStatus.entries) {
                         val plural = when (status) {
                             SaleStatus.PENDING -> "En curso"
-                            SaleStatus.COMPLETED -> "Completadas"
-                            SaleStatus.CANCELLED -> "Canceladas"
+                            SaleStatus.COMPLETED -> "Cobradas"
+                            SaleStatus.CANCELLED -> "Anuladas"
                         }
-                        Choice("$plural ($n)", view.status == status) { vm.showSales(view.copy(status = status)) }
+                        Choice("$plural ${sales.count { it.status == status }}", view.status == status) {
+                            vm.showSales(view.copy(status = status.takeIf { view.status != status }))
+                        }
                     }
                 }
             }
@@ -232,197 +215,163 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
                 item(key = "review-title") { Section("Para revisar") }
                 items(review, key = { it.id }) { SaleCard(vm, p, it) }
             }
-            for ((month, sales) in months) {
-                item(key = "month-$month") { MonthTitle(month, Stats.summary(sales)) }
-                items(sales, key = { it.id }) { SaleCard(vm, p, it) }
+            for ((month, list) in months) {
+                item(key = "month-$month") { Section(MONTH_FORMAT.format(month).replaceFirstChar { it.uppercase(SPANISH) }) }
+                items(list, key = { it.id }) { SaleCard(vm, p, it) }
             }
         }
     }
 }
 
-/** What the PC is doing about the sales. */
+private fun count(n: Int): String = if (n == 1) "1 venta" else "$n ventas"
+
+/** What a profit figure leaves out. */
+private fun costNote(sales: List<Sale>, status: SaleStatus): String {
+    val unknown = sales.count { it.status == status && it.cost == null }
+    return if (unknown == 0) "descontado el coste" else "$unknown sin coste, fuera"
+}
+
+/** A Vinted order and a sale written by hand that may be one and the same: only the user knows. */
 @Composable
-private fun ReadingCard(reading: MainViewModel.SalesReading) {
+fun DoubtCard(vm: MainViewModel, p: ParentState, order: Sale, hand: Sale) {
     Tile {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(reading.text, style = MaterialTheme.typography.bodyMedium)
-            if (reading.working) LinearProgressIndicator(Modifier.fillMaxWidth())
+        Text("¿Es la misma venta?", style = MaterialTheme.typography.titleMedium, color = Tone.Warn.color)
+        Text(saleTitle(order), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        for ((from, sale) in listOf("En Vinted" to order, "Apuntada a mano" to hand)) {
+            Row(Modifier.fillMaxWidth()) {
+                Muted(listOfNotNull(from, saleCode(p, sale), DAY_FORMAT.format(date(sale.soldAt))).joinToString(" · "), Modifier.weight(1f))
+                Text(Money.format(sale.price), style = Mono.copy(fontSize = 14.sp), maxLines = 1, softWrap = false)
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            FilledTonalButton(onClick = { vm.mergeSale(order.id) }, modifier = Modifier.weight(1f)) { Text("Es la misma", maxLines = 1) }
+            OutlinedButton(onClick = { vm.separateSale(order.id) }, modifier = Modifier.weight(1f)) { Text("Son dos", maxLines = 1) }
         }
     }
 }
 
-/** «Vinted: finalizadas desde el 1 nov 2026»: older finished orders are not brought in. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun StartDate(from: Long, onChange: (Long) -> Unit) {
-    if (from <= 0) return
-    var choosing by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        Muted("De Vinted: las en curso y las finalizadas desde el ${longDate(from)}", Modifier.weight(1f))
-        TextButton(onClick = { choosing = true }) { Text("Cambiar") }
-    }
-    if (choosing) {
-        // The picker speaks in UTC midnights.
-        val zone = ZoneId.systemDefault()
-        val picker = rememberDatePickerState(
-            initialSelectedDateMillis = date(from).toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-        )
-        DatePickerDialog(
-            onDismissRequest = { choosing = false },
-            confirmButton = {
-                TextButton(onClick = {
-                    choosing = false
-                    picker.selectedDateMillis?.let {
-                        val day = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()
-                        onChange(day.atStartOfDay(zone).toInstant().toEpochMilli())
-                    }
-                }) { Text("Aceptar") }
-            },
-            dismissButton = { TextButton(onClick = { choosing = false }) { Text("Cancelar") } },
-        ) { DatePicker(state = picker) }
-    }
+/** Where a sale is, in the words of Vinted while it is on its way. */
+private fun saleState(sale: Sale): String = when {
+    sale.conflict -> "para revisar"
+    sale.status == SaleStatus.PENDING -> sale.detail.trim().trimEnd('.').ifBlank { "en curso" }
+    sale.status == SaleStatus.COMPLETED -> "cobrada"
+    else -> "anulada"
 }
 
-@Composable
-private fun MoneyCard(period: Stats.Summary, current: Stats.Summary) {
-    Tile {
-        Muted("Cobrado")
-        Text(Money.format(period.revenue), style = Mono.copy(fontSize = 38.sp), maxLines = 1, softWrap = false)
-        Muted(
-            listOfNotNull(
-                if (period.sold == 1) "1 venta completada" else "${period.sold} ventas completadas",
-                period.averagePrice?.let { "media ${Money.format(it)}" },
-            ).joinToString(GAP),
-            maxLines = 1,
-        )
-        Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Figure(
-                "Beneficio", Money.format(period.profit), if (period.profit > 0) SaleGreen else MaterialTheme.colorScheme.onSurface,
-                if (period.unknownCost == 0) "descontado el coste" else "${period.unknownCost} sin coste, fuera",
-                Modifier.weight(1f),
-            )
-            Figure(
-                "En camino", Money.format(current.pendingRevenue), if (current.pending > 0) Tone.Warn.color else MaterialTheme.colorScheme.onSurface,
-                if (current.pending == 1) "1 venta en curso" else "${current.pending} ventas en curso",
-                Modifier.weight(1f),
-            )
-        }
-    }
-}
-
-@Composable
-private fun Figure(label: String, value: String, color: Color, detail: String, modifier: Modifier) {
-    Column(
-        modifier.clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceContainerHighest).padding(12.dp),
-    ) {
-        Muted(label, maxLines = 1)
-        Text(value, style = Mono.copy(fontSize = 20.sp), color = color, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-        Text(detail, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-@Composable
-private fun MonthTitle(month: YearMonth, summary: Stats.Summary) {
-    Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, top = 18.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            MONTH_FORMAT.format(month).replaceFirstChar { it.uppercase(SPANISH) },
-            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-            modifier = Modifier.weight(1f),
-        )
-        Muted(
-            listOfNotNull(
-                if (summary.sold > 0) "cobrado ${Money.format(summary.revenue)}" else null,
-                if (summary.pending > 0) "en camino ${Money.format(summary.pendingRevenue)}" else null,
-            ).joinToString(GAP),
-            maxLines = 1,
-        )
-    }
-}
-
+/** Photo, then three lines that are never cut short: title and price, code and account with profit, date and state. */
 @Composable
 private fun SaleCard(vm: MainViewModel, p: ParentState, sale: Sale) {
     val cancelled = sale.status == SaleStatus.CANCELLED
     Tile(onClick = { vm.go(Screen.Sale(sale.id)) }) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            SaleImage(vm, p, sale, Modifier.size(76.dp).clip(RoundedCornerShape(16.dp)))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(saleTitle(sale), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val code = saleCode(p, sale)
-                    if (code != null) Text(code, style = Mono.copy(fontSize = 13.sp), maxLines = 1, softWrap = false)
-                    else Muted("Sin código", maxLines = 1)
-                    SaleChip(sale)
-                }
-                Muted(
-                    listOfNotNull(
-                        DAY_FORMAT.format(date(sale.soldAt)),
-                        Stats.daysToSell(sale)?.let { if (it == 1) "en 1 día" else "en $it días" },
-                        if (Catalog.devices(p).size > 1) Catalog.device(p, sale.deviceId)?.label else null,
-                    ).joinToString(GAP),
-                    maxLines = 1,
-                )
-            }
-            Column(horizontalAlignment = Alignment.End) {
-                Text(
-                    Money.format(sale.price),
-                    style = Mono.copy(fontSize = 17.sp, textDecoration = if (cancelled) TextDecoration.LineThrough else TextDecoration.None),
-                    color = if (cancelled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1, softWrap = false,
-                )
-                val cost = sale.cost
-                if (!cancelled && cost != null) {
-                    val profit = sale.price - cost
+        Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            SaleImage(vm, p, sale, Modifier.size(72.dp).clip(RoundedCornerShape(16.dp)))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        (if (profit > 0) "+" else "") + Money.format(profit),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (profit > 0) SaleGreen else MaterialTheme.colorScheme.error,
+                        saleTitle(sale), style = MaterialTheme.typography.titleSmall, maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+                    )
+                    Text(
+                        Money.format(sale.price),
+                        style = Mono.copy(fontSize = 16.sp, textDecoration = if (cancelled) TextDecoration.LineThrough else TextDecoration.None),
+                        color = if (cancelled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1, softWrap = false,
                     )
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Muted(
+                        listOfNotNull(saleCode(p, sale) ?: "Sin código", Catalog.device(p, sale.deviceId)?.label).joinToString(" · "),
+                        Modifier.weight(1f),
+                    )
+                    val cost = sale.cost
+                    if (!cancelled && cost != null) {
+                        val profit = sale.price - cost
+                        Text(
+                            (if (profit > 0) "+" else "") + Money.format(profit),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (profit > 0) SaleGreen else MaterialTheme.colorScheme.error,
+                            maxLines = 1, softWrap = false,
+                        )
+                    }
+                }
+                Text(
+                    "${DAY_FORMAT.format(date(sale.soldAt))} · ${saleState(sale)}",
+                    style = MaterialTheme.typography.bodySmall, color = saleTone(sale).first,
+                )
+            }
+        }
+    }
+}
+
+/** The numbers behind the sales, for the period chosen. */
+@Composable
+fun SalesStatsScreen(vm: MainViewModel, p: ParentState) {
+    val view by vm.salesView.collectAsStateWithLifecycle()
+    val now = remember(p) { System.currentTimeMillis() }
+    val inPeriod = remember(p, view.period) { Stats.within(Ledger.counted(p.sales), view.period, now) }
+    val summary = remember(inPeriod) { Stats.summary(inPeriod) }
+    val all = remember(p) { Stats.kpis(p, now) }
+    val period = remember(p, inPeriod) { Stats.kpis(p.copy(sales = inPeriod), now) }
+
+    Scaffold(topBar = { Bar("Estadísticas", onBack = { vm.back() }) }) { padding ->
+        LazyColumn(
+            modifier = Modifier.padding(padding),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            item(key = "periods") {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(Stats.Period.entries, key = { it.name }) { option ->
+                        Choice(option.label, view.period == option) { vm.showSales(view.copy(period = option)) }
+                    }
+                }
+            }
+            item(key = "numbers") {
+                KpiGrid(
+                    listOf(
+                        Triple("Cobrado", Money.format(summary.revenue), count(summary.sold)),
+                        Triple("Beneficio", Money.format(summary.profit), costNote(inPeriod, SaleStatus.COMPLETED)),
+                        Triple("Precio medio", summary.averagePrice?.let(Money::format) ?: "—", "de lo cobrado"),
+                        Triple("Rentabilidad", period.roi?.let { "$it %" } ?: "—", "sobre el coste"),
+                        Triple("Días en venderse", summary.medianDays?.toString() ?: "—", "lo habitual"),
+                        Triple("Vendido", all.sellThrough?.let { "$it %" } ?: "—", "de lo catalogado"),
+                    ),
+                )
+            }
+            item(key = "months") {
+                Tile {
+                    Text("Cobrado por mes", style = MaterialTheme.typography.titleMedium)
+                    MonthBars(all.months)
+                }
+            }
+            if (period.accounts.size > 1) {
+                item(key = "accounts") {
+                    Tile {
+                        Text("Por cuenta", style = MaterialTheme.typography.titleMedium)
+                        val max = period.accounts.maxOf { it.revenue }.coerceAtLeast(1)
+                        for (a in period.accounts) {
+                            BarRow(a.label, "${a.sold} vendidos$GAP${Money.format(a.revenue)}", a.revenue.toFloat() / max)
+                        }
+                    }
+                }
+            }
+            if (period.brands.isNotEmpty()) {
+                item(key = "brands") {
+                    Tile {
+                        Text("Marcas más vendidas", style = MaterialTheme.typography.titleMedium)
+                        val max = period.brands.first().second.coerceAtLeast(1)
+                        for ((brand, n) in period.brands.take(6)) BarRow(brand, if (n == 1) "1 venta" else "$n ventas", n.toFloat() / max)
+                    }
                 }
             }
         }
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.statistics(
-    p: ParentState, inPeriod: List<Sale>, summary: Stats.Summary, now: Long,
-) {
-    val all = Stats.kpis(p, now)
-    val period = Stats.kpis(p.copy(sales = inPeriod), now)
-    item(key = "numbers") {
-        KpiGrid(
-            listOf(
-                Triple("Días en venderse", summary.medianDays?.toString() ?: "—", "lo habitual"),
-                Triple("Vendido", all.sellThrough?.let { "$it %" } ?: "—", "de lo catalogado"),
-                Triple("Rentabilidad", period.roi?.let { "$it %" } ?: "—", "sobre el coste"),
-                Triple("Canceladas", "${summary.cancelled}", "en el periodo"),
-            ),
-        )
-    }
-    item(key = "months") {
-        Tile {
-            Text("Cobrado por mes", style = MaterialTheme.typography.titleMedium)
-            MonthBars(all.months)
-        }
-    }
-    if (period.accounts.size > 1) {
-        item(key = "accounts") {
-            Tile {
-                Text("Por cuenta", style = MaterialTheme.typography.titleMedium)
-                val max = period.accounts.maxOf { it.revenue }.coerceAtLeast(1)
-                for (a in period.accounts) {
-                    BarRow(a.label, "${a.sold} vendidos$GAP${Money.format(a.revenue)}", a.revenue.toFloat() / max)
-                }
-            }
-        }
-    }
-    if (period.brands.isNotEmpty()) {
-        item(key = "brands") {
-            Tile {
-                Text("Marcas más vendidas", style = MaterialTheme.typography.titleMedium)
-                val max = period.brands.first().second.coerceAtLeast(1)
-                for ((brand, n) in period.brands.take(6)) BarRow(brand, if (n == 1) "1 venta" else "$n ventas", n.toFloat() / max)
-            }
-        }
-    }
+/** A rising line: the statistics (material-icons-core has none). */
+private val StatsIcon: ImageVector by lazy {
+    ImageVector.Builder("Catalogo.Stats", 24.dp, 24.dp, 24f, 24f).addPath(
+        pathData = addPathNodes("M16,6l2.29,2.29-4.88,4.88-4-4L2,16.59 3.41,18l6-6 4,4 6.3-6.29L22,12V6z"),
+        fill = SolidColor(Color.Black),
+    ).build()
 }

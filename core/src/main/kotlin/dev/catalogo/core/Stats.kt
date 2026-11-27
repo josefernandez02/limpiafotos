@@ -34,7 +34,6 @@ object Stats {
         val sellThrough: Int?,
         /** Median days from creation to sale; null without data. */
         val medianDays: Int?,
-        val favourites: Int,
         val months: List<Month>,
         val accounts: List<Account>,
         /** Brands by units sold, best first. */
@@ -46,6 +45,7 @@ object Stats {
         val unknownCost: Int = 0,
         /** What the stock adds up to at its listed prices. */
         val stockValue: Long = 0,
+        val stockProfit: Long = 0,
     )
 
     enum class Period(val label: String) { MONTH("Este mes"), LAST_30("30 días"), YEAR("Año"), ALL("Todo") }
@@ -78,9 +78,11 @@ object Stats {
         val cancelled: Int,
         val averagePrice: Long?,
         val medianDays: Int?,
+        val pendingProfit: Long = 0,
     )
 
-    fun summary(sales: List<Sale>): Summary {
+    fun summary(all: List<Sale>): Summary {
+        val sales = Ledger.counted(all)
         val done = sales.filter { it.status == SaleStatus.COMPLETED }
         val pending = sales.filter { it.status == SaleStatus.PENDING }
         val totals = Ledger.totals(done)
@@ -95,13 +97,15 @@ object Stats {
             cancelled = sales.count { it.status == SaleStatus.CANCELLED },
             averagePrice = if (done.isEmpty()) null else totals.revenue / done.size,
             medianDays = days.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] },
+            pendingProfit = pending.sumOf { v -> v.cost?.let { v.price - it } ?: 0 },
         )
     }
 
     fun kpis(s: ParentState, now: Long, zone: ZoneId = ZoneId.systemDefault(), months: Int = 6): Kpis {
         val stock = s.articles.filter { it.inStock }
-        val sales = s.sales.filter { it.status == SaleStatus.COMPLETED }
-        val pending = s.sales.filter { it.status == SaleStatus.PENDING }
+        val counted = Ledger.counted(s.sales)
+        val sales = counted.filter { it.status == SaleStatus.COMPLETED }
+        val pending = counted.filter { it.status == SaleStatus.PENDING }
         val totals = Ledger.totals(sales)
         val costOfSold = totals.cost
         val revenue = totals.revenue
@@ -138,7 +142,6 @@ object Stats {
             // Only articles catalogued here: older history has no stock to compare with.
             sellThrough = sales.count { it.listedAt != null }.let { sold -> (sold + stock.size).takeIf { it > 0 }?.let { sold * 100 / it } },
             medianDays = days.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] },
-            favourites = stock.sumOf { a -> a.vinted.values.sumOf { it.favourites ?: 0 } },
             months = monthly,
             accounts = accounts,
             brands = brands,
@@ -146,6 +149,8 @@ object Stats {
             pendingRevenue = pending.sumOf { it.price },
             unknownCost = sales.count { it.cost == null },
             stockValue = stock.sumOf { it.price ?: 0 },
+            // What would be earned selling at the listed prices what has a price and a known cost.
+            stockProfit = stock.sumOf { a -> a.price?.let { p -> Ledger.costOf(s, a)?.let { c -> p - c } } ?: 0 },
         )
     }
 

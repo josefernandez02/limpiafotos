@@ -117,12 +117,14 @@ class Desk(private val resolver: ContentResolver) {
     /** The sales the PC has read in Vinted, as it sends them (see VintedSales.parsePc). */
     fun sales(link: PcLink): String = call(link, "GET", "/ventas", null).toString()
 
-    /** "mandar" or "parar". [prefixes]: the article codes to recognise; [since]: older finished orders are not looked into. */
-    fun salesControl(link: PcLink, action: String, prefixes: List<String>, since: Long): String = call(link, "POST", "/ventas",
+    /**
+     * "mandar" (read now), "refrescar" (read if the last time is old) or "parar".
+     * [prefixes]: the article codes to recognise.
+     */
+    fun salesControl(link: PcLink, action: String, prefixes: List<String>): String = call(link, "POST", "/ventas",
         buildJsonObject {
             put("accion", action)
             put("prefijos", JsonArray(prefixes.map(::JsonPrimitive)))
-            put("desde", since)
         }.toString()).toString()
 
     fun incidents(link: PcLink): List<Incident> =
@@ -252,7 +254,7 @@ class Desk(private val resolver: ContentResolver) {
             throw e
         } catch (e: IOException) {
             AppLog.w("pc", "$method $path: ${e.javaClass.simpleName} ${e.message.orEmpty()}")
-            throw CatalogException("No llego al PC")
+            throw CatalogException(UNREACHABLE)
         } finally {
             c.disconnect()
         }
@@ -277,6 +279,8 @@ class Desk(private val resolver: ContentResolver) {
     }
 
     companion object {
+        /** The PC is off, its program closed, or there is no way to it. */
+        const val UNREACHABLE = "No llego al PC"
         /** Long side of the photos sent: Vinted shows them smaller. */
         private const val SIDE = 2048
         private const val SEND_TIMEOUT = 120_000

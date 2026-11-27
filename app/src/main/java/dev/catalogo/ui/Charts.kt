@@ -35,9 +35,9 @@ import dev.catalogo.core.Stats
 @Composable
 fun Kpi(label: String, value: String, detail: String, modifier: Modifier = Modifier) {
     Tile(modifier) {
-        Muted(label, maxLines = 1)
+        Muted(label, maxLines = 2)
         Text(value, style = Mono.copy(fontSize = 22.sp), maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
-        Muted(detail, maxLines = 1)
+        Muted(detail, maxLines = 2)
     }
 }
 
