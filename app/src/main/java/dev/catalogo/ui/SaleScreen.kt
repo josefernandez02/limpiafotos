@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
+import dev.catalogo.core.Labels
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
 import dev.catalogo.core.ParentState
@@ -89,6 +90,8 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
                 Muted(text)
                 if (sale.detail.isNotBlank()) Muted("En Vinted: ${sale.detail}", Modifier.padding(top = 4.dp))
             }
+
+            if (Labels.canPrint(sale)) LabelsCard(vm, p, only = sale.order)
 
             Tile {
                 Fact("Código", saleCode(p, sale) ?: "Sin código")

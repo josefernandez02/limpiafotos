@@ -12,6 +12,8 @@ import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
+import dev.catalogo.core.LabelJob
+import dev.catalogo.core.Labels
 import dev.catalogo.core.ParentState
 import dev.catalogo.data.Desk
 import dev.catalogo.data.AppLog
@@ -506,6 +508,97 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             n(Kind.CONFLICT, "para que la revises", "para que las revises"),
         )
         return if (changes.isEmpty()) null else "Ventas: ${changes.joinToString(", ")}"
+    }
+
+    // ---------- shipping labels: the PC takes them out, the phone keeps the PDF ----------
+
+    /** How the labels asked for are going, in one line, while the PC is on them. */
+    private val _labelsText = MutableStateFlow("")
+    val labelsText: StateFlow<String> = _labelsText.asStateFlow()
+    private val labelsLock = Mutex()
+
+    /** Asks the PC for the labels of every sale still to be sent, or of the order [only]. */
+    fun printLabels(only: String? = null) = run {
+        val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
+        val p = repo.state.parent ?: throw CatalogException("No hay catálogo")
+        val requests = Labels.requests(p, only)
+        if (requests.isEmpty()) throw CatalogException("No hay ventas pendientes de enviar")
+        labelsLock.withLock {
+            val reply = Labels.parse(withContext(Dispatchers.IO) { repo.desk.labelsControl(link, "mandar", requests) })
+            _labelsText.value = "Pedidas al PC…"
+            repo.setLabels(LabelJob(lot = reply.lot))
+            takeLabels(link, reply)
+        }
+    }
+
+    fun stopLabels() = run {
+        labelsLock.withLock {
+            // Forgotten here even if the PC does not hear it: the user can always ask again.
+            repo.setLabels(LabelJob())
+            val link = repo.state.pc ?: return@withLock
+            try {
+                withContext(Dispatchers.IO) { repo.desk.labelsControl(link, "parar") }
+            } catch (e: CatalogException) {
+                if (e.message != Desk.UNREACHABLE) throw e
+                _message.value = "Sin conexión: el PC no sabe que has parado"
+            }
+        }
+    }
+
+    /** Puts away the finished PDF or the warnings; the file stays in Descargas. */
+    fun dismissLabels() = run { repo.setLabels(LabelJob()) }
+
+    /** Asks the PC how the pending labels go, and brings the PDF when they are done. */
+    suspend fun refreshLabels() {
+        val link = repo.state.pc ?: return
+        if (repo.state.labels.lot == 0L) return
+        try {
+            labelsLock.withLock {
+                if (repo.state.labels.lot == 0L) return@withLock
+                takeLabels(link, Labels.parse(withContext(Dispatchers.IO) { repo.desk.labels(link) }))
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: CatalogException) {
+            _labelsText.value = if (e.message == Desk.UNREACHABLE) "PC sin conexión: las recojo cuando vuelva" else e.message.orEmpty()
+        } catch (e: Exception) {
+            AppLog.w("etiquetas", "error: ${e.message ?: e.javaClass.simpleName}")
+            _labelsText.value = "No se pudo guardar el PDF (${e.message ?: e.javaClass.simpleName})"
+        }
+    }
+
+    /** Only inside [labelsLock]. */
+    private suspend fun takeLabels(link: PcLink, reply: Labels.Reply) {
+        val lot = repo.state.labels.lot
+        when (val step = Labels.step(lot, reply)) {
+            is Labels.Step.Wait -> _labelsText.value = step.text
+            is Labels.Step.Fetch -> {
+                _labelsText.value = "Trayendo el PDF…"
+                val file = withContext(Dispatchers.IO) {
+                    val pdf = Labels.parsePdf(repo.desk.labelsPdf(link))
+                    // Another lot took its place meanwhile: the next question tells.
+                    if (pdf.lot != lot) null else repo.labelFiles.save(pdf.name, pdf.bytes)
+                } ?: return
+                repo.setLabels(LabelJob(file = file.toString(), count = step.done.labels, warnings = step.done.warnings))
+                AppLog.i("etiquetas", "PDF con ${step.done.labels}, avisos ${step.done.warnings.size}")
+                _message.value = "PDF de etiquetas guardado en Descargas"
+            }
+            is Labels.Step.Failed -> {
+                repo.setLabels(LabelJob(warnings = step.warnings.ifEmpty { listOf("El PC no ha podido sacar ninguna etiqueta") }))
+                _message.value = "No ha salido ninguna etiqueta"
+            }
+            Labels.Step.Dropped -> {
+                repo.setLabels(LabelJob())
+                _message.value = "El PC ha parado las etiquetas"
+            }
+        }
+    }
+
+    /** Opens the PDF in the label printer's app. */
+    fun openLabels() = run {
+        val file = repo.state.labels.file
+        if (file.isBlank()) return@run
+        openInPrinter(getApplication<Application>(), Uri.parse(file))?.let { _message.value = it }
     }
 
     // ---------- sales ----------

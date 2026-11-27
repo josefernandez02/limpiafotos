@@ -30,6 +30,7 @@ class Repo(context: Context) {
     val previews = Previews(context.filesDir)
     val desk = Desk(context.contentResolver)
     val saleImages = SaleImages(context.filesDir, context.contentResolver)
+    val labelFiles = LabelFiles(context.contentResolver)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
@@ -90,6 +91,10 @@ class Repo(context: Context) {
 
     suspend fun setGamesOff(off: Set<String>) {
         store.update { it.copy(gamesOff = off) }
+    }
+
+    suspend fun setLabels(job: dev.catalogo.core.LabelJob) {
+        store.update { it.copy(labels = job) }
     }
 
     suspend fun setPc(link: dev.catalogo.core.PcLink?) {

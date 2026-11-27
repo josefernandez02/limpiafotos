@@ -194,6 +194,7 @@ fun SalesScreen(vm: MainViewModel, p: ParentState) {
                     ),
                 )
             }
+            item(key = "labels") { LabelsCard(vm, p) }
             items(doubts, key = { "doubt-${it.first.id}" }) { (order, hand) -> DoubtCard(vm, p, order, hand) }
             item(key = "statuses") {
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -61,12 +61,18 @@ class MainActivity : ComponentActivity() {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 vm.salesOpened()
                 var last: Long? = null
+                var lastLabels: Long? = null
                 while (true) {
                     val every = vm.salesEvery()
                     val now = SystemClock.elapsedRealtime()
                     if (every != null && (last == null || now - last >= every)) {
                         vm.refreshSales()
                         last = SystemClock.elapsedRealtime()
+                    }
+                    // Labels asked for: the PDF is brought as soon as the PC has it.
+                    if (every != null && (lastLabels == null || now - lastLabels >= 4_000)) {
+                        vm.refreshLabels()
+                        lastLabels = SystemClock.elapsedRealtime()
                     }
                     delay(2_000)
                 }

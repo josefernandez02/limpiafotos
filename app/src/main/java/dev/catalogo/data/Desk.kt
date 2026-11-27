@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import dev.catalogo.core.CatalogException
+import dev.catalogo.core.Labels
 import dev.catalogo.core.PcLink
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -127,6 +128,25 @@ class Desk(private val resolver: ContentResolver) {
             put("prefijos", JsonArray(prefixes.map(::JsonPrimitive)))
         }.toString()).toString()
 
+    /** The shipping labels the PC was last asked for and how they go (see Labels.parse). */
+    fun labels(link: PcLink): String = call(link, "GET", "/etiquetas", null).toString()
+
+    /** "mandar" (take out the labels of [requests]) or "parar". */
+    fun labelsControl(link: PcLink, action: String, requests: List<Labels.Request> = emptyList()): String = call(link, "POST", "/etiquetas",
+        buildJsonObject {
+            put("accion", action)
+            putJsonArray("pedidos") {
+                for (r in requests) add(buildJsonObject {
+                    put("id", r.id)
+                    put("codigo", r.code)
+                    put("titulo", r.title)
+                })
+            }
+        }.toString()).toString()
+
+    /** The PDF of the last lot (see Labels.parsePdf). It carries the whole file, so it may take longer. */
+    fun labelsPdf(link: PcLink): String = call(link, "GET", "/etiquetas/pdf", null, SEND_TIMEOUT).toString()
+
     fun incidents(link: PcLink): List<Incident> =
         (call(link, "GET", "/incidencias", null)["incidencias"] as? JsonArray).orEmpty().mapNotNull { e ->
             (e as? JsonObject)?.let {
@@ -246,7 +266,11 @@ class Desk(private val resolver: ContentResolver) {
                 in 200..299 -> o
                 401 -> throw CatalogException("El PC no acepta la clave: revísala en Ajustes")
                 404 -> throw CatalogException(
-                    if (path == "/ventas") "El programa del PC es antiguo: ciérralo y vuelve a abrirlo" else "El PC no conoce este artículo",
+                    when (path) {
+                        "/ventas", "/etiquetas" -> "El programa del PC es antiguo: ciérralo y vuelve a abrirlo"
+                        "/etiquetas/pdf" -> "El PC ya no tiene el PDF de las etiquetas: vuelve a pedirlas"
+                        else -> "El PC no conoce este artículo"
+                    },
                 )
                 else -> throw CatalogException("PC: ${o.str("error").ifBlank { "error $code" }}")
             }

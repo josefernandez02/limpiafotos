@@ -208,6 +208,8 @@ data class AppState(
     val pc: PcLink? = null,
     /** Game groups switched off ("ava", "likes", "discord"): none of their games is ever played. Decided here, the PC just obeys. */
     val gamesOff: Set<String> = emptySet(),
+    /** The shipping labels this phone last asked the PC for. */
+    val labels: LabelJob = LabelJob(),
 ) {
     companion object {
         /** Folders where galleries list albums; the app picks one per phone automatically. */
