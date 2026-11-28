@@ -48,6 +48,10 @@ import dev.catalogo.ui.photos.SessionPhotosScreen
 import dev.catalogo.ui.sales.SaleScreen
 import dev.catalogo.ui.sales.SalesScreen
 import dev.catalogo.ui.sales.SalesStatsScreen
+import dev.catalogo.ui.sales.refreshLabels
+import dev.catalogo.ui.sales.refreshSales
+import dev.catalogo.ui.sales.salesEvery
+import dev.catalogo.ui.sales.salesOpened
 import dev.catalogo.ui.settings.SettingsScreen
 import dev.catalogo.ui.settings.SetupScreen
 import dev.catalogo.ui.settings.TemplateScreen
