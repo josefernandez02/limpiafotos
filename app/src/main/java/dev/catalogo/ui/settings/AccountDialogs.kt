@@ -74,7 +74,7 @@ fun AccountDialog(
     )
 }
 
-/** Vinted user name and profile link of the account a phone publishes in. */
+/** Vinted user name and profile link of an account. */
 @Composable
 internal fun VintedProfileDialog(vm: MainViewModel, vintedAccount: VintedAccount, onDismiss: () -> Unit) {
     var account by remember { mutableStateOf(vintedAccount.vintedName) }

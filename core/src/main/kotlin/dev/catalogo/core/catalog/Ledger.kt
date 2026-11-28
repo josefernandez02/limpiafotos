@@ -7,7 +7,7 @@ import dev.catalogo.core.model.Sale
 import dev.catalogo.core.model.SaleStatus
 import kotlin.math.roundToLong
 
-/** Lots, sales and their numbers. Pure functions over the parent state. */
+/** Lots, sales and their numbers. Pure functions over the catalogue state. */
 object Ledger {
 
     data class LotStats(val sold: Int, val quantity: Int, val inStock: Int, val recovered: Long, val profit: Long, val pending: Int = 0)

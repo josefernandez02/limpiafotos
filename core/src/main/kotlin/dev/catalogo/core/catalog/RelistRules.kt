@@ -24,7 +24,7 @@ object RelistRules {
         return new.map { it.lowercase() }.toSet().count { it !in before } >= MIN_TAGS
     }
 
-    /** What is still repeated, in plain words (empty = fine). A device without a new title counts as repeating it. */
+    /** What is still repeated, in plain words (empty = fine). An account without a new title counts as repeating it. */
     fun repeated(avoid: Relist, titles: Map<String, String>, hashtags: List<String>): List<String> = buildList {
         if (avoid.titles.any { (id, old) -> !titleChanged(old, titles[id].orEmpty()) }) add("título")
         if (avoid.hashtags.isNotEmpty() && !hashtagsChanged(avoid.hashtags, hashtags)) add("hashtags")

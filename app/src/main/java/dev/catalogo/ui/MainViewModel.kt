@@ -88,11 +88,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _covers = MutableStateFlow<Map<String, Uri>>(emptyMap())
     val covers: StateFlow<Map<String, Uri>> = _covers.asStateFlow()
 
-    /** Main phone: article number → cover from any account (own album, outbox or sent copies). */
+    /** Article number → cover from any account (gallery album, photos kept in the app or legacy copies). */
     private val _articleCovers = MutableStateFlow<Map<Int, Uri>>(emptyMap())
     val articleCovers: StateFlow<Map<Int, Uri>> = _articleCovers.asStateFlow()
 
-    /** Clean photos waiting in the outbox: deviceId → number → count. */
+    /** Clean photos kept in the app for the other accounts: account id → number → count. */
     private val _accountPhotos = MutableStateFlow<Map<String, Map<Int, Int>>>(emptyMap())
     val accountPhotos: StateFlow<Map<String, Map<Int, Int>>> = _accountPhotos.asStateFlow()
 
@@ -128,13 +128,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun albumPhotos(album: String): List<Uri> =
         withContext(Dispatchers.IO) { runCatching { repo.gallery.albumPhotos(repo.base, album) }.getOrDefault(emptyList()) }
 
-    /** Photos for [accountId]'s account kept on this phone: waiting to be sent, then reduced copies of the sent ones. */
+    /** Photos for [accountId] kept in the app, then the reduced copies left by earlier versions. */
     suspend fun pendingAccountPhotos(accountId: String, number: Int): List<Uri> = withContext(Dispatchers.IO) {
         (repo.accountPhotos.files(accountId, number) + repo.legacyPreviews.files(number, accountId)).map { Uri.fromFile(it) }
     }
 
     init {
-        // Each phone keeps its albums where its own gallery shows them.
+        // The albums live where this phone's gallery shows them.
         run {
             repo.ensureDistinctStyles()
             repo.adoptAccounts()
@@ -242,7 +242,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repo.adoptFolder(GalleryFolders.auto())
     }
 
-    // ---------- parent ----------
+    // ---------- articles ----------
 
     fun saveArticle(number: Int?, listing: Listing, lotId: String?, costText: String, ai: AiResult?, priceText: String = "") = run {
         val cost = if (lotId != null || costText.isBlank()) null
@@ -365,7 +365,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun forgetPc() = run { repo.setPc(null) }
 
-    /** Photos the AI can look at: main phone's album first, then photos waiting for other phones. */
+    /** Photos the AI can look at: the main account's album first, then the photos of the other accounts. */
     suspend fun aiPhotos(number: Int): List<Uri> {
         val p = repo.state.catalog ?: return emptyList()
         return Catalog.allAccounts(p).flatMap { d ->
@@ -726,7 +726,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    /** [account]: the phone whose Vinted account sold it (the main phone when null). */
+    /** [account]: the Vinted account that sold it (the main one when null). */
     fun registerSale(number: Int, priceText: String, costText: String, account: String?, paid: Boolean, freeNumber: Boolean) = run {
         val price = Money.parse(priceText) ?: throw CatalogException("Precio de venta no válido")
         val cost = if (costText.isBlank()) null else Money.parse(costText) ?: throw CatalogException("Coste no válido")

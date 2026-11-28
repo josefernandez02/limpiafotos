@@ -19,7 +19,7 @@ import dev.catalogo.core.vinted.VintedProfile
 
 class CatalogException(message: String) : Exception(message)
 
-/** Pure state transitions of the parent's catalogue. No I/O. */
+/** Pure state transitions of the catalogue. No I/O. */
 object Catalog {
 
     fun allAccounts(s: CatalogState): List<VintedAccount> = listOf(s.mainAccount) + s.otherAccounts
@@ -66,9 +66,9 @@ object Catalog {
     }
 
     /**
-     * One word for where [article] is in [vintedAccount]'s account. This phone's account
+     * One word for where [article] is in [vintedAccount]'s account. The main account
      * follows the PC (or what was set by hand); other accounts only have the mark
-     * «subido» from their own phones.
+     * «subido», set by hand.
      */
     fun stage(s: CatalogState, article: Article, vintedAccount: VintedAccount): Stage {
         if (article.held || article.vinted[vintedAccount.id]?.status == "sold") return Stage.SOLD
@@ -100,7 +100,7 @@ object Catalog {
 
     /**
      * Lists [number] again, with new photos: everything the user filled in stays (listing, price, cost, lot, accounts);
-     * what the old publication left behind goes: the AI's answer, the photo choice, the draft on the PC and this phone's
+     * what the old publication left behind goes: the AI's answer, the photo choice, the draft on the PC and the main account's
      * «subido» and wardrobe marks. The titles and hashtags it had are kept apart, as what the new ones must not repeat.
      */
     fun relist(s: CatalogState, number: Int): CatalogState {
@@ -132,7 +132,7 @@ object Catalog {
         return a.ai?.takeIf { it.basis == Ai.basis(listing) }
     }
 
-    /** Accounts the AI writes titles for: every phone, in order. */
+    /** Accounts the AI writes titles for: all of them, in order. */
     fun aiAccounts(s: CatalogState): List<Ai.Account> = allAccounts(s).map { Ai.Account(it.id, it.prefix, it.style) }
 
     /** Marks whether [accountId]'s account already has [number] published on Vinted (and so is one of its accounts). */
@@ -148,7 +148,7 @@ object Catalog {
         )
     }
 
-    /** Accounts [number] will be published in. Unknown devices are ignored. */
+    /** Accounts [number] will be published in. Unknown accounts are ignored. */
     fun setAccounts(s: CatalogState, number: Int, accounts: Set<String>): CatalogState {
         val a = article(s, number) ?: return s
         if (!a.inStock) return s
@@ -158,8 +158,8 @@ object Catalog {
     }
 
     /**
-     * Makes sure no secondary phone writes with the main phone's style (phones
-     * paired before styles existed all had style 0).
+     * Makes sure no other account writes with the main account's style (accounts
+     * added before styles existed all had style 0).
      */
     fun ensureDistinctStyles(s: CatalogState): CatalogState {
         if (s.otherAccounts.none { it.style == s.mainAccount.style }) return s
@@ -168,7 +168,7 @@ object Catalog {
         return s.copy(otherAccounts = otherAccounts)
     }
 
-    /** Style for a newly paired phone: never the main phone's own style. */
+    /** Style for a new account: never the main account's own style. */
     fun nextStyle(s: CatalogState): Int = (s.mainAccount.style + 1) % Garments.STYLES
 
     fun styleAndTemplate(s: CatalogState, id: String, style: Int, template: String): CatalogState {
@@ -200,7 +200,7 @@ object Catalog {
 
     /**
      * Removes an article added by mistake, without a sale: its number is free at
-     * once (other accounts have no phone of their own left to confirm anything).
+     * once (nothing is left waiting for the other accounts to confirm).
      */
     fun delete(s: CatalogState, number: Int): CatalogState {
         val a = article(s, number) ?: return s
@@ -236,7 +236,7 @@ object Catalog {
     }
 
     /**
-     * Vinted account of a phone: its user name and the profile link
+     * Vinted profile of an account: its user name and the profile link
      * ("https://www.vinted.es/member/123456-shiorawear"), from which the
      * member id is taken. A link without a name fills the name too.
      */

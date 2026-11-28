@@ -28,7 +28,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 
-/** What the AI decided for an article, kept with it. Titles are per device id. */
+/** What the AI decided for an article, kept with it. Titles are per account id. */
 @Serializable
 data class AiResult(
     /** [Ai.basis] of the listing the titles were written for; other data means stale titles. */
@@ -57,7 +57,7 @@ data class AiSuggestion(
     val category: String?,
     val colors: List<String>,
     val sizeLabel: String?,
-    /** Device id to title. */
+    /** Account id to title. */
     val titles: Map<String, String>,
     val findings: List<String>,
     val hashtags: List<String> = emptyList(),

@@ -10,9 +10,9 @@ import dev.catalogo.core.model.Sale
 import dev.catalogo.core.model.SaleStatus
 
 /**
- * The life of a sale. Pure transitions of the parent's state; deleting photos and
+ * The life of a sale. Pure transitions of the catalogue state; deleting photos and
  * telling the PC is left to the caller ([freed], [CatalogState.retired] and the
- * article's pending desk state say what is to be done).
+ * article's pending PC task say what is to be done).
  *
  *  - PENDING: sold, but the order can still be cancelled. The article stays, out of
  *    stock, with its number, data and photos, unless the user frees the number early.

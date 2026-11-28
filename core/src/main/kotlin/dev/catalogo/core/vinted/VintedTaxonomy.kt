@@ -38,8 +38,8 @@ object VintedTaxonomy {
 
     /**
      * Vinted Spain leaf categories for men and women: clothing, shoes,
-     * accessories and bags. Copied from Jarvis' catalogue snapshot
-     * (docs/dotb-samples/catalogs-es.json, synced 2026-09-09).
+     * accessories and bags. Snapshot of Vinted's category
+     * catalogue taken on 2026-09-09.
      */
     val categories: List<String> = listOf(
         "Hombre › Accesorios › Bandanas y pañuelos para el pelo",

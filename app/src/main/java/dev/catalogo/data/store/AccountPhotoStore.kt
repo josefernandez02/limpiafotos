@@ -3,7 +3,7 @@ package dev.catalogo.data.store
 import dev.catalogo.core.model.Ids
 import java.io.File
 
-/** Clean photos waiting to be sent: <files>/outbox/<deviceId>/<number>/<name>.jpg */
+/** Clean photos of the other accounts, kept inside the app: <files>/outbox/<accountId>/<number>/<name>.jpg */
 class AccountPhotoStore(filesDir: File) {
     private val root = File(filesDir, "outbox")
 
@@ -35,7 +35,7 @@ class AccountPhotoStore(filesDir: File) {
     }
 
     /**
-     * Copies of the main phone's album made for another account. Only these
+     * Copies of the main account's album made for another account. Only these
      * are ever replaced or removed automatically; photos taken for that
      * account (the only copy there is) are never touched.
      */

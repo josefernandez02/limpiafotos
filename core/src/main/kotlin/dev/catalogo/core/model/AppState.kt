@@ -41,7 +41,7 @@ data class AppState(
     val labelPdfs: List<LabelFile> = emptyList(),
 ) {
     companion object {
-        /** Folders where galleries list albums; the app picks one per phone automatically. */
+        /** Folders where galleries list albums; the app picks the one that suits the phone. */
         val BASE_FOLDERS = listOf("DCIM", "Pictures/Gallery/owner", "Pictures")
     }
 }

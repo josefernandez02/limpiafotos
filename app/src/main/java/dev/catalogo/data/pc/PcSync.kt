@@ -41,7 +41,7 @@ import kotlinx.coroutines.withContext
  * app running in the background with a notification, so leaving the app or
  * locking the phone does not cut Gemini or the upload. Everything is saved in
  * the article ([PcTask]): if Android still stops the app, it carries on the
- * next time. Only this phone's own account goes to the PC.
+ * next time. Only the main account goes to the PC.
  */
 class PcSync(private val repo: CatalogRepository, private val context: android.content.Context) {
 
@@ -378,7 +378,7 @@ class PcSync(private val repo: CatalogRepository, private val context: android.c
     // ---------- by hand: what to do and where it stands ----------
 
     /**
-     * Sets where the article stands in this phone's account, as the user knows it
+     * Sets where the article stands in the main account, as the user knows it
      * (done by hand, or the system got it wrong). The PC hears about it so it never
      * likes a link twice or publishes a draft that must stay a draft. If the PC
      * cannot be reached, the change stays here and is sent on the next check.

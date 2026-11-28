@@ -61,7 +61,7 @@ class CatalogRepository(context: Context) {
         }
     }
 
-    // ---------- parent: articles and photo sessions ----------
+    // ---------- articles and photo sessions ----------
 
     suspend fun newArticle(listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?): Int {
         var number = -1
@@ -135,10 +135,9 @@ class CatalogRepository(context: Context) {
     }
 
     /**
-     * Accounts [number] will be published in. The photos are always taken on
-     * this phone: a chosen account of another phone gets a copy of them, sent
-     * on the next connection; an account no longer chosen loses the copy that
-     * was still waiting.
+     * Accounts [number] will be published in. Another chosen account gets
+     * its own copy of the main album, kept inside the app; an account no longer
+     * chosen loses that copy.
      */
     suspend fun setAccounts(number: Int, accounts: Set<String>) {
         store.update { s -> s.copy(catalog = Catalog.setAccounts(s.catalog!!, number, accounts)) }
@@ -146,7 +145,7 @@ class CatalogRepository(context: Context) {
     }
 
     /**
-     * Keeps the copies waiting for other phones equal to this phone's album
+     * Keeps the copies of the other accounts equal to the main album
      * (after new photos, a new order or a crop). Only copies are touched:
      * photos taken for another account, or already delivered, are left alone.
      */
@@ -413,7 +412,7 @@ class CatalogRepository(context: Context) {
     }
 
     /**
-     * Uses [folder] for albums and moves this phone's albums found in any
+     * Uses [folder] for albums and moves the albums found in any
      * other known folder into it. Returns photos that could not be moved.
      */
     suspend fun adoptFolder(folder: String): Int {
@@ -434,7 +433,7 @@ class CatalogRepository(context: Context) {
         return failed
     }
 
-    /** Fills the fixed "0 Subir" folder with this phone's album of [number]. */
+    /** Fills the fixed "0 Subir" folder with the main account's album of [number]. */
     suspend fun stage(number: Int): Int {
         val s = state
         val album = s.catalog?.let { sku(it.mainAccount, number, it.digits) }

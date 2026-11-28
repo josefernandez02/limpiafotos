@@ -3,7 +3,7 @@ package dev.catalogo.data.store
 import java.io.File
 
 /**
- * Reduced copies of photos that earlier versions sent to other phones: <files>/previews/<number>/.
+ * Reduced copies of photos that earlier versions sent to other phones (they are only read and deleted now): <files>/previews/<number>/.
  * Nothing writes them any more; they are still shown for the articles that have them.
  */
 class LegacyPreviewStore(filesDir: File) {

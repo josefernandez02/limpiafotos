@@ -17,7 +17,7 @@ data class VintedItem(
 )
 
 /**
- * What a re-listed article must not repeat: the titles (per device id) and hashtags it was published with.
+ * What a re-listed article must not repeat: the titles (per account id) and hashtags it was published with.
  * Kept until the AI has written new ones that differ enough ([RelistRules]); nothing is sent to the PC before.
  */
 @Serializable
@@ -27,8 +27,8 @@ data class Relist(
 )
 
 /**
- * One catalogued article, identified by its number (shared by every device).
- * Once [released], it stays here until every device in [pendingRelease] has
+ * One catalogued article, identified by its number (shared by every account).
+ * Once [released], it stays here until every account in [pendingRelease] has
  * confirmed deleting its album; only then the number becomes free again.
  */
 @Serializable
@@ -42,12 +42,12 @@ data class Article(
     val lotId: String? = null,
     /** Manual cost in cents, used when the article has no lot. */
     val cost: Long? = null,
-    /** Devices whose Vinted account already has this article published. */
+    /** Accounts that already have this article published. */
     val uploaded: Set<String> = emptySet(),
     val ai: AiResult? = null,
-    /** Per device id: the listing found in that account's Vinted wardrobe. */
+    /** Per account id: the listing found in that account's Vinted wardrobe. */
     val vinted: Map<String, VintedItem> = emptyMap(),
-    /** Accounts (device ids) chosen to publish this article in; usually one. */
+    /** Accounts (their ids) chosen to publish this article in; usually one. */
     val accounts: Set<String> = emptySet(),
     /** Price in cents it is listed at in Vinted. */
     val price: Long? = null,

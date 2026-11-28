@@ -41,7 +41,7 @@ import dev.catalogo.ui.common.Muted
 import dev.catalogo.ui.common.OneLine
 
 /**
- * This phone's account in the article: what to do with it, how far it is, and the
+ * The main account in the article: what to do with it, how far it is, and the
  * one button that moves it on. Same shape in every state: a short line on top
  * (what is happening), the main button, and «Cambiar estado» at the bottom.
  */

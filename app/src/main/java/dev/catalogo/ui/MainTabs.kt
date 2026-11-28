@@ -15,7 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.unit.dp
 
-/** Bottom tabs of the main phone. */
+/** Bottom tabs. */
 @Composable
 fun MainTabs(vm: MainViewModel, current: Screen) {
     val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current

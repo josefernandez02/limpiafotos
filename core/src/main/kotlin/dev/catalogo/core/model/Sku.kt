@@ -1,6 +1,6 @@
 package dev.catalogo.core.model
 
-/** SKU = device prefix (letters) + zero-padded article number, e.g. "SA0054". */
+/** SKU = account prefix (letters) + zero-padded article number, e.g. "SA0054". */
 object Sku {
     const val MIN_DIGITS = 3
     const val MAX_DIGITS = 6

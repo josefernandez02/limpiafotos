@@ -146,8 +146,8 @@ fun AccountLine(label: String, stage: Stage) {
 
 /**
  * The article in Vinted: which accounts it goes to, how far it is in each, and the
- * one action that moves it forward. This phone's account is created by the PC; the
- * others are uploaded from their own phones and only marked here.
+ * one action that moves it forward. The main account is created by the PC; the
+ * others are uploaded elsewhere and only marked here.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
