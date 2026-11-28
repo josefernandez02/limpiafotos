@@ -5,22 +5,22 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class ReadingTest {
+class TagReadingTest {
     private val jeans = Listing(type = "jeans", brand = "Levi's", model = "505", size = "W38 L38", gender = Gender.MEN)
     private val accounts = listOf(Ai.Account("a", "SH", 0))
 
     @Test
     fun `composition decides the materials`() {
-        assertEquals(listOf("Algodón"), Reader.materials(listOf("100% ALGODÓN")))
-        assertEquals(listOf("Algodón", "Elastano"), Reader.materials(listOf("98% cotton 2% elastane")))
-        assertEquals(listOf("Poliéster", "Algodón"), Reader.materials(listOf("35% algodón", "65% poliéster")))
-        assertEquals(listOf("Cuero sintético"), Reader.materials(listOf("100% piel sintética")))
-        assertEquals(emptyList(), Reader.materials(listOf("hecho a mano")))
+        assertEquals(listOf("Algodón"), TagReader.materials(listOf("100% ALGODÓN")))
+        assertEquals(listOf("Algodón", "Elastano"), TagReader.materials(listOf("98% cotton 2% elastane")))
+        assertEquals(listOf("Poliéster", "Algodón"), TagReader.materials(listOf("35% algodón", "65% poliéster")))
+        assertEquals(listOf("Cuero sintético"), TagReader.materials(listOf("100% piel sintética")))
+        assertEquals(emptyList(), TagReader.materials(listOf("hecho a mano")))
     }
 
     @Test
     fun `reading answer is cleaned`() {
-        val r = Reader.parse(
+        val r = TagReader.parse(
             """{"composicion":["100% algodón","sin número"],"hecho_en":"Argentina","talla_etiqueta":" W38  L38 ",
                "marca":null,"modelo":"505","defectos":[],"detalles":["pestaña roja"]}""",
         )
@@ -28,12 +28,12 @@ class ReadingTest {
         assertEquals("Argentina", r.origin)
         assertEquals("W38 L38", r.sizeLabel)
         assertNull(r.brand)
-        assertEquals("100% algodón", Reader.compositionText(r))
+        assertEquals("100% algodón", TagReader.compositionText(r))
     }
 
     @Test
     fun `the label wins over the listing call for materials`() {
-        val reading = Reading(composition = listOf("100% algodón"), origin = "Argentina")
+        val reading = TagReading(composition = listOf("100% algodón"), origin = "Argentina")
         val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","categoria":null,
             "colores":["Azul"],"materiales":["Vaquero"],"dudas":["materiales"],"marca":null,"modelo":null,"talla":null,
             "titulos":{"SH":"Levi's 505 Jeans Vintage 90s Classic Straight Fit Blue"},"hashtags":["levis"]}"""
@@ -46,7 +46,7 @@ class ReadingTest {
 
     @Test
     fun `the prompt carries the reading and keeps a country out of the title`() {
-        val p = Ai.prompt(jeans, accounts, Reading(composition = listOf("100% algodón")))
+        val p = Ai.prompt(jeans, accounts, TagReading(composition = listOf("100% algodón")))
         assertTrue("LECTURA_DE_ETIQUETAS" in p && "100% algodón" in p, p)
         assertTrue("en UN solo sitio" in p)
         assertTrue("LECTURA_DE_ETIQUETAS\n{" !in Ai.prompt(jeans, accounts, null))
@@ -81,16 +81,16 @@ class ChosenPhotosTest {
 class StageTest {
     @Test
     fun `stages are one word and uploaded is not played`() {
-        val self = Device("me", "Móvil", "SH", account = "shiorawear")
-        val s = ParentState(self = self)
-        fun st(desk: Desk?, uploaded: Set<String> = emptySet()) =
-            Catalog.stage(s, Article(number = 1, createdAt = 1, desk = desk, uploaded = uploaded), self)
+        val mainAccount = VintedAccount("me", "Móvil", "SH", vintedName = "shiorawear")
+        val s = CatalogState(mainAccount = mainAccount)
+        fun st(pcTask: PcTask?, uploaded: Set<String> = emptySet()) =
+            Catalog.stage(s, Article(number = 1, createdAt = 1, pcTask = pcTask, uploaded = uploaded), mainAccount)
         assertEquals(Stage.TO_UPLOAD, st(null))
-        assertEquals(Stage.WORKING, st(Desk("r", Desk.PREPARING)))
-        assertEquals(Stage.REVIEW, st(Desk("r", "revisar")))
-        assertEquals(Stage.DRAFT, st(Desk("r", "borrador")))
-        assertEquals(Stage.UPLOADED, st(Desk("r", "publicado"), setOf("me")))
-        assertEquals(Stage.PLAYED, st(Desk("r", "jugado"), setOf("me")))
+        assertEquals(Stage.WORKING, st(PcTask("r", PcTask.PREPARING)))
+        assertEquals(Stage.REVIEW, st(PcTask("r", "revisar")))
+        assertEquals(Stage.DRAFT, st(PcTask("r", "borrador")))
+        assertEquals(Stage.UPLOADED, st(PcTask("r", "publicado"), setOf("me")))
+        assertEquals(Stage.PLAYED, st(PcTask("r", "jugado"), setOf("me")))
         assertEquals(Stage.UPLOADED, st(null, setOf("me")))
     }
 }
@@ -98,12 +98,12 @@ class StageTest {
 class FitsTest {
     @Test
     fun `the cut decides the jeans category and the model number wins`() {
-        assertEquals(Fits.SLIM, Fits.ofModel("Levi's", "511"))
-        assertEquals(Fits.STRAIGHT, Fits.ofModel("Levis", "505 Regular"))
-        assertEquals(Fits.BAGGY, Fits.normalize("Loose Straight"))
-        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Fits.jeansCategory(Gender.MEN, Fits.STRAIGHT))
-        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros de campana", Fits.jeansCategory(Gender.WOMEN, Fits.BOOTCUT))
-        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", Fits.forGender("Hombre › Ropa › Vaqueros › Vaqueros rectos", Gender.WOMEN))
+        assertEquals(TrouserFits.SLIM, TrouserFits.ofModel("Levi's", "511"))
+        assertEquals(TrouserFits.STRAIGHT, TrouserFits.ofModel("Levis", "505 Regular"))
+        assertEquals(TrouserFits.BAGGY, TrouserFits.normalize("Loose Straight"))
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", TrouserFits.jeansCategory(Gender.MEN, TrouserFits.STRAIGHT))
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros de campana", TrouserFits.jeansCategory(Gender.WOMEN, TrouserFits.BOOTCUT))
+        assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", TrouserFits.forGender("Hombre › Ropa › Vaqueros › Vaqueros rectos", Gender.WOMEN))
         // The AI said «ajustados» but the patch reads 505: straight.
         val jeans = Listing(type = "jeans", brand = "Levi's", model = "505", gender = Gender.MEN)
         val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","corte":"slim",
@@ -113,7 +113,7 @@ class FitsTest {
         assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", s.category)
         assertTrue("categoria" !in s.doubts)
         // A women's label read in the photos moves the category to Mujer.
-        val r = Reading(gender = "mujer", fit = Fits.STRAIGHT)
+        val r = TagReading(gender = "mujer", fit = TrouserFits.STRAIGHT)
         val s2 = Ai.parse(answer, jeans.copy(gender = null, model = ""), listOf(Ai.Account("a", "SH", 0)), r)
         assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s2.category)
     }

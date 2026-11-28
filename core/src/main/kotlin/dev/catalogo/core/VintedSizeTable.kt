@@ -1,7 +1,7 @@
 package dev.catalogo.core
 
 // Generado desde el catálogo de Vinted España (recursos/vinted_es.json del PC): grupos de talla por categoría.
-internal object SizeTable {
+internal object VintedSizeTable {
     val groups: Map<String, List<Int>> = buildMap {
         for (c in listOf(
             "Hombre › Accesorios › Cinturones",

@@ -40,7 +40,7 @@ import androidx.compose.ui.graphics.Color
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Lot
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stats
 import androidx.compose.foundation.clickable
@@ -52,7 +52,7 @@ import androidx.compose.ui.text.style.TextOverflow
  * lots. The money that came in and its statistics are in «Ventas».
  */
 @Composable
-fun LotsScreen(vm: MainViewModel, p: ParentState) {
+fun LotsScreen(vm: MainViewModel, p: CatalogState) {
     var editing by remember { mutableStateOf<Lot?>(null) }
     var creating by remember { mutableStateOf(false) }
     val now = remember(p) { System.currentTimeMillis() }

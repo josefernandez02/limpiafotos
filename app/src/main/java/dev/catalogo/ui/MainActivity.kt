@@ -99,7 +99,7 @@ private fun App(vm: MainViewModel) {
         snackbar.showSnackbar(text)
         vm.clearMessage()
     }
-    val sessionOpen = state.parent?.session != null && stack.last() != Screen.Review
+    val sessionOpen = state.catalog?.session != null && stack.last() != Screen.SessionPhotos
     val onSecondaryTab = stack.size == 1 && stack.last() in setOf(Screen.Lots, Screen.Status, Screen.Sales)
     BackHandler(enabled = (stack.size > 1 || onSecondaryTab) && !sessionOpen) { vm.back() }
 
@@ -120,23 +120,23 @@ private fun App(vm: MainViewModel) {
             },
             label = "screens",
         ) { shownStack ->
-            val parent = state.parent
+            val catalog = state.catalog
             val top = shownStack.last()
             when {
-                parent == null -> SetupScreen(vm)
-                parent != null && top == Screen.Review && parent.session != null -> ReviewScreen(vm, parent)
-                parent != null && parent.session != null -> SessionScreen(vm, parent)
+                catalog == null -> SetupScreen(vm)
+                catalog != null && top == Screen.SessionPhotos && catalog.session != null -> SessionPhotosScreen(vm, catalog)
+                catalog != null && catalog.session != null -> CameraSessionScreen(vm, catalog)
                 top == Screen.Settings -> SettingsScreen(vm, state)
-                parent != null && top is Screen.Template -> TemplateScreen(vm, parent, top.deviceId)
-                parent != null && top is Screen.Editor -> EditorScreen(vm, parent, top.number)
-                parent != null && top is Screen.Article -> ArticleScreen(vm, parent, top.number)
-                parent != null && top is Screen.Photos -> PhotosScreen(vm, parent, top.number, top.deviceId)
-                parent != null && top == Screen.Sales -> SalesScreen(vm, parent)
-                parent != null && top is Screen.Sale -> SaleScreen(vm, parent, top.id)
-                parent != null && top == Screen.SalesStats -> SalesStatsScreen(vm, parent)
-                parent != null && top == Screen.Lots -> LotsScreen(vm, parent)
-                parent != null && top == Screen.Status -> StatusScreen(vm, parent)
-                else -> ParentHome(vm, parent)
+                catalog != null && top is Screen.Template -> TemplateScreen(vm, catalog, top.accountId)
+                catalog != null && top is Screen.Editor -> EditorScreen(vm, catalog, top.number)
+                catalog != null && top is Screen.Article -> ArticleScreen(vm, catalog, top.number)
+                catalog != null && top is Screen.Photos -> PhotosScreen(vm, catalog, top.number, top.accountId)
+                catalog != null && top == Screen.Sales -> SalesScreen(vm, catalog)
+                catalog != null && top is Screen.Sale -> SaleScreen(vm, catalog, top.id)
+                catalog != null && top == Screen.SalesStats -> SalesStatsScreen(vm, catalog)
+                catalog != null && top == Screen.Lots -> LotsScreen(vm, catalog)
+                catalog != null && top == Screen.Status -> StatusScreen(vm, catalog)
+                else -> ArticleListScreen(vm, catalog)
             }
         }
         val viewer by vm.viewer.collectAsStateWithLifecycle()

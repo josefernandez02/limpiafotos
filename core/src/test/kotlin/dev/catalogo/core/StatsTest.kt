@@ -8,12 +8,12 @@ import kotlin.test.assertTrue
 
 class StatsTest {
     private val day = 86_400_000L
-    private val samsung = Device("p", "Samsung", "SH", account = "shiorawear")
-    private val poco = Device("c1", "Poco", "SA", style = 1)
+    private val samsung = VintedAccount("p", "Samsung", "SH", vintedName = "shiorawear")
+    private val poco = VintedAccount("c1", "Poco", "SA", style = 1)
 
     @Test
     fun `kpis count stock, sales, speed and age`() {
-        var s = ParentState(self = samsung, children = listOf(poco))
+        var s = CatalogState(mainAccount = samsung, otherAccounts = listOf(poco))
         s = Ledger.addLot(s, "l1", "Lote", 4000, 4, 0)
         repeat(4) { i ->
             val (next, n) = Catalog.create(s, i * 10 * day)
@@ -42,7 +42,7 @@ class StatsTest {
 
     @Test
     fun `empty catalogue has no ratios`() {
-        val k = Stats.kpis(ParentState(self = samsung), 0, ZoneOffset.UTC)
+        val k = Stats.kpis(CatalogState(mainAccount = samsung), 0, ZoneOffset.UTC)
         assertNull(k.sellThrough)
         assertNull(k.roi)
         assertNull(k.medianDays)
@@ -50,12 +50,12 @@ class StatsTest {
 }
 
 class AccountsTest {
-    private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA", style = 1)
+    private val samsung = VintedAccount("p", "Samsung", "SH")
+    private val poco = VintedAccount("c1", "Poco", "SA", style = 1)
 
     @Test
     fun `chosen accounts drive what is left to upload`() {
-        var (s, n) = Catalog.create(ParentState(self = samsung, children = listOf(poco)), 0)
+        var (s, n) = Catalog.create(CatalogState(mainAccount = samsung, otherAccounts = listOf(poco)), 0)
         assertTrue(Catalog.article(s, n)!!.toUpload, "no account chosen yet")
         s = Catalog.setAccounts(s, n, setOf("c1", "ghost"))
         assertEquals(setOf("c1"), Catalog.article(s, n)!!.targets)

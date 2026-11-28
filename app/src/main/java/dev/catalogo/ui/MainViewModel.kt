@@ -13,9 +13,9 @@ import dev.catalogo.core.Catalog
 import dev.catalogo.core.Sku
 import dev.catalogo.core.CatalogException
 import dev.catalogo.core.LabelJob
-import dev.catalogo.core.Labels
-import dev.catalogo.core.ParentState
-import dev.catalogo.data.Desk
+import dev.catalogo.core.ShippingLabels
+import dev.catalogo.core.CatalogState
+import dev.catalogo.data.PcClient
 import dev.catalogo.data.AppLog
 import dev.catalogo.core.VintedSales
 import dev.catalogo.core.VintedSales.Kind
@@ -28,7 +28,7 @@ import dev.catalogo.core.Sales as SalesRules
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import dev.catalogo.core.Device
+import dev.catalogo.core.VintedAccount
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Money
 import kotlinx.coroutines.Dispatchers
@@ -53,9 +53,9 @@ sealed interface Screen {
     data class Editor(val number: Int?) : Screen
     data object Review : Screen
     data object Settings : Screen
-    data class Template(val deviceId: String) : Screen
-    /** Order, cover and crop of [deviceId]'s photos of [number]. */
-    data class Photos(val number: Int, val deviceId: String) : Screen
+    data class Template(val accountId: String) : Screen
+    /** Order, cover and crop of [accountId]'s photos of [number]. */
+    data class Photos(val number: Int, val accountId: String) : Screen
 }
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -79,8 +79,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val articleCovers: StateFlow<Map<Int, Uri>> = _articleCovers.asStateFlow()
 
     /** Clean photos waiting in the outbox: deviceId → number → count. */
-    private val _outbox = MutableStateFlow<Map<String, Map<Int, Int>>>(emptyMap())
-    val outbox: StateFlow<Map<String, Map<Int, Int>>> = _outbox.asStateFlow()
+    private val _accountPhotos = MutableStateFlow<Map<String, Map<Int, Int>>>(emptyMap())
+    val accountPhotos: StateFlow<Map<String, Map<Int, Int>>> = _accountPhotos.asStateFlow()
 
     private val _message = MutableStateFlow<String?>(null)
     val message: StateFlow<String?> = _message.asStateFlow()
@@ -114,9 +114,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun albumPhotos(album: String): List<Uri> =
         withContext(Dispatchers.IO) { runCatching { repo.gallery.albumPhotos(repo.base, album) }.getOrDefault(emptyList()) }
 
-    /** Photos for [deviceId]'s account kept on this phone: waiting to be sent, then reduced copies of the sent ones. */
-    suspend fun outboxPhotos(deviceId: String, number: Int): List<Uri> = withContext(Dispatchers.IO) {
-        (repo.outbox.files(deviceId, number) + repo.previews.files(number, deviceId)).map { Uri.fromFile(it) }
+    /** Photos for [accountId]'s account kept on this phone: waiting to be sent, then reduced copies of the sent ones. */
+    suspend fun pendingAccountPhotos(accountId: String, number: Int): List<Uri> = withContext(Dispatchers.IO) {
+        (repo.accountPhotos.files(accountId, number) + repo.legacyPreviews.files(number, accountId)).map { Uri.fromFile(it) }
     }
 
     init {
@@ -125,7 +125,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repo.ensureDistinctStyles()
             repo.adoptAccounts()
             repo.ensureSaleIds()
-            reportMoves(repo.adoptFolder(dev.catalogo.data.Folders.auto()))
+            reportMoves(repo.adoptFolder(dev.catalogo.data.GalleryFolders.auto()))
             refresh()
         }
     }
@@ -183,20 +183,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun refresh() = viewModelScope.launch {
-        app.drafts.refresh()
+        app.pcSync.refresh()
         val base = repo.base
         val s = state.value
-        val p = s.parent
+        val p = s.catalog
         var articleCovers = emptyMap<Int, Uri>()
-        val (albums, outbox) = withContext(Dispatchers.IO) {
+        val (albums, accountPhotos) = withContext(Dispatchers.IO) {
             val a = runCatching { repo.gallery.albums(base) }.getOrDefault(emptyMap())
-            val pending = p?.children?.associate { d -> d.id to repo.outbox.pending(d.id) } ?: emptyMap()
+            val pending = p?.otherAccounts?.associate { d -> d.id to repo.accountPhotos.pending(d.id) } ?: emptyMap()
             if (p != null) {
                 articleCovers = p.articles.filter { !it.released }.mapNotNull { art ->
-                    val own = a[Sku.format(p.self.prefix, art.number, p.digits)]?.cover
+                    val own = a[Sku.format(p.mainAccount.prefix, art.number, p.digits)]?.cover
                     val cover = own
-                        ?: p.children.firstNotNullOfOrNull { d -> pending[d.id]?.get(art.number)?.firstOrNull() }?.let { Uri.fromFile(it) }
-                        ?: repo.previews.files(art.number).firstOrNull()?.let { Uri.fromFile(it) }
+                        ?: p.otherAccounts.firstNotNullOfOrNull { d -> pending[d.id]?.get(art.number)?.firstOrNull() }?.let { Uri.fromFile(it) }
+                        ?: repo.legacyPreviews.files(art.number).firstOrNull()?.let { Uri.fromFile(it) }
                     cover?.let { art.number to it }
                 }.toMap()
             }
@@ -205,7 +205,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _counts.value = albums.mapValues { it.value.count }
         _covers.value = albums.mapValues { it.value.cover }
         _articleCovers.value = articleCovers
-        _outbox.value = outbox
+        _accountPhotos.value = accountPhotos
     }
 
     // ---------- deletion consent ----------
@@ -223,9 +223,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---------- setup ----------
 
-    fun setupParent(name: String, prefix: String) = run {
-        repo.setupParent(name, prefix)
-        repo.adoptFolder(dev.catalogo.data.Folders.auto())
+    fun setupMainPhone(name: String, prefix: String) = run {
+        repo.setupMainPhone(name, prefix)
+        repo.adoptFolder(dev.catalogo.data.GalleryFolders.auto())
     }
 
     // ---------- parent ----------
@@ -249,11 +249,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ---------- drafts on the PC ----------
 
     /** The PC program as last seen (null status = not configured or not reached). */
-    val pc = app.drafts.pc
-    val incidents = app.drafts.incidents
-    val offers = app.drafts.offers
+    val pc = app.pcSync.pc
+    val incidents = app.pcSync.incidents
+    val offers = app.pcSync.offers
 
-    fun incidentReviewed(id: String) = run { app.drafts.reviewed(id) }
+    fun incidentReviewed(id: String) = run { app.pcSync.reviewed(id) }
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
     /** «Generar y preparar borrador» with the photos the AI should look at (the PC gets all of them). */
@@ -261,40 +261,40 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
         if (photos.isEmpty()) throw CatalogException("Elige al menos una foto")
         repo.setPhotos(number, photos.map { it.toString() })
-        app.drafts.prepareNow(number, mode)
+        app.pcSync.prepareNow(number, mode)
         _message.value = "En cola: puedes salir de la app y seguir con otros artículos"
     }
 
     /** Photos of [number]'s album, and which ones the AI looks at. */
     suspend fun vintedPhotos(number: Int): Pair<List<Uri>, List<Uri>> {
-        val p = repo.state.parent ?: return emptyList<Uri>() to emptyList()
-        val album = albumPhotos(Sku.format(p.self.prefix, number, p.digits))
+        val p = repo.state.catalog ?: return emptyList<Uri>() to emptyList()
+        val album = albumPhotos(Sku.format(p.mainAccount.prefix, number, p.digits))
         val chosen = Catalog.chosenPhotos(album, Catalog.article(p, number)?.photos.orEmpty()) { it.toString() }
         return album to chosen
     }
 
-    fun fixDraft(number: Int, fixes: dev.catalogo.core.Draft.Fixes) = run {
-        app.drafts.fix(number, fixes)
+    fun fixDraft(number: Int, fixes: dev.catalogo.core.PcPayload.Fixes) = run {
+        app.pcSync.fix(number, fixes)
         _message.value = "Revisado: sigue su camino al PC"
     }
 
-    fun retryDraft(number: Int) = run { app.drafts.retry(number) }
+    fun retryDraft(number: Int) = run { app.pcSync.retry(number) }
 
     /** Where it stands, set by hand (also tells the PC). */
     fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "") = run {
-        app.drafts.setStage(number, stage, url)
+        app.pcSync.setStage(number, stage, url)
         _message.value = "Estado: ${stage.label}"
     }
 
     /** The same status for several articles; those the PC cannot change now are reported. */
     fun setStageMany(numbers: List<Int>, stage: dev.catalogo.core.Stage) = run {
-        val failed = app.drafts.setStageMany(numbers, stage)
+        val failed = app.pcSync.setStageMany(numbers, stage)
         _message.value = if (failed.isEmpty()) "${numbers.size} en «${stage.label}»"
         else "${numbers.size - failed.size} cambiados; ${failed.size} no (¿PC sin conexión?)"
     }
 
     fun setMode(number: Int, mode: String) = run {
-        app.drafts.setMode(number, mode)
+        app.pcSync.setMode(number, mode)
         _message.value = dev.catalogo.core.Mode.label(mode)
     }
 
@@ -303,24 +303,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (!Regex("^https://(www\\.)?vinted\\.[a-z.]{2,8}/items/\\d+").containsMatchIn(url.trim())) {
             throw CatalogException("Pega el link del artículo en Vinted")
         }
-        app.drafts.playOnly(number, url)
+        app.pcSync.playOnly(number, url)
         _message.value = "Irá al siguiente juego"
     }
 
     /** Ask the PC now («Actualizar» in Estado). */
     fun refreshPc() {
-        app.drafts.refresh()
+        app.pcSync.refresh()
     }
 
     /** Out of the queue (and off the PC) until the user sends it again. */
     fun removeDraft(number: Int) = run {
-        app.drafts.remove(number)
+        app.pcSync.remove(number)
         _message.value = "Fuera de la cola"
     }
 
     /** «iniciar», «pausar», «reanudar», «detener» or «seguir» (go on now) on the PC program. */
     fun pcControl(action: String) = run {
-        val s = app.drafts.control(action)
+        val s = app.pcSync.control(action)
         _message.value = when {
             action == "detener" -> "PC detenido"
             action == "seguir" -> "Sigo ya"
@@ -330,11 +330,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Switch of one game (the PC never plays one that is off). */
-    fun setGame(kind: String, on: Boolean) = run { app.drafts.setGame(kind, on) }
+    fun setGame(kind: String, on: Boolean) = run { app.pcSync.setGame(kind, on) }
 
     /** «mandar» or «parar» for the automatic offers. */
     fun offersControl(action: String) = run {
-        app.drafts.offersControl(action)
+        app.pcSync.offersControl(action)
         _message.value = if (action == "mandar") "Ofertas: en cuanto haya hueco empiezo" else "Ofertas paradas"
     }
 
@@ -342,10 +342,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun savePc(url: String, token: String, done: () -> Unit) = run {
         val clean = url.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
         val link = dev.catalogo.core.PcLink(clean, token.trim())
-        val s = app.drafts.test(link)
+        val s = app.pcSync.test(link)
         repo.setPc(link)
         _message.value = "PC conectado: ${s.text}"
-        app.drafts.kick()
+        app.pcSync.kick()
         done()
     }
 
@@ -353,9 +353,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Photos the AI can look at: main phone's album first, then photos waiting for other phones. */
     suspend fun aiPhotos(number: Int): List<Uri> {
-        val p = repo.state.parent ?: return emptyList()
-        return Catalog.devices(p).flatMap { d ->
-            if (d.id == p.self.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else outboxPhotos(d.id, number)
+        val p = repo.state.catalog ?: return emptyList()
+        return Catalog.allAccounts(p).flatMap { d ->
+            if (d.id == p.mainAccount.id) albumPhotos(Sku.format(d.prefix, number, p.digits)) else pendingAccountPhotos(d.id, number)
         }.distinct()
     }
 
@@ -364,8 +364,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _message.value = if (key.isBlank()) "Clave borrada" else "Clave guardada"
     }
 
-    fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) = run {
-        repo.setUploaded(number, deviceId, uploaded)
+    fun setUploaded(number: Int, accountId: String, uploaded: Boolean) = run {
+        repo.setUploaded(number, accountId, uploaded)
     }
 
     fun setAccounts(number: Int, accounts: Set<String>) = run {
@@ -373,8 +373,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         refresh()
     }
 
-    fun setAccount(id: String, account: String, profile: String, done: () -> Unit) = run {
-        repo.setAccount(id, account, profile)
+    fun setVintedProfile(id: String, account: String, profile: String, done: () -> Unit) = run {
+        repo.setVintedProfile(id, account, profile)
         done()
     }
 
@@ -411,7 +411,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun salesEvery(): Long? {
         val top = stack.value.last()
         return when {
-            repo.state.parent?.session != null || top is Screen.Editor || top is Screen.Photos || top is Screen.Template -> null
+            repo.state.catalog?.session != null || top is Screen.Editor || top is Screen.Photos || top is Screen.Template -> null
             reading.value?.working == true -> 8_000
             top == Screen.Sales || top is Screen.Sale || pendingAsk != null -> 30_000
             else -> 5 * 60_000
@@ -421,17 +421,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Tells the PC what is pending and takes what it has read so far. */
     suspend fun refreshSales() {
         val link = repo.state.pc ?: return
-        if (repo.state.parent == null) return
+        if (repo.state.catalog == null) return
         val ask = pendingAsk
         try {
             val read = if (ask != null) tellSales(link, ask)
-            else VintedSales.parsePc(withContext(Dispatchers.IO) { repo.desk.sales(link) })
+            else VintedSales.parsePc(withContext(Dispatchers.IO) { repo.pcClient.sales(link) })
             if (pendingAsk == ask) pendingAsk = null
             takeSales(read)
         } catch (e: CancellationException) {
             throw e
         } catch (e: CatalogException) {
-            val offline = e.message == Desk.UNREACHABLE
+            val offline = e.message == PcClient.UNREACHABLE
             // An answer, even a bad one, means it heard: asking again would not change it.
             if (!offline && pendingAsk == ask) pendingAsk = null
             _reading.value = SalesReading(false, if (offline) offlineText() else e.message.orEmpty())
@@ -442,34 +442,34 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun tellSales(link: PcLink, action: String): VintedSales.Reading {
-        val p = repo.state.parent ?: throw CatalogException("No hay catálogo")
+        val p = repo.state.catalog ?: throw CatalogException("No hay catálogo")
         return VintedSales.parsePc(withContext(Dispatchers.IO) {
-            repo.desk.salesControl(link, action, VintedSales.prefixes(p))
+            repo.pcClient.salesControl(link, action, VintedSales.prefixes(p))
         })
     }
 
     private suspend fun takeSales(read: VintedSales.Reading) = readingLock.withLock {
-        val before = repo.state.parent ?: return@withLock
+        val before = repo.state.catalog ?: return@withLock
         if (read.lastRead > before.salesReadAt) repo.salesRead(read.lastRead)
         _reading.value = readingText(read)
-        val current = repo.state.parent ?: return@withLock
+        val current = repo.state.catalog ?: return@withLock
         val now = System.currentTimeMillis()
-        val (after, counts) = VintedSales.applyAll(current, current.self.id, read.orders, now)
+        val (after, counts) = VintedSales.applyAll(current, current.mainAccount.id, read.orders, now)
         if (after == current) return@withLock
         // Never cut between deleting photos and saving the state.
         val originals = withContext(NonCancellable) {
-            repo.changeSales { VintedSales.applyAll(it, it.self.id, read.orders, now).first }
+            repo.changeSales { VintedSales.applyAll(it, it.mainAccount.id, read.orders, now).first }
         }
         AppLog.i("ventas", "del PC ${read.orders.size}, cambios $counts, quedan ${read.pending}")
         summary(counts)?.let { _message.value = it }
         askToDelete(originals)
-        app.drafts.kick()
+        app.pcSync.kick()
         refresh()
-        viewModelScope.launch { app.drafts.tellPc() }
+        viewModelScope.launch { app.pcSync.tellPc() }
     }
 
     private fun updated(): String =
-        repo.state.parent?.salesReadAt?.takeIf { it > 0 }?.let { "Actualizado ${shortTime(it)}" } ?: "Aún sin leer"
+        repo.state.catalog?.salesReadAt?.takeIf { it > 0 }?.let { "Actualizado ${shortTime(it)}" } ?: "Aún sin leer"
 
     private fun offlineText(): String = "${updated()}$GAP· PC sin conexión"
 
@@ -514,11 +514,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Asks the PC for the labels of every sale still to be sent, or of the order [only]. */
     fun printLabels(only: String? = null) = run {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val p = repo.state.parent ?: throw CatalogException("No hay catálogo")
-        val requests = Labels.requests(p, only)
+        val p = repo.state.catalog ?: throw CatalogException("No hay catálogo")
+        val requests = ShippingLabels.requests(p, only)
         if (requests.isEmpty()) throw CatalogException("No hay ventas pendientes de enviar")
         labelsLock.withLock {
-            val reply = Labels.parse(withContext(Dispatchers.IO) { repo.desk.labelsControl(link, "mandar", requests) })
+            val reply = ShippingLabels.parse(withContext(Dispatchers.IO) { repo.pcClient.labelsControl(link, "mandar", requests) })
             _labelsText.value = "Pedidas al PC…"
             repo.setLabels(LabelJob(lot = reply.lot))
             takeLabels(link, reply)
@@ -531,9 +531,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repo.setLabels(LabelJob())
             val link = repo.state.pc ?: return@withLock
             try {
-                withContext(Dispatchers.IO) { repo.desk.labelsControl(link, "parar") }
+                withContext(Dispatchers.IO) { repo.pcClient.labelsControl(link, "parar") }
             } catch (e: CatalogException) {
-                if (e.message != Desk.UNREACHABLE) throw e
+                if (e.message != PcClient.UNREACHABLE) throw e
                 _message.value = "Sin conexión: el PC no sabe que has parado"
             }
         }
@@ -549,12 +549,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         try {
             labelsLock.withLock {
                 if (repo.state.labels.lot == 0L) return@withLock
-                takeLabels(link, Labels.parse(withContext(Dispatchers.IO) { repo.desk.labels(link) }))
+                takeLabels(link, ShippingLabels.parse(withContext(Dispatchers.IO) { repo.pcClient.labels(link) }))
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: CatalogException) {
-            _labelsText.value = if (e.message == Desk.UNREACHABLE) "PC sin conexión: las recojo cuando vuelva" else e.message.orEmpty()
+            _labelsText.value = if (e.message == PcClient.UNREACHABLE) "PC sin conexión: las recojo cuando vuelva" else e.message.orEmpty()
         } catch (e: Exception) {
             AppLog.w("etiquetas", "error: ${e.message ?: e.javaClass.simpleName}")
             _labelsText.value = "No se pudo guardar el PDF (${e.message ?: e.javaClass.simpleName})"
@@ -562,14 +562,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** Only inside [labelsLock]. */
-    private suspend fun takeLabels(link: PcLink, reply: Labels.Reply) {
+    private suspend fun takeLabels(link: PcLink, reply: ShippingLabels.Reply) {
         val lot = repo.state.labels.lot
-        when (val step = Labels.step(lot, reply)) {
-            is Labels.Step.Wait -> _labelsText.value = step.text
-            is Labels.Step.Fetch -> {
+        when (val step = ShippingLabels.step(lot, reply)) {
+            is ShippingLabels.Step.Wait -> _labelsText.value = step.text
+            is ShippingLabels.Step.Fetch -> {
                 _labelsText.value = "Trayendo el PDF…"
                 val file = withContext(Dispatchers.IO) {
-                    val pdf = Labels.parsePdf(repo.desk.labelsPdf(link))
+                    val pdf = ShippingLabels.parsePdf(repo.pcClient.labelsPdf(link))
                     // Another lot took its place meanwhile: the next question tells.
                     if (pdf.lot != lot) null else repo.labelFiles.save(pdf.name, pdf.bytes)
                 } ?: return
@@ -577,11 +577,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 AppLog.i("etiquetas", "PDF con ${step.done.labels}, avisos ${step.done.warnings.size}")
                 _message.value = "PDF de etiquetas guardado en Descargas"
             }
-            is Labels.Step.Failed -> {
+            is ShippingLabels.Step.Failed -> {
                 repo.setLabels(LabelJob(warnings = step.warnings.ifEmpty { listOf("El PC no ha podido sacar ninguna etiqueta") }))
                 _message.value = "No ha salido ninguna etiqueta"
             }
-            Labels.Step.Dropped -> {
+            ShippingLabels.Step.Dropped -> {
                 repo.setLabels(LabelJob())
                 _message.value = "El PC ha parado las etiquetas"
             }
@@ -618,36 +618,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** The picture kept from a sold article, if any. */
     suspend fun saleImage(sale: dev.catalogo.core.Sale): java.io.File? = repo.saleImages.get(sale.id)
 
-    private fun sale(done: String, change: (ParentState) -> ParentState) = run {
+    private fun sale(done: String, change: (CatalogState) -> CatalogState) = run {
         askToDelete(repo.changeSales(change))
         _message.value = done
-        app.drafts.kick()
+        app.pcSync.kick()
         refresh()
-        app.drafts.tellPc()
+        app.pcSync.tellPc()
     }
 
     // ---------- photo editing ----------
 
-    /** Photos of [deviceId] for [number] that can be edited on this phone, in order. */
-    suspend fun editablePhotos(number: Int, deviceId: String): List<Uri> {
-        val p = repo.state.parent ?: return emptyList()
-        return if (deviceId == p.self.id) albumPhotos(Sku.format(p.self.prefix, number, p.digits))
-        else withContext(Dispatchers.IO) { repo.outbox.files(deviceId, number).map { Uri.fromFile(it) } }
+    /** Photos of [accountId] for [number] that can be edited on this phone, in order. */
+    suspend fun editablePhotos(number: Int, accountId: String): List<Uri> {
+        val p = repo.state.catalog ?: return emptyList()
+        return if (accountId == p.mainAccount.id) albumPhotos(Sku.format(p.mainAccount.prefix, number, p.digits))
+        else withContext(Dispatchers.IO) { repo.accountPhotos.files(accountId, number).map { Uri.fromFile(it) } }
     }
 
     /** The framed photo as JPEG bytes, made off the main thread. */
     suspend fun renderCrop(uri: Uri, framing: dev.catalogo.data.Framing): ByteArray = withContext(Dispatchers.Default) {
-        dev.catalogo.data.Crop.render(getApplication<Application>().contentResolver, uri, framing)
+        dev.catalogo.data.PhotoCropper.render(getApplication<Application>().contentResolver, uri, framing)
     }
 
     private val _savingPhotos = MutableStateFlow(false)
     val savingPhotos: StateFlow<Boolean> = _savingPhotos.asStateFlow()
 
-    fun savePhotos(number: Int, deviceId: String, photos: List<dev.catalogo.data.Repo.EditedPhoto>) = run {
+    fun savePhotos(number: Int, accountId: String, photos: List<dev.catalogo.data.CatalogRepository.EditedPhoto>) = run {
         if (photos.isEmpty()) throw CatalogException("Deja al menos una foto")
         _savingPhotos.value = true
         try {
-            askToDelete(repo.rewritePhotos(number, deviceId, photos))
+            askToDelete(repo.rewritePhotos(number, accountId, photos))
             _message.value = "Fotos guardadas"
             back()
         } finally {
@@ -665,15 +665,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteLot(id: String) = run { repo.deleteLot(id) }
 
-    fun saveStyle(deviceId: String, style: Int, template: String) = run {
-        repo.setStyle(deviceId, style, template)
+    fun saveStyle(accountId: String, style: Int, template: String) = run {
+        repo.setStyle(accountId, style, template)
         back()
     }
 
     // ---------- camera session ----------
 
-    fun startSession(number: Int, deviceId: String, openCamera: () -> Unit) = run {
-        repo.startSession(number, deviceId)
+    fun startSession(number: Int, accountId: String, openCamera: () -> Unit) = run {
+        repo.startSession(number, accountId)
         openCamera()
     }
 
@@ -687,7 +687,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
         _review.value = photos.map { it.uri }
         _selected.value = photos.map { it.uri }.toSet()
-        go(Screen.Review)
+        go(Screen.SessionPhotos)
     }
 
     fun toggle(uri: Uri) {
@@ -698,7 +698,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun saveReview() = run {
         val chosen = _review.value.filter { it in _selected.value }
         if (chosen.isEmpty()) return@run
-        val number = state.value.parent?.session?.number
+        val number = state.value.catalog?.session?.number
         _progress.value = 0 to chosen.size
         try {
             val originals = repo.saveSession(chosen) { done -> _progress.value = done to chosen.size }
@@ -723,12 +723,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             else -> "Venta en curso. Márcala como cobrada cuando llegue el dinero"
         }
         back()
-        app.drafts.tellPc()
+        app.pcSync.tellPc()
     }
 
     /** «Resubir»: new photos, new title and hashtags; the rest of the article stays. */
     fun relist(number: Int, keepPhotos: Boolean = false) = run {
-        askToDelete(app.drafts.relist(number, keepPhotos))
+        askToDelete(app.pcSync.relist(number, keepPhotos))
         _message.value = if (keepPhotos) "Resubido con las fotos que ya tiene. La IA cambiará el título y los hashtags al preparar el borrador. Borra el anuncio antiguo en Vinted"
         else "Resubir: haz fotos nuevas. La IA cambiará el título y los hashtags al preparar el borrador. Borra el anuncio antiguo en Vinted"
         refresh()
@@ -737,7 +737,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteArticle(number: Int) = run {
         askToDelete(repo.deleteArticle(number))
         back()
-        app.drafts.tellPc()
+        app.pcSync.tellPc()
     }
 
     // ---------- settings ----------
@@ -746,29 +746,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (failed > 0) _message.value = "$failed fotos no se pudieron mover (no las creó esta app)"
     }
 
-    fun renameDevice(id: String, name: String, prefix: String, done: () -> Unit) = run {
-        reportMoves(repo.renameDevice(id, name, prefix))
+    fun renameAccount(id: String, name: String, prefix: String, done: () -> Unit) = run {
+        reportMoves(repo.renameAccount(id, name, prefix))
         done()
         refresh()
     }
 
     /** Adds a Vinted account (the one a second PC publishes in). Returns an error to show, or null when done. */
     fun addAccount(name: String, prefix: String): String? {
-        val p = state.value.parent ?: return "Configura primero este móvil"
+        val p = state.value.catalog ?: return "Configura primero este móvil"
         val cleanName = name.trim()
         val cleanPrefix = prefix.trim().uppercase()
         return try {
             val id = java.util.UUID.randomUUID().toString()
-            Catalog.validateDevice(p, id, cleanName, cleanPrefix)
-            run { repo.addChild(Device(id, cleanName, cleanPrefix)); refresh() }
+            Catalog.validateAccount(p, id, cleanName, cleanPrefix)
+            run { repo.addAccount(VintedAccount(id, cleanName, cleanPrefix)); refresh() }
             null
         } catch (e: Exception) {
             e.message ?: "No válido"
         }
     }
 
-    fun removeChild(id: String) = run {
-        repo.removeChild(id)
+    fun removeAccount(id: String) = run {
+        repo.removeAccount(id)
         refresh()
     }
 

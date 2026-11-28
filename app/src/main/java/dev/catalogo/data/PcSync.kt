@@ -14,10 +14,10 @@ import dev.catalogo.core.AiException
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
-import dev.catalogo.core.Desk as DeskState
-import dev.catalogo.core.Draft
+import dev.catalogo.core.PcTask
+import dev.catalogo.core.PcPayload
 import dev.catalogo.core.Listing
-import dev.catalogo.core.Relisting
+import dev.catalogo.core.RelistRules
 import dev.catalogo.core.Sku
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,30 +36,30 @@ import java.io.IOException
  * Articles on their way to the PC: AI (if missing or stale) → checks → photos
  * and data to the PC → the PC's progress (draft, published, in a game).
  *
- * While something is on its way here (AI or upload), [DraftsService] keeps the
+ * While something is on its way here (AI or upload), [PcSyncService] keeps the
  * app running in the background with a notification, so leaving the app or
  * locking the phone does not cut Gemini or the upload. Everything is saved in
- * the article ([DeskState]): if Android still stops the app, it carries on the
+ * the article ([PcTask]): if Android still stops the app, it carries on the
  * next time. Only this phone's own account goes to the PC.
  */
-class Drafts(private val repo: Repo, private val context: android.content.Context) {
+class PcSync(private val repo: CatalogRepository, private val context: android.content.Context) {
 
-    data class Pc(val status: Desk.Status? = null, val error: String? = null, val at: Long = 0)
+    data class Pc(val status: PcClient.Status? = null, val error: String? = null, val at: Long = 0)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutex = Mutex()
     private val _pc = MutableStateFlow(Pc())
     val pc: StateFlow<Pc> = _pc.asStateFlow()
-    private val _offers = MutableStateFlow<Desk.Offers?>(null)
-    val offers: StateFlow<Desk.Offers?> = _offers.asStateFlow()
-    private val _incidents = MutableStateFlow<List<Desk.Incident>>(emptyList())
-    val incidents: StateFlow<List<Desk.Incident>> = _incidents.asStateFlow()
+    private val _offers = MutableStateFlow<PcClient.Offers?>(null)
+    val offers: StateFlow<PcClient.Offers?> = _offers.asStateFlow()
+    private val _incidents = MutableStateFlow<List<PcClient.Incident>>(emptyList())
+    val incidents: StateFlow<List<PcClient.Incident>> = _incidents.asStateFlow()
 
     /** Links without like reported by the PC: fetched when their count changes; new ones notify once. */
     private suspend fun checkIncidents(link: dev.catalogo.core.PcLink, count: Int, last: String) {
         val known = _incidents.value
         if (count == known.size && (count == 0 || (known.isNotEmpty() && (last.isBlank() || known.any { it.id == last })))) return
-        val list = withContext(Dispatchers.IO) { repo.desk.incidents(link) }.sortedByDescending { it.at }
+        val list = withContext(Dispatchers.IO) { repo.pcClient.incidents(link) }.sortedByDescending { it.at }
         _incidents.value = list
         val prefs = context.getSharedPreferences("incidencias", Context.MODE_PRIVATE)
         val seen = prefs.getLong("vistas_hasta", 0)
@@ -77,7 +77,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             }
             val text = if (fresh.size == 1 && worst != null) worst.summary.ifBlank { worst.reason }.let { if (it.length > 90) it.take(89).trimEnd() + "…" else it }
                 else games.let { if (it.length > 70) it.take(69).trimEnd() + "…" else it }
-            DraftsService.alert(context, 9_000, title, text)
+            PcSyncService.alert(context, 9_000, title, text)
             AppLog.w("pc", "avisos del PC: ${fresh.joinToString { it.title.ifBlank { it.url } }}")
         }
     }
@@ -85,7 +85,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     /** «Revisado»: it leaves the list here and on the PC. */
     suspend fun reviewed(id: String) {
         val link = repo.state.pc ?: return
-        withContext(Dispatchers.IO) { repo.desk.reviewed(link, id) }
+        withContext(Dispatchers.IO) { repo.pcClient.reviewed(link, id) }
         _incidents.value = _incidents.value.filterNot { it.id == id }
     }
 
@@ -98,7 +98,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         scope.launch {
             while (true) {
                 runCatching { tick() }.onFailure { Log.e("cola", "tick", it) }
-                DraftsService.sync(context, local())
+                PcSyncService.sync(context, local())
                 delay(if (local().isNotEmpty()) LOCAL_MS else IDLE_MS)
             }
         }
@@ -116,83 +116,83 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     }
 
     /** Articles still being worked on this phone (AI or upload), in queue order. */
-    fun local(): List<Article> = repo.state.parent?.articles.orEmpty()
-        .filter { it.inStock && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
-        .sortedBy { it.desk!!.at }
+    fun local(): List<Article> = repo.state.catalog?.articles.orEmpty()
+        .filter { it.inStock && (it.pcTask?.status == PcTask.PREPARING || it.pcTask?.status == PcTask.SENDING) }
+        .sortedBy { it.pcTask!!.at }
 
-    private fun album(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> =
-        runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.self.prefix, a.number, p.digits)) }
+    private fun album(p: dev.catalogo.core.CatalogState, a: Article): List<android.net.Uri> =
+        runCatching { repo.gallery.albumPhotos(repo.base, Sku.format(p.mainAccount.prefix, a.number, p.digits)) }
             .getOrDefault(emptyList())
 
     /** The AI only looks at the photos chosen for it; the PC always gets the whole album. */
-    private fun aiPhotos(p: dev.catalogo.core.ParentState, a: Article): List<android.net.Uri> =
+    private fun aiPhotos(p: dev.catalogo.core.CatalogState, a: Article): List<android.net.Uri> =
         Catalog.chosenPhotos(album(p, a), a.photos) { it.toString() }
 
     /** Work now (after a change by the user). */
     fun kick() {
-        DraftsService.sync(context, local())
+        PcSyncService.sync(context, local())
         scope.launch {
             runCatching { tick() }
-            DraftsService.sync(context, local())
+            PcSyncService.sync(context, local())
         }
     }
 
-    private fun busy(): Boolean = repo.state.parent?.articles.orEmpty().any { a ->
-        a.inStock && a.desk?.let { it.working || it.status == "borrador" || it.status == "publicado" } == true
+    private fun busy(): Boolean = repo.state.catalog?.articles.orEmpty().any { a ->
+        a.inStock && a.pcTask?.let { it.working || it.status == "borrador" || it.status == "publicado" } == true
     }
 
     private suspend fun tick() = mutex.withLock {
-        val p = repo.state.parent ?: return@withLock
-        val moving = p.articles.filter { it.inStock && (it.desk?.status == DeskState.PREPARING || it.desk?.status == DeskState.SENDING) }
-            .sortedBy { it.desk!!.at }
+        val p = repo.state.catalog ?: return@withLock
+        val moving = p.articles.filter { it.inStock && (it.pcTask?.status == PcTask.PREPARING || it.pcTask?.status == PcTask.SENDING) }
+            .sortedBy { it.pcTask!!.at }
         for (a in moving) {
-            if (a.desk!!.status == DeskState.PREPARING) prepare(a.number)
-            if (current(a.number)?.desk?.status == DeskState.SENDING) send(a.number)
+            if (a.pcTask!!.status == PcTask.PREPARING) prepare(a.number)
+            if (current(a.number)?.pcTask?.status == PcTask.SENDING) send(a.number)
         }
     }
 
-    private fun current(number: Int): Article? = repo.state.parent?.let { Catalog.article(it, number) }
+    private fun current(number: Int): Article? = repo.state.catalog?.let { Catalog.article(it, number) }
 
     private suspend fun set(number: Int, status: String, message: String = "", doubts: List<String> = emptyList()) {
         // Sold while it was being prepared: it stays as the sale left it.
         if (current(number)?.inStock != true) return
-        val before = current(number)?.desk?.status
-        repo.updateDesk(number) { d ->
+        val before = current(number)?.pcTask?.status
+        repo.updatePcTask(number) { d ->
             d?.copy(status = status, message = message, doubts = doubts, at = System.currentTimeMillis())
         }
-        AppLog.i("cola", "${current(number)?.desk?.ref ?: number} $before -> $status ${message.take(160)}")
-        if (status == DeskState.REVIEW && before != DeskState.REVIEW) alert(number, message)
+        AppLog.i("cola", "${current(number)?.pcTask?.ref ?: number} $before -> $status ${message.take(160)}")
+        if (status == PcTask.REVIEW && before != PcTask.REVIEW) alert(number, message)
     }
 
     /** «0031 necesita que lo mires» when an article stops and waits for the user. */
     private fun alert(number: Int, message: String) {
-        val p = repo.state.parent ?: return
-        DraftsService.alert(context, number, "${Sku.format(p.self.prefix, number, p.digits)} necesita que lo mires", message)
+        val p = repo.state.catalog ?: return
+        PcSyncService.alert(context, number, "${Sku.format(p.mainAccount.prefix, number, p.digits)} necesita que lo mires", message)
     }
 
     /** AI if needed, then the checks: to the PC, or to «Revisar» with the reason. */
     private suspend fun prepare(number: Int) {
-        val p = repo.state.parent ?: return
+        val p = repo.state.catalog ?: return
         val a = current(number) ?: return
-        if (p.self.id !in a.targets) {
+        if (p.mainAccount.id !in a.targets) {
             // With a single phone there is nothing to choose: it goes to this account.
-            if (p.children.isEmpty() && a.accounts.isEmpty()) {
-                repo.setAccounts(number, setOf(p.self.id))
+            if (p.otherAccounts.isEmpty() && a.accounts.isEmpty()) {
+                repo.setAccounts(number, setOf(p.mainAccount.id))
             } else {
-                return set(number, DeskState.REVIEW, "Marca la cuenta ${p.self.label} en «Publicar en»")
+                return set(number, PcTask.REVIEW, "Marca la cuenta ${p.mainAccount.label} en «Publicar en»")
             }
         }
         if (Catalog.freshAi(p, number) == null) {
             val key = repo.state.geminiKey
-            if (key.isBlank()) return set(number, DeskState.REVIEW, "Falta la clave de Gemini (Ajustes)")
+            if (key.isBlank()) return set(number, PcTask.REVIEW, "Falta la clave de Gemini (Ajustes)")
             val photos = aiPhotos(p, a)
-            if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
+            if (photos.isEmpty()) return set(number, PcTask.REVIEW, "Este artículo no tiene fotos")
             try {
                 val accounts = Catalog.aiAccounts(p)
                 var answer = repo.gemini.suggest(key, a.listing ?: Listing(), accounts, photos, a.relist)
                 // A re-listed article must not go up with the old title or hashtags. Asking the AI again gives the same answer
                 // (the photos and the account rules decide it), so what repeats is edited with one short text-only call.
-                var repeated = a.relist?.let { Relisting.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
+                var repeated = a.relist?.let { RelistRules.repeated(it, answer.suggestion.titles, answer.suggestion.hashtags) }.orEmpty()
                 if (repeated.isNotEmpty()) {
                     val fixed = try {
                         repo.gemini.fixRepeated(key, a.listing ?: Listing(), a.relist!!, answer.suggestion, accounts)
@@ -204,7 +204,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                     }
                     if (fixed != null) {
                         answer = answer.copy(suggestion = fixed)
-                        repeated = Relisting.repeated(a.relist!!, fixed.titles, fixed.hashtags)
+                        repeated = RelistRules.repeated(a.relist!!, fixed.titles, fixed.hashtags)
                         AppLog.i("ia", "tras el arreglo: ${if (repeated.isEmpty()) "ya no repite" else "repite ${repeated.joinToString(" y ")}"}")
                     }
                 }
@@ -212,25 +212,25 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                 if (repeated == listOf("hashtags")) {
                     val before = a.relist!!.hashtags.map { it.lowercase() }.toSet()
                     val fresh = answer.suggestion.hashtags.count { it.lowercase() !in before }
-                    AppLog.i("ia", "${Catalog.article(p, number)?.desk?.ref ?: number}: hashtags nuevos $fresh de ${answer.suggestion.hashtags.size} tras el arreglo")
+                    AppLog.i("ia", "${Catalog.article(p, number)?.pcTask?.ref ?: number}: hashtags nuevos $fresh de ${answer.suggestion.hashtags.size} tras el arreglo")
                     if (fresh >= 2) repeated = emptyList()
                 }
                 if (repeated.isNotEmpty()) {
-                    return set(number, DeskState.REVIEW, "La IA ha repetido ${repeated.joinToString(" y ")} de la publicación anterior. Vuelve a intentarlo")
+                    return set(number, PcTask.REVIEW, "La IA ha repetido ${repeated.joinToString(" y ")} de la publicación anterior. Vuelve a intentarlo")
                 }
                 repo.applyAi(number, answer.suggestion, answer.model, answer.seconds)
                 if (a.relist != null) repo.finishRelist(number)
             } catch (e: AiException) {
-                return set(number, DeskState.REVIEW, e.message ?: "La IA no ha respondido")
+                return set(number, PcTask.REVIEW, e.message ?: "La IA no ha respondido")
             } catch (e: CatalogException) {
-                return set(number, DeskState.REVIEW, e.message ?: "Error con la IA")
+                return set(number, PcTask.REVIEW, e.message ?: "Error con la IA")
             } catch (e: IOException) {
-                return set(number, DeskState.PREPARING, "Sin conexión: se reintenta solo")
+                return set(number, PcTask.PREPARING, "Sin conexión: se reintenta solo")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // Nunca en bucle: cualquier otro fallo espera al usuario (no gasta cuota de Gemini).
-                return set(number, DeskState.REVIEW, "Error con la IA: ${e.message ?: e.javaClass.simpleName}")
+                return set(number, PcTask.REVIEW, "Error con la IA: ${e.message ?: e.javaClass.simpleName}")
             }
         }
         check(number)
@@ -238,42 +238,42 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     /** Builds the draft data; with problems or doubts it waits for the user. */
     private suspend fun check(number: Int) {
-        val p = repo.state.parent ?: return
+        val p = repo.state.catalog ?: return
         val a = current(number) ?: return
-        val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
+        val built = PcPayload.build(p, a, p.mainAccount, a.pcTask?.fixes ?: PcPayload.Fixes())
         when {
-            built.problems.isNotEmpty() -> set(number, DeskState.REVIEW, built.problems.joinToString(". "))
-            built.doubts.isNotEmpty() -> set(number, DeskState.REVIEW, "Revisa: " + built.doubts.joinToString(", ") { label(it) }, built.doubts)
-            else -> set(number, DeskState.SENDING)
+            built.problems.isNotEmpty() -> set(number, PcTask.REVIEW, built.problems.joinToString(". "))
+            built.doubts.isNotEmpty() -> set(number, PcTask.REVIEW, "Revisa: " + built.doubts.joinToString(", ") { label(it) }, built.doubts)
+            else -> set(number, PcTask.SENDING)
         }
     }
 
     private suspend fun send(number: Int) {
-        val link = repo.state.pc ?: return set(number, DeskState.REVIEW, "Configura el PC en Ajustes")
-        val p = repo.state.parent ?: return
+        val link = repo.state.pc ?: return set(number, PcTask.REVIEW, "Configura el PC en Ajustes")
+        val p = repo.state.catalog ?: return
         val a = current(number)?.takeIf { it.inStock } ?: return
-        val built = Draft.build(p, a, p.self, a.desk?.fixes ?: Draft.Fixes())
+        val built = PcPayload.build(p, a, p.mainAccount, a.pcTask?.fixes ?: PcPayload.Fixes())
         if (!built.ready) return check(number)
         val photos = album(p, a).take(MAX_PHOTOS)
-        if (photos.isEmpty()) return set(number, DeskState.REVIEW, "Este artículo no tiene fotos")
+        if (photos.isEmpty()) return set(number, PcTask.REVIEW, "Este artículo no tiene fotos")
         try {
             // A cheap question first: without the PC, the photos (MBs) are not uploaded every few seconds.
-            repo.desk.status(link)
+            repo.pcClient.status(link)
             if (current(number)?.inStock != true) return
-            val job = repo.desk.send(link, built.ref, built.payload!!, photos)
-            repo.updateDesk(number) { d ->
+            val job = repo.pcClient.send(link, built.ref, built.payload!!, photos)
+            repo.updatePcTask(number) { d ->
                 d?.copy(ref = built.ref, status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis())
             }
         } catch (e: CatalogException) {
             val offline = e.message.orEmpty().startsWith("No llego")
             // Without connection it stays in «Enviando» and is retried; a refusal goes to «Revisar»,
             // with the field to fix when the PC names one (size, category…).
-            if (offline) set(number, DeskState.SENDING, e.message.orEmpty())
-            else set(number, DeskState.REVIEW, e.message.orEmpty(), fieldsIn(e.message.orEmpty()))
+            if (offline) set(number, PcTask.SENDING, e.message.orEmpty())
+            else set(number, PcTask.REVIEW, e.message.orEmpty(), fieldsIn(e.message.orEmpty()))
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Throwable) {
-            set(number, DeskState.REVIEW, "No se pudo enviar: ${e.message ?: e.javaClass.simpleName}")
+            set(number, PcTask.REVIEW, "No se pudo enviar: ${e.message ?: e.javaClass.simpleName}")
         }
     }
 
@@ -291,7 +291,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         // The last thing the PC said was «parado» (stopped or closed on purpose): not answering is expected, not an outage.
         if (_pc.value.status?.text == "parado") return
         downAlerted = true
-        DraftsService.alert(
+        PcSyncService.alert(
             context, 9_002, "No llego al PC",
             "Lleva ${(now - downSince) / 60_000} min sin responder. Mira que el PC esté encendido, con internet y el programa abierto.",
         )
@@ -303,28 +303,28 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
     private suspend fun poll() {
         val link = repo.state.pc ?: return run { _pc.value = Pc() }
         try {
-            val status = repo.desk.status(link)
+            val status = repo.pcClient.status(link)
             // States set by hand and sold articles first: the PC must know them before it plays anything.
             tellPc()
-            val onPc = repo.state.parent?.articles.orEmpty().filter { a ->
-                a.inStock && a.desk != null && a.desk!!.status !in LOCAL && a.desk!!.pending.isBlank()
+            val onPc = repo.state.catalog?.articles.orEmpty().filter { a ->
+                a.inStock && a.pcTask != null && a.pcTask!!.status !in LOCAL && a.pcTask!!.pending.isBlank()
             }
             if (onPc.isNotEmpty()) {
-                val jobs = repo.desk.jobs(link).associateBy { it.ref }
+                val jobs = repo.pcClient.jobs(link).associateBy { it.ref }
                 for (a in onPc) {
-                    val job = jobs[a.desk!!.ref] ?: continue
+                    val job = jobs[a.pcTask!!.ref] ?: continue
                     // The PC could not fill a field the user can settle here: it comes back to «Revisar»
                     // with that field to choose, instead of a retry that would fail the same way.
                     val fields = if (job.status == "revisar" || job.status == "error") fieldsIn(job.message) else emptyList()
                     if (fields.isNotEmpty()) {
-                        set(a.number, DeskState.REVIEW, "PC: ${job.message}", fields)
+                        set(a.number, PcTask.REVIEW, "PC: ${job.message}", fields)
                         continue
                     }
-                    val before = a.desk!!.status
+                    val before = a.pcTask!!.status
                     // A state set by hand meanwhile wins: the PC is told first, then it answers.
                     // Sold while the PC was answering: its answer is old news.
                     if (current(a.number)?.inStock != true) continue
-                    repo.updateDesk(a.number) { d ->
+                    repo.updatePcTask(a.number) { d ->
                         if (d == null || d.pending.isNotBlank()) d
                         else d.copy(status = job.status, message = job.message, itemId = job.itemId, url = job.url, game = job.game)
                     }
@@ -333,9 +333,9 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
                         if (job.status == "revisar" || job.status == "error") alert(a.number, job.message)
                     }
                     if (job.status == "publicado" || job.status == "jugado") {
-                        val p = repo.state.parent
-                        if (p != null && p.self.id !in (current(a.number)?.uploaded ?: emptySet())) {
-                            repo.setUploaded(a.number, p.self.id, true)
+                        val p = repo.state.catalog
+                        if (p != null && p.mainAccount.id !in (current(a.number)?.uploaded ?: emptySet())) {
+                            repo.setUploaded(a.number, p.mainAccount.id, true)
                         }
                     }
                 }
@@ -345,16 +345,16 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             downAlerted = false
             _pc.value = Pc(status, null, System.currentTimeMillis())
             // An older PC program has no offers: that is not an error.
-            runCatching { repo.desk.offers(link) }.onSuccess { _offers.value = it }
+            runCatching { repo.pcClient.offers(link) }.onSuccess { _offers.value = it }
             // The phone decides which game groups are played; the PC is told whenever it differs (older programs: nothing).
             runCatching {
-                val onPc = repo.desk.gamesOff(link)
-                if (onPc != null && onPc != repo.state.gamesOff) repo.desk.setGamesOff(link, repo.state.gamesOff)
+                val onPc = repo.pcClient.gamesOff(link)
+                if (onPc != null && onPc != repo.state.gamesOff) repo.pcClient.setGamesOff(link, repo.state.gamesOff)
             }
             runCatching { checkIncidents(link, status.incidents, status.lastIncident) }
             if (System.currentTimeMillis() - logSent > LOG_EVERY_MS) {
                 logSent = System.currentTimeMillis()
-                runCatching { repo.desk.log(link, AppLog.tail()) }
+                runCatching { repo.pcClient.log(link, AppLog.tail()) }
             }
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -383,22 +383,22 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * cannot be reached, the change stays here and is sent on the next check.
      */
     suspend fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "", notify: Boolean = true) {
-        val p = repo.state.parent ?: return
+        val p = repo.state.catalog ?: return
         val a = current(number)?.takeIf { it.inStock } ?: return
-        val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
+        val ref = a.pcTask?.ref?.takeIf { it.isNotBlank() } ?: PcPayload.ref(p.mainAccount, a, p.digits)
         val link = repo.state.pc
-        val cleanUrl = url.trim().ifBlank { a.desk?.url.orEmpty() }
+        val cleanUrl = url.trim().ifBlank { a.pcTask?.url.orEmpty() }
         if (stage == dev.catalogo.core.Stage.TO_UPLOAD) {
             // Off the PC first: if it cannot hear it, nothing changes here (it could still play it).
-            val d = a.desk
+            val d = a.pcTask
             if (link != null && d != null && d.status !in LOCAL) {
                 withContext(Dispatchers.IO) {
-                    if (d.status in setOf("pendiente", "revisar", "error")) repo.desk.delete(link, d.ref)
-                    else repo.desk.setState(link, d.ref, "fuera", d.mode, d.url, p.self.account)
+                    if (d.status in setOf("pendiente", "revisar", "error")) repo.pcClient.delete(link, d.ref)
+                    else repo.pcClient.setState(link, d.ref, "fuera", d.mode, d.url, p.mainAccount.vintedName)
                 }
             }
-            repo.updateDesk(number) { null }
-            repo.setUploaded(number, p.self.id, false)
+            repo.updatePcTask(number) { null }
+            repo.setUploaded(number, p.mainAccount.id, false)
             AppLog.i("cola", "$ref a mano: por subir")
             return
         }
@@ -407,8 +407,8 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             dev.catalogo.core.Stage.PLAYED -> "jugado"
             else -> "publicado"
         }
-        repo.updateDesk(number) { d ->
-            val base = d ?: DeskState(ref, status, at = System.currentTimeMillis())
+        repo.updatePcTask(number) { d ->
+            val base = d ?: PcTask(ref, status, at = System.currentTimeMillis())
             // Marked «Subido» by hand: it does not go to a game unless asked («Meter en los juegos»).
             // An article the PC published and is waiting for its game keeps its place.
             // Marked «Borrador» by hand: it stays a draft until «Subir y jugar» is pressed.
@@ -420,7 +420,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
             base.copy(ref = ref, status = status, message = "", doubts = emptyList(), url = cleanUrl,
                 pending = status, mode = mode, at = System.currentTimeMillis())
         }
-        repo.setUploaded(number, p.self.id, stage != dev.catalogo.core.Stage.DRAFT)
+        repo.setUploaded(number, p.mainAccount.id, stage != dev.catalogo.core.Stage.DRAFT)
         AppLog.i("cola", "$ref a mano: $status")
         if (notify) push(number)
     }
@@ -443,22 +443,22 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     /** What to do with it (only before the PC acts, or for a draft / an uploaded article). */
     suspend fun setMode(number: Int, mode: String) {
-        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
-        repo.updateDesk(number) { x -> x?.copy(mode = mode, pending = if (x.status in setOf("borrador", "publicado")) x.status else x.pending) }
+        val d = current(number)?.takeIf { it.inStock }?.pcTask ?: return
+        repo.updatePcTask(number) { x -> x?.copy(mode = mode, pending = if (x.status in setOf("borrador", "publicado")) x.status else x.pending) }
         AppLog.i("cola", "${d.ref} modo: $mode")
         push(number)
     }
 
     /** «Solo jugar»: the article is already on Vinted; its link goes to the next game. */
     suspend fun playOnly(number: Int, url: String) {
-        val p = repo.state.parent ?: return
+        val p = repo.state.catalog ?: return
         val a = current(number)?.takeIf { it.inStock } ?: return
-        val ref = a.desk?.ref?.takeIf { it.isNotBlank() } ?: Draft.ref(p.self, a, p.digits)
-        repo.updateDesk(number) { d ->
-            (d ?: DeskState(ref, "publicado")).copy(ref = ref, status = "publicado", mode = dev.catalogo.core.Mode.PLAY,
+        val ref = a.pcTask?.ref?.takeIf { it.isNotBlank() } ?: PcPayload.ref(p.mainAccount, a, p.digits)
+        repo.updatePcTask(number) { d ->
+            (d ?: PcTask(ref, "publicado")).copy(ref = ref, status = "publicado", mode = dev.catalogo.core.Mode.PLAY,
                 url = url.trim(), message = "", doubts = emptyList(), pending = "publicado", at = System.currentTimeMillis())
         }
-        repo.setUploaded(number, p.self.id, true)
+        repo.setUploaded(number, p.mainAccount.id, true)
         push(number)
     }
 
@@ -469,11 +469,11 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      */
     suspend fun tellPc() {
         val link = repo.state.pc ?: return
-        val p = repo.state.parent ?: return
-        for (a in p.articles.filter { it.desk?.pending?.isNotBlank() == true }) push(a.number)
+        val p = repo.state.catalog ?: return
+        for (a in p.articles.filter { it.pcTask?.pending?.isNotBlank() == true }) push(a.number)
         for (d in p.retired) {
             runCatching {
-                withContext(Dispatchers.IO) { repo.desk.setState(link, d.ref, d.pending, d.mode, d.url, p.self.account) }
+                withContext(Dispatchers.IO) { repo.pcClient.setState(link, d.ref, d.pending, d.mode, d.url, p.mainAccount.vintedName) }
             }.onSuccess {
                 repo.heard(d.ref)
                 AppLog.i("cola", "${d.ref} PC enterado: fuera")
@@ -483,13 +483,13 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
 
     /** Sends a state set by hand to the PC; on failure it stays pending for the next check. */
     private suspend fun push(number: Int) {
-        val p = repo.state.parent ?: return
-        val d = current(number)?.desk?.takeIf { it.pending.isNotBlank() } ?: return
+        val p = repo.state.catalog ?: return
+        val d = current(number)?.pcTask?.takeIf { it.pending.isNotBlank() } ?: return
         val link = repo.state.pc ?: return
         runCatching {
-            withContext(Dispatchers.IO) { repo.desk.setState(link, d.ref, d.pending, d.mode, d.url, p.self.account) }
+            withContext(Dispatchers.IO) { repo.pcClient.setState(link, d.ref, d.pending, d.mode, d.url, p.mainAccount.vintedName) }
         }.onSuccess {
-            repo.updateDesk(number) { x -> x?.copy(pending = "") }
+            repo.updatePcTask(number) { x -> x?.copy(pending = "") }
             AppLog.i("cola", "${d.ref} PC enterado: ${d.pending} (${d.mode})")
         }.onFailure { AppLog.w("cola", "${d.ref} pendiente de avisar al PC: ${it.message}") }
     }
@@ -500,27 +500,27 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * PC cannot hear that, nothing changes. Returns the originals the user must allow to delete.
      */
     suspend fun relist(number: Int, keepPhotos: Boolean = false): List<android.net.Uri> {
-        if (current(number)?.desk != null) setStage(number, dev.catalogo.core.Stage.TO_UPLOAD)
+        if (current(number)?.pcTask != null) setStage(number, dev.catalogo.core.Stage.TO_UPLOAD)
         AppLog.i("cola", "$number resubido" + if (keepPhotos) " (con las fotos que ya tenía)" else "")
         return repo.relist(number, keepPhotos)
     }
 
     /** «Generar y preparar borrador». */
     suspend fun prepareNow(number: Int, mode: String? = null) {
-        val p = repo.state.parent ?: return
+        val p = repo.state.catalog ?: return
         val a = current(number)?.takeIf { it.inStock } ?: return
-        val ref = Draft.ref(p.self, a, p.digits)
-        repo.updateDesk(number) { d ->
+        val ref = PcPayload.ref(p.mainAccount, a, p.digits)
+        repo.updatePcTask(number) { d ->
             val keep = d?.takeIf { it.ref == ref }
-            DeskState(ref, DeskState.PREPARING, fixes = keep?.fixes ?: Draft.Fixes(), at = System.currentTimeMillis(),
+            PcTask(ref, PcTask.PREPARING, fixes = keep?.fixes ?: PcPayload.Fixes(), at = System.currentTimeMillis(),
                 mode = mode ?: keep?.mode ?: dev.catalogo.core.Mode.UPLOAD_PLAY)
         }
         kick()
     }
 
     /** What the user settled in «Revisar»; the article goes back through the checks. */
-    suspend fun fix(number: Int, fixes: Draft.Fixes) {
-        repo.updateDesk(number) { d -> d?.copy(fixes = fixes, status = DeskState.PREPARING, message = "", at = System.currentTimeMillis()) }
+    suspend fun fix(number: Int, fixes: PcPayload.Fixes) {
+        repo.updatePcTask(number) { d -> d?.copy(fixes = fixes, status = PcTask.PREPARING, message = "", at = System.currentTimeMillis()) }
         kick()
     }
 
@@ -530,11 +530,11 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * the article goes through the checks again (the AI only if its data changed).
      */
     suspend fun retry(number: Int) {
-        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
+        val d = current(number)?.takeIf { it.inStock }?.pcTask ?: return
         val link = repo.state.pc
         if (link != null && (d.status == "revisar" || d.status == "error") && d.ref.isNotBlank()) {
-            val job = withContext(Dispatchers.IO) { repo.desk.retry(link, d.ref) }
-            repo.updateDesk(number) { x -> x?.copy(status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis()) }
+            val job = withContext(Dispatchers.IO) { repo.pcClient.retry(link, d.ref) }
+            repo.updatePcTask(number) { x -> x?.copy(status = job.status, message = job.message, doubts = emptyList(), at = System.currentTimeMillis()) }
             AppLog.i("cola", "${d.ref} reintento en el PC")
             refresh()
         } else {
@@ -547,18 +547,18 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
      * draft is not created yet) and back to «Por subir». Nothing is deleted in Vinted.
      */
     suspend fun remove(number: Int) {
-        val d = current(number)?.takeIf { it.inStock }?.desk ?: return
+        val d = current(number)?.takeIf { it.inStock }?.pcTask ?: return
         val link = repo.state.pc
         if (link != null && d.ref.isNotBlank() && d.status !in LOCAL) {
-            withContext(Dispatchers.IO) { runCatching { repo.desk.delete(link, d.ref) } }
+            withContext(Dispatchers.IO) { runCatching { repo.pcClient.delete(link, d.ref) } }
         }
-        repo.updateDesk(number) { null }
+        repo.updatePcTask(number) { null }
         AppLog.i("cola", "${d.ref} fuera de la cola")
     }
 
-    suspend fun control(action: String): Desk.Status {
+    suspend fun control(action: String): PcClient.Status {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val status = withContext(Dispatchers.IO) { repo.desk.control(link, action) }   // never on the UI thread
+        val status = withContext(Dispatchers.IO) { repo.pcClient.control(link, action) }   // never on the UI thread
         _pc.value = Pc(status, null, System.currentTimeMillis())
         return status
     }
@@ -568,17 +568,17 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         val off = if (on) repo.state.gamesOff - kind else repo.state.gamesOff + kind
         repo.setGamesOff(off)
         val link = repo.state.pc ?: return
-        runCatching { withContext(Dispatchers.IO) { repo.desk.setGamesOff(link, off) } }
+        runCatching { withContext(Dispatchers.IO) { repo.pcClient.setGamesOff(link, off) } }
     }
 
-    suspend fun offersControl(action: String): Desk.Offers {
+    suspend fun offersControl(action: String): PcClient.Offers {
         val link = repo.state.pc ?: throw CatalogException("Configura el PC en Ajustes")
-        val o = withContext(Dispatchers.IO) { repo.desk.offersControl(link, action) }
+        val o = withContext(Dispatchers.IO) { repo.pcClient.offersControl(link, action) }
         _offers.value = o
         return o
     }
 
-    suspend fun test(link: dev.catalogo.core.PcLink): Desk.Status = withContext(Dispatchers.IO) { repo.desk.status(link) }
+    suspend fun test(link: dev.catalogo.core.PcLink): PcClient.Status = withContext(Dispatchers.IO) { repo.pcClient.status(link) }
 
     companion object {
         /** AI or upload waiting on this phone (e.g. after a cut connection). */
@@ -589,7 +589,7 @@ class Drafts(private val repo: Repo, private val context: android.content.Contex
         private const val POLL_IDLE_MS = 30_000L
         private const val IDLE_MS = 60_000L
         private const val MAX_PHOTOS = 20
-        private val LOCAL = setOf(DeskState.PREPARING, DeskState.REVIEW, DeskState.SENDING)
+        private val LOCAL = setOf(PcTask.PREPARING, PcTask.REVIEW, PcTask.SENDING)
 
         /** Fields named in a refusal from the PC that «Revisar» lets the user choose. */
         fun fieldsIn(message: String): List<String> {

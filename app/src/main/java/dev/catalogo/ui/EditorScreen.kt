@@ -25,7 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.Vinted
+import dev.catalogo.core.VintedTaxonomy
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import dev.catalogo.core.Condition
@@ -44,7 +44,7 @@ import dev.catalogo.core.Listing
 import dev.catalogo.core.Measures
 import androidx.compose.ui.text.input.KeyboardType
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sku
 
 /**
@@ -54,7 +54,7 @@ import dev.catalogo.core.Sku
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun EditorScreen(vm: MainViewModel, p: ParentState, number: Int?) {
+fun EditorScreen(vm: MainViewModel, p: CatalogState, number: Int?) {
     val article = number?.let { Catalog.article(p, it) }
     val creating = number == null
     val start = article?.listing ?: Listing()

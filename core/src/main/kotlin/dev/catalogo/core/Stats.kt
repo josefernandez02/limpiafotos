@@ -13,7 +13,7 @@ object Stats {
 
     data class Month(val month: YearMonth, val sold: Int, val revenue: Long, val profit: Long)
 
-    data class Account(val deviceId: String, val label: String, val sold: Int, val revenue: Long, val listed: Int)
+    data class Account(val accountId: String, val label: String, val sold: Int, val revenue: Long, val listed: Int)
 
     data class Kpis(
         val inStock: Int,
@@ -100,7 +100,7 @@ object Stats {
         )
     }
 
-    fun kpis(s: ParentState, now: Long, zone: ZoneId = ZoneId.systemDefault(), months: Int = 6): Kpis {
+    fun kpis(s: CatalogState, now: Long, zone: ZoneId = ZoneId.systemDefault(), months: Int = 6): Kpis {
         val stock = s.articles.filter { it.inStock }
         val sales = s.sales.filter { it.status == SaleStatus.COMPLETED }
         val pending = s.sales.filter { it.status == SaleStatus.PENDING }
@@ -116,8 +116,8 @@ object Stats {
             val list = byMonth[m].orEmpty()
             Month(m, list.size, list.sumOf { it.price }, Ledger.totals(list).profit)
         }
-        val accounts = Catalog.devices(s).map { d ->
-            val mine = sales.filter { it.deviceId == d.id }
+        val accounts = Catalog.allAccounts(s).map { d ->
+            val mine = sales.filter { it.accountId == d.id }
             Account(d.id, d.label, mine.size, mine.sumOf { it.price }, stock.count { d.id in it.targets })
         }
         val brands = sales.filter { it.brand.isNotBlank() }
@@ -153,7 +153,7 @@ object Stats {
     }
 
     /** Articles in stock, oldest first, with their age in days: what to review, discount or re-upload. */
-    fun oldest(s: ParentState, now: Long, limit: Int = 5): List<Pair<Article, Int>> =
+    fun oldest(s: CatalogState, now: Long, limit: Int = 5): List<Pair<Article, Int>> =
         s.articles.filter { it.inStock }.sortedBy { it.createdAt }.take(limit)
             .map { it to ((now - it.createdAt) / DAY).toInt() }
 }

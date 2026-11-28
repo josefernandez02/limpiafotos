@@ -7,7 +7,7 @@ import java.time.ZoneId
  * What the app has learned about the Gemini models during this session, so a model that just said «no» is not asked
  * again until it can say «yes»: one request per model per cooldown instead of walking the whole list every time.
  */
-class ModelPool(private val clock: () -> Long = System::currentTimeMillis) {
+class GeminiModelPool(private val clock: () -> Long = System::currentTimeMillis) {
     enum class Why { BUSY, MINUTE, DAILY }
 
     private class Block(val until: Long, val why: Why)

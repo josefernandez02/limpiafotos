@@ -12,7 +12,7 @@ import dev.catalogo.core.Garments
 import dev.catalogo.core.Listing
 import dev.catalogo.core.ListingWriter
 import dev.catalogo.core.Measures
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -45,7 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.Device
+import dev.catalogo.core.VintedAccount
 import dev.catalogo.core.Sku
 
 // ---------- first run ----------
@@ -70,14 +70,14 @@ fun SetupScreen(vm: MainViewModel) {
         }
     }
     if (ask) {
-        DeviceDialog(
+        AccountDialog(
             title = "Tu cuenta principal",
             subtitle = "El prefijo es el principio del código de cada artículo (SH0045).",
             initialName = "Samsung",
             initialPrefix = "SH",
             confirm = "Crear",
             onDismiss = { ask = false },
-            onConfirm = { name, prefix -> vm.setupParent(name, prefix); null },
+            onConfirm = { name, prefix -> vm.setupMainPhone(name, prefix); null },
         )
     }
 }
@@ -86,16 +86,16 @@ fun SetupScreen(vm: MainViewModel) {
 
 @Composable
 fun SettingsScreen(vm: MainViewModel, state: AppState) {
-    var editing by remember { mutableStateOf<Device?>(null) }
+    var editing by remember { mutableStateOf<VintedAccount?>(null) }
     var adding by remember { mutableStateOf(false) }
-    val p = state.parent
+    val p = state.catalog
 
     Scaffold(topBar = { Bar("Ajustes", onBack = { vm.back() }) }) { padding ->
         Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)) {
             if (p != null) {
                 Section("Cuentas de Vinted")
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    for (d in Catalog.devices(p)) {
+                    for (d in Catalog.allAccounts(p)) {
                         Tile(onClick = { editing = d }) {
                             Row2(
                                 left = {
@@ -103,8 +103,8 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
                                         Text(d.label, style = MaterialTheme.typography.titleMedium)
                                         Muted(
                                             listOfNotNull(
-                                                d.name.takeIf { d.account.isNotBlank() },
-                                                if (d.id == p.self.id) "Principal" else "Otra cuenta",
+                                                d.name.takeIf { d.vintedName.isNotBlank() },
+                                                if (d.id == p.mainAccount.id) "Principal" else "Otra cuenta",
                                                 "estilo ${d.style + 1}",
                                                 if (d.vintedId.isBlank()) "sin perfil de Vinted" else null,
                                             ).joinToString(GAP),
@@ -144,32 +144,32 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
         }
     }
 
-    var accountOf by remember { mutableStateOf<Device?>(null) }
-    accountOf?.let { d -> AccountDialog(vm, d) { accountOf = null } }
+    var accountOf by remember { mutableStateOf<VintedAccount?>(null) }
+    accountOf?.let { d -> VintedProfileDialog(vm, d) { accountOf = null } }
 
-    val device = editing
-    if (device != null && p != null) {
-        val isChild = device.id != p.self.id
-        var confirmRemove by remember(device.id) { mutableStateOf(false) }
+    val vintedAccount = editing
+    if (vintedAccount != null && p != null) {
+        val isOtherAccount = vintedAccount.id != p.mainAccount.id
+        var confirmRemove by remember(vintedAccount.id) { mutableStateOf(false) }
         val extraButtons: @Composable () -> Unit = {
             Column {
-                TextButton(onClick = { editing = null; accountOf = device }) { Text("Cuenta de Vinted") }
-                TextButton(onClick = { editing = null; vm.go(Screen.Template(device.id)) }) { Text("Estilo y plantilla del anuncio") }
-                if (isChild) {
+                TextButton(onClick = { editing = null; accountOf = vintedAccount }) { Text("Cuenta de Vinted") }
+                TextButton(onClick = { editing = null; vm.go(Screen.Template(vintedAccount.id)) }) { Text("Estilo y plantilla del anuncio") }
+                if (isOtherAccount) {
                     TextButton(onClick = { confirmRemove = true }) { Text("Quitar cuenta", color = MaterialTheme.colorScheme.error) }
                 }
             }
         }
-        DeviceDialog(
-            title = device.name,
-            initialName = device.name,
-            initialPrefix = device.prefix,
+        AccountDialog(
+            title = vintedAccount.name,
+            initialName = vintedAccount.name,
+            initialPrefix = vintedAccount.prefix,
             confirm = "Guardar",
             onDismiss = { editing = null },
             onConfirm = { name, prefix ->
                 try {
-                    Catalog.validateDevice(p, device.id, name.trim(), prefix.trim().uppercase())
-                    vm.renameDevice(device.id, name, prefix) { editing = null }
+                    Catalog.validateAccount(p, vintedAccount.id, name.trim(), prefix.trim().uppercase())
+                    vm.renameAccount(vintedAccount.id, name, prefix) { editing = null }
                     null
                 } catch (e: Exception) {
                     e.message
@@ -179,18 +179,18 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
         )
         if (confirmRemove) {
             Confirm(
-                title = "Quitar ${device.label}",
+                title = "Quitar ${vintedAccount.label}",
                 text = "Dejará de estar entre tus cuentas. Sus álbumes no se borran.",
                 confirm = "Quitar",
                 destructive = true,
-                onConfirm = { vm.removeChild(device.id); editing = null },
+                onConfirm = { vm.removeAccount(vintedAccount.id); editing = null },
                 onDismiss = { confirmRemove = false },
             )
         }
     }
 
     if (adding && p != null) {
-        DeviceDialog(
+        AccountDialog(
             title = "Otra cuenta",
             subtitle = "La que publica otro PC. El prefijo abre el código de sus artículos.",
             initialName = "",
@@ -204,7 +204,7 @@ fun SettingsScreen(vm: MainViewModel, state: AppState) {
 
 /** Name + prefix form. [onConfirm] returns an error to show, or null when accepted. */
 @Composable
-fun DeviceDialog(
+fun AccountDialog(
     title: String,
     initialName: String,
     initialPrefix: String,
@@ -255,12 +255,12 @@ fun DeviceDialog(
 
 /** Vinted user name and profile link of the account a phone publishes in. */
 @Composable
-private fun AccountDialog(vm: MainViewModel, device: Device, onDismiss: () -> Unit) {
-    var account by remember { mutableStateOf(device.account) }
-    var profile by remember { mutableStateOf(if (device.vintedId.isBlank()) "" else "https://www.vinted.es/member/${device.vintedId}") }
+private fun VintedProfileDialog(vm: MainViewModel, vintedAccount: VintedAccount, onDismiss: () -> Unit) {
+    var account by remember { mutableStateOf(vintedAccount.vintedName) }
+    var profile by remember { mutableStateOf(if (vintedAccount.vintedId.isBlank()) "" else "https://www.vinted.es/member/${vintedAccount.vintedId}") }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Cuenta de Vinted de ${device.name}") },
+        title = { Text("Cuenta de Vinted de ${vintedAccount.name}") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(
@@ -281,7 +281,7 @@ private fun AccountDialog(vm: MainViewModel, device: Device, onDismiss: () -> Un
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { vm.setAccount(device.id, account, profile, onDismiss) }) { Text("Guardar") } },
+        confirmButton = { TextButton(onClick = { vm.setVintedProfile(vintedAccount.id, account, profile, onDismiss) }) { Text("Guardar") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
         containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
     )
@@ -296,12 +296,12 @@ private val SAMPLE = Listing(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
-    val device = Catalog.device(p, deviceId) ?: return
-    var style by remember { mutableIntStateOf(device.style) }
-    var text by remember { mutableStateOf(TextFieldValue(ListingWriter.upgrade(device.template, device.style))) }
+fun TemplateScreen(vm: MainViewModel, p: CatalogState, accountId: String) {
+    val vintedAccount = Catalog.findAccount(p, accountId) ?: return
+    var style by remember { mutableIntStateOf(vintedAccount.style) }
+    var text by remember { mutableStateOf(TextFieldValue(ListingWriter.upgrade(vintedAccount.template, vintedAccount.style))) }
     val sample = p.articles.firstOrNull { it.listing != null && !it.released }?.listing ?: SAMPLE
-    val sku = Sku.format(device.prefix, 54, p.digits)
+    val sku = Sku.format(vintedAccount.prefix, 54, p.digits)
 
     fun insert(token: String) {
         val sel = text.selection
@@ -310,7 +310,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
     }
 
     Scaffold(
-        topBar = { Bar("Anuncio de ${device.label}", onBack = { vm.back() }) },
+        topBar = { Bar("Anuncio de ${vintedAccount.label}", onBack = { vm.back() }) },
         bottomBar = {
             BottomActions {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -322,7 +322,7 @@ fun TemplateScreen(vm: MainViewModel, p: ParentState, deviceId: String) {
                     Button(
                         onClick = {
                             val custom = text.text.trim().takeIf { it != ListingWriter.defaultTemplate(style) } ?: ""
-                            vm.saveStyle(device.id, style, custom)
+                            vm.saveStyle(vintedAccount.id, style, custom)
                         },
                         modifier = Modifier.weight(1f).height(54.dp),
                         shape = RoundedCornerShape(18.dp),

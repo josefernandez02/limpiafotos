@@ -1,19 +1,19 @@
 package dev.catalogo
 
 import android.app.Application
-import dev.catalogo.data.Drafts
-import dev.catalogo.data.Repo
+import dev.catalogo.data.PcSync
+import dev.catalogo.data.CatalogRepository
 
 class CatalogoApp : Application() {
-    lateinit var repo: Repo
+    lateinit var repo: CatalogRepository
         private set
-    lateinit var drafts: Drafts
+    lateinit var pcSync: PcSync
         private set
 
     override fun onCreate() {
         super.onCreate()
         dev.catalogo.data.AppLog.init(this)
-        repo = Repo(this)
-        drafts = Drafts(repo, this).also { it.start() }
+        repo = CatalogRepository(this)
+        pcSync = PcSync(repo, this).also { it.start() }
     }
 }

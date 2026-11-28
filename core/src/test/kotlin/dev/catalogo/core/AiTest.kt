@@ -77,9 +77,9 @@ class AiTest {
 
     @Test
     fun `listing text uses ai titles only while the data they were written for is unchanged`() {
-        val samsung = Device("p", "Samsung", "SH")
-        val poco = Device("c1", "Poco", "SA", style = 1)
-        var (s, n) = Catalog.create(ParentState(self = samsung, children = listOf(poco)), 0)
+        val samsung = VintedAccount("p", "Samsung", "SH")
+        val poco = VintedAccount("c1", "Poco", "SA", style = 1)
+        var (s, n) = Catalog.create(CatalogState(mainAccount = samsung, otherAccounts = listOf(poco)), 0)
         val listing = levis.copy(type = "jeans")
         val ai = AiResult(Ai.basis(listing), titles = mapOf("p" to "AI SH", "c1" to "AI SA"))
         s = Catalog.updateArticle(s, n, listing, null, null, ai)
@@ -94,8 +94,8 @@ class AiTest {
 
     @Test
     fun `ai answer is saved into the article without touching what the user typed`() {
-        val samsung = Device("p", "Samsung", "SH")
-        var (s, n) = Catalog.create(ParentState(self = samsung), 0)
+        val samsung = VintedAccount("p", "Samsung", "SH")
+        var (s, n) = Catalog.create(CatalogState(mainAccount = samsung), 0)
         s = Catalog.updateArticle(s, n, levis.copy(notes = "Tiene manchas"), null, null)
         val answer = AiSuggestion("jeans", listOf("straight"), Gender.MEN, "Hombre › Ropa › Vaqueros › Vaqueros rectos",
             listOf("Azul"), "W30", mapOf("p" to "Levi's 513 Jeans"), emptyList())
@@ -111,11 +111,11 @@ class AiTest {
 
     @Test
     fun `letter sizes follow gender and show in the description`() {
-        assertEquals("M", Vinted.letterSize("W32 L34", Gender.MEN))
-        assertEquals("L", Vinted.letterSize("w32", Gender.WOMEN))
-        assertEquals("S", Vinted.letterSize("W 30 L32", Gender.MEN))
-        assertNull(Vinted.letterSize("W32 L34", null))
-        assertNull(Vinted.letterSize("M", Gender.MEN))
+        assertEquals("M", VintedTaxonomy.letterSize("W32 L34", Gender.MEN))
+        assertEquals("L", VintedTaxonomy.letterSize("w32", Gender.WOMEN))
+        assertEquals("S", VintedTaxonomy.letterSize("W 30 L32", Gender.MEN))
+        assertNull(VintedTaxonomy.letterSize("W32 L34", null))
+        assertNull(VintedTaxonomy.letterSize("M", Gender.MEN))
         val l = Listing(size = "W32 L34", gender = Gender.MEN)
         assertTrue(ListingWriter.description(l, 0, "", "SH1").startsWith("🏷️ Talla: W32 L34 (aprox. una M)\n"))
         assertTrue(ListingWriter.description(l, 1, "", "SA1").startsWith("🏷️ Talla W32 L34 · aprox. M\n"))
@@ -178,10 +178,10 @@ class AiTest {
 
     @Test
     fun `categories are unique and split by gender`() {
-        assertEquals(Vinted.categories.size, Vinted.categories.toSet().size)
-        assertTrue(Vinted.categories.all { it.startsWith("Hombre › ") || it.startsWith("Mujer › ") })
-        assertTrue("Mujer › Ropa › Vestidos › Midi" in Vinted.categories)
-        assertFalse("Hombre › Ropa › Vestidos › Midi" in Vinted.categories)
+        assertEquals(VintedTaxonomy.categories.size, VintedTaxonomy.categories.toSet().size)
+        assertTrue(VintedTaxonomy.categories.all { it.startsWith("Hombre › ") || it.startsWith("Mujer › ") })
+        assertTrue("Mujer › Ropa › Vestidos › Midi" in VintedTaxonomy.categories)
+        assertFalse("Hombre › Ropa › Vestidos › Midi" in VintedTaxonomy.categories)
     }
 
     @Test

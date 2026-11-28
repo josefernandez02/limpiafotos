@@ -14,7 +14,7 @@ import kotlin.math.roundToInt
  * pixels are decoded with their orientation applied, re-encoded at full
  * resolution, and every non-image block is stripped and verified absent.
  */
-object Cleaner {
+object PhotoCleaner {
     private const val QUALITY = 95
     private const val MAX_EDGE = 8192 // only guards against 200 MP modes exhausting memory
 

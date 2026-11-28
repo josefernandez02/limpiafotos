@@ -1,10 +1,11 @@
 package dev.catalogo.core
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 /** A Vinted account the catalogue publishes in (the main one, or another that a second PC handles). */
 @Serializable
-data class Device(
+data class VintedAccount(
     val id: String,
     val name: String,
     val prefix: String,
@@ -13,7 +14,7 @@ data class Device(
     /** Description template; blank means the style's default. */
     val template: String = "",
     /** Vinted user name of the account this phone publishes in ("shiorawear"). */
-    val account: String = "",
+    @SerialName("account") val vintedName: String = "",
     /** Numeric Vinted member id, taken from the profile link; used to read the wardrobe. */
     val vintedId: String = "",
 ) {
@@ -34,7 +35,7 @@ data class VintedItem(
 
 /**
  * What a re-listed article must not repeat: the titles (per device id) and hashtags it was published with.
- * Kept until the AI has written new ones that differ enough ([Relisting]); nothing is sent to the PC before.
+ * Kept until the AI has written new ones that differ enough ([RelistRules]); nothing is sent to the PC before.
  */
 @Serializable
 data class Relist(
@@ -68,7 +69,7 @@ data class Article(
     /** Price in cents it is listed at in Vinted. */
     val price: Long? = null,
     /** Its draft on the PC that uploads it (null = never sent). */
-    val desk: Desk? = null,
+    @SerialName("desk") val pcTask: PcTask? = null,
     /** Photos the AI looks at, in order (the PC always gets the whole album); empty = all of them. */
     val photos: List<String> = emptyList(),
     /** How many times it was listed again (new photos, new title and hashtags); part of its code on the PC. */
@@ -98,7 +99,7 @@ data class Article(
  * publicado, jugado, revisar, error.
  */
 @Serializable
-data class Desk(
+data class PcTask(
     /** Unique for this article's life on the PC (numbers are reused after a sale). */
     val ref: String,
     val status: String,
@@ -111,7 +112,7 @@ data class Desk(
     val game: String = "",
     val at: Long = 0,
     /** What the user settled in «Revisar». */
-    val fixes: Draft.Fixes = Draft.Fixes(),
+    val fixes: PcPayload.Fixes = PcPayload.Fixes(),
     /** What to do with it: [Mode]. */
     val mode: String = Mode.UPLOAD_PLAY,
     /** A state set by hand that the PC still has to hear about ("" = nothing pending). */
@@ -175,15 +176,15 @@ enum class Stage(val label: String) {
 @Serializable
 data class PcLink(val url: String, val token: String)
 
-/** Photos being taken with the system camera for [deviceId]'s album of [number]. */
+/** Photos being taken with the system camera for [accountId]'s album of [number]. */
 @Serializable
-data class Session(val number: Int, val deviceId: String, val startedAt: Long)
+data class Session(val number: Int, @SerialName("deviceId") val accountId: String, val startedAt: Long)
 
 @Serializable
-data class ParentState(
-    val self: Device,
+data class CatalogState(
+    @SerialName("self") val mainAccount: VintedAccount,
     val digits: Int = 4,
-    val children: List<Device> = emptyList(),
+    @SerialName("children") val otherAccounts: List<VintedAccount> = emptyList(),
     val articles: List<Article> = emptyList(),
     val session: Session? = null,
     val lots: List<Lot> = emptyList(),
@@ -191,14 +192,14 @@ data class ParentState(
     /** When the PC last finished reading the sales, as it told this phone (0 = never). */
     val salesReadAt: Long = 0,
     /** Jobs of sold articles that no longer exist here, still to be taken off the PC. */
-    val retired: List<Desk> = emptyList(),
+    val retired: List<PcTask> = emptyList(),
 )
 
 @Serializable
 data class AppState(
     val deviceId: String,
     val baseFolder: String = "Pictures",
-    val parent: ParentState? = null,
+    @SerialName("parent") val catalog: CatalogState? = null,
     /** Google AI Studio key; stays on this phone, never synced. */
     val geminiKey: String = "",
     /** The PC that creates the drafts; stays on this phone, never synced. */

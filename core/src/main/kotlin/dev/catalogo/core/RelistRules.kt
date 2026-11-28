@@ -4,7 +4,7 @@ package dev.catalogo.core
  * A re-listed article goes up again with new photos, so its title and hashtags must change too (the same
  * words again would be the same listing). The AI writes them; this says whether they differ enough.
  */
-object Relisting {
+object RelistRules {
     /** Words in the new title that the old one did not have: one swapped word (a colour, a synonym) is too little, a reorder is nothing. */
     const val MIN_WORDS = 2
 

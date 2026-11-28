@@ -12,7 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import dev.catalogo.core.Article
-import dev.catalogo.core.Desk
+import dev.catalogo.core.PcTask
 import dev.catalogo.ui.MainActivity
 
 /**
@@ -20,9 +20,9 @@ import dev.catalogo.ui.MainActivity
  * so leaving the app, locking the phone or opening the camera does not cut
  * Gemini or the upload. It only shows a quiet notification with the queue, and
  * stops by itself as soon as nothing is left on this phone. The work itself is
- * done by [Drafts]; this only stops Android from freezing the app meanwhile.
+ * done by [PcSync]; this only stops Android from freezing the app meanwhile.
  */
-class DraftsService : Service() {
+class PcSyncService : Service() {
 
     private var wake: PowerManager.WakeLock? = null
 
@@ -74,7 +74,7 @@ class DraftsService : Service() {
         fun sync(context: Context, queue: List<Article>) {
             val app = context.applicationContext
             if (queue.isEmpty()) {
-                if (running) app.stopService(Intent(app, DraftsService::class.java))
+                if (running) app.stopService(Intent(app, PcSyncService::class.java))
                 return
             }
             val text = describe(queue)
@@ -83,7 +83,7 @@ class DraftsService : Service() {
                 return
             }
             runCatching {
-                app.startForegroundService(Intent(app, DraftsService::class.java).putExtra(EXTRA_TEXT, text))
+                app.startForegroundService(Intent(app, PcSyncService::class.java).putExtra(EXTRA_TEXT, text))
             }
         }
 
@@ -117,7 +117,7 @@ class DraftsService : Service() {
         private const val ALERTS = "avisos"
 
         private fun describe(queue: List<Article>): String {
-            val ai = queue.count { it.desk?.status == Desk.PREPARING }
+            val ai = queue.count { it.pcTask?.status == PcTask.PREPARING }
             val up = queue.size - ai
             return listOfNotNull(
                 ai.takeIf { it > 0 }?.let { if (it == 1) "1 con la IA" else "$it con la IA" },

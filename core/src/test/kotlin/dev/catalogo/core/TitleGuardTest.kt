@@ -123,22 +123,22 @@ class TitleGuardTest {
             materials = listOf("Lana", "Nailon"),
         )
         val facts = TitleGuard.facts(Listing(brand = "Jeckerson"), current)
-        val edit = RelistFix.Edit(
+        val edit = RelistRepair.Edit(
             mapOf("SH" to "Jeckerson Mockneck Cashmere Jumper Retro Knit Heather"),
             listOf("cashmere", "merino", "jumper", "knitwear", "mocknecksweater"),
         )
-        val fixed = RelistFix.merge(avoid, current, edit, accounts, facts)
+        val fixed = RelistRepair.merge(avoid, current, edit, accounts, facts)
         assertEquals("Jeckerson Mockneck Jumper Retro Knit Heather", fixed.titles["p"])
         assertFalse("cashmere" in fixed.hashtags || "merino" in fixed.hashtags)
         assertTrue("jumper" in fixed.hashtags && "knitwear" in fixed.hashtags)
 
-        val prompt = RelistFix.prompt(avoid, current, accounts, 2, facts)
+        val prompt = RelistRepair.prompt(avoid, current, accounts, 2, facts)
         assertTrue("materiales: Lana, Nailon" in prompt && "colores: Gris" in prompt, prompt)
         assertTrue("Wool no es Cashmere" in prompt)
         assertTrue("sinónimos REALES" in prompt)
 
         // a rewrite about another garment is not used at all
-        val puffer = RelistFix.Edit(mapOf("SH" to "Jeckerson Puffer Jacket Vintage Grey"), emptyList())
-        assertEquals(avoid.titles["p"], RelistFix.merge(avoid, current, puffer, accounts, facts).titles["p"])
+        val puffer = RelistRepair.Edit(mapOf("SH" to "Jeckerson Puffer Jacket Vintage Grey"), emptyList())
+        assertEquals(avoid.titles["p"], RelistRepair.merge(avoid, current, puffer, accounts, facts).titles["p"])
     }
 }

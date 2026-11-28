@@ -6,7 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import dev.catalogo.core.CatalogException
-import dev.catalogo.core.Labels
+import dev.catalogo.core.ShippingLabels
 import dev.catalogo.core.PcLink
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -28,7 +28,7 @@ import java.net.URLEncoder
  * Every call carries the shared token; errors come back as [CatalogException]
  * with a message the user can act on.
  */
-class Desk(private val resolver: ContentResolver) {
+class PcClient(private val resolver: ContentResolver) {
 
     /** One article as the PC sees it. */
     data class Job(val ref: String, val status: String, val message: String, val itemId: String, val url: String, val game: String)
@@ -132,7 +132,7 @@ class Desk(private val resolver: ContentResolver) {
     fun labels(link: PcLink): String = call(link, "GET", "/etiquetas", null).toString()
 
     /** "mandar" (take out the labels of [requests]) or "parar". */
-    fun labelsControl(link: PcLink, action: String, requests: List<Labels.Request> = emptyList()): String = call(link, "POST", "/etiquetas",
+    fun labelsControl(link: PcLink, action: String, requests: List<ShippingLabels.Request> = emptyList()): String = call(link, "POST", "/etiquetas",
         buildJsonObject {
             put("accion", action)
             putJsonArray("pedidos") {

@@ -20,19 +20,19 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import dev.catalogo.core.Labels
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.ShippingLabels
+import dev.catalogo.core.CatalogState
 
 /**
  * The shipping labels: ask the PC for them, see how it goes and open the PDF in the printer's
  * app. For every sale still to be sent, or only for the order [only].
  */
 @Composable
-fun LabelsCard(vm: MainViewModel, p: ParentState, only: String? = null) {
+fun LabelsCard(vm: MainViewModel, p: CatalogState, only: String? = null) {
     val state by vm.state.collectAsStateWithLifecycle()
     val text by vm.labelsText.collectAsStateWithLifecycle()
     val job = state.labels
-    val count = remember(p, only) { Labels.requests(p, only).size }
+    val count = remember(p, only) { ShippingLabels.requests(p, only).size }
     val working = job.lot != 0L
     val finished = job.file.isNotBlank() || job.warnings.isNotEmpty()
     if (!working && !finished && count == 0) return
@@ -84,7 +84,7 @@ fun openInPrinter(context: Context, pdf: Uri): String? {
     val packages = context.packageManager
     for (intent in listOf(view, send)) {
         val found = packages.queryIntentActivities(intent, PackageManager.MATCH_ALL)
-        val i = Labels.printer(found.map { it.activityInfo.packageName to it.loadLabel(packages).toString() })
+        val i = ShippingLabels.printer(found.map { it.activityInfo.packageName to it.loadLabel(packages).toString() })
         if (i < 0) continue
         val target = found[i].activityInfo
         val direct = Intent(intent).setComponent(ComponentName(target.packageName, target.name)).addFlags(flags)

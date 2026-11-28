@@ -24,7 +24,7 @@ data class LabelFile(val file: String, val orders: List<String>)
  * Shipping labels. The PC takes them out of Vinted, crops them upright and joins them into
  * one PDF; the phone only says which sales, takes the PDF and hands it to the printer app.
  */
-object Labels {
+object ShippingLabels {
     /** One sale to print. [code] is written on its label, so it is known which parcel it goes on. */
     data class Request(val id: String, val code: String, val title: String)
 
@@ -70,14 +70,14 @@ object Labels {
     }
 
     /** What to ask the PC for, the oldest sale first: all of them, or the order [only]. */
-    fun requests(s: ParentState, only: String? = null): List<Request> = s.sales
+    fun requests(s: CatalogState, only: String? = null): List<Request> = s.sales
         .filter { canPrint(it) && (only == null || it.order == only) }
         .sortedBy { it.soldAt }
         .groupBy { it.order }
         .map { (order, garments) -> Request(order, lotCode(garments.map { code(s, it) }), garments.first().title) }
 
-    private fun code(s: ParentState, sale: Sale): String = sale.code.ifBlank {
-        if (sale.number < 0) "" else Sku.format(Catalog.device(s, sale.deviceId)?.prefix ?: s.self.prefix, sale.number, s.digits)
+    private fun code(s: CatalogState, sale: Sale): String = sale.code.ifBlank {
+        if (sale.number < 0) "" else Sku.format(Catalog.findAccount(s, sale.accountId)?.prefix ?: s.mainAccount.prefix, sale.number, s.digits)
     }
 
     /** One code for a parcel: «SH0006», «SH0006-0012» for two garments, «SH0006#3» for more. */
@@ -123,7 +123,7 @@ object Labels {
      * The saved PDFs with nothing left to send: one of their sales paid and none still
      * open. A sale cancelled by hand, in doubt or unknown here keeps its PDF.
      */
-    fun spent(s: ParentState, files: List<LabelFile>): List<LabelFile> {
+    fun spent(s: CatalogState, files: List<LabelFile>): List<LabelFile> {
         val sales = s.sales.groupBy { it.order }
         return files.filter { pdf ->
             val inside = pdf.orders.map { sales[it].orEmpty() }

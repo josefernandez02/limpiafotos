@@ -7,12 +7,12 @@ import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.CatalogException
-import dev.catalogo.core.Device
+import dev.catalogo.core.VintedAccount
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Listing
 import dev.catalogo.core.Ids
-import dev.catalogo.core.Labels
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.ShippingLabels
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sales
 import dev.catalogo.core.Session
 import dev.catalogo.core.Sku
@@ -20,32 +20,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /** Every operation that touches state, gallery and outbox together. */
-class Repo(context: Context) {
+class CatalogRepository(context: Context) {
     private val resolver = context.contentResolver
-    val store = Store(context.filesDir)
+    val store = StateStore(context.filesDir)
     val gallery = Gallery(context)
-    val outbox = Outbox(context.filesDir)
-    val gemini = Gemini(context.contentResolver)
-    val previews = Previews(context.filesDir)
-    val desk = Desk(context.contentResolver)
-    val saleImages = SaleImages(context.filesDir, context.contentResolver)
-    val labelFiles = LabelFiles(context.contentResolver)
+    val accountPhotos = AccountPhotoStore(context.filesDir)
+    val gemini = GeminiClient(context.contentResolver)
+    val legacyPreviews = LegacyPreviewStore(context.filesDir)
+    val pcClient = PcClient(context.contentResolver)
+    val saleImages = SaleImageStore(context.filesDir, context.contentResolver)
+    val labelFiles = LabelFileStore(context.contentResolver)
 
     val state: AppState get() = store.value
     val base: String get() = state.baseFolder
 
-    private fun parent(): ParentState = state.parent ?: throw CatalogException("Este móvil no es el principal")
+    private fun catalog(): CatalogState = state.catalog ?: throw CatalogException("Este móvil no es el principal")
 
 
-    fun sku(device: Device, number: Int, digits: Int) = Sku.format(device.prefix, number, digits)
+    fun sku(vintedAccount: VintedAccount, number: Int, digits: Int) = Sku.format(vintedAccount.prefix, number, digits)
 
     // ---------- setup ----------
 
-    suspend fun setupParent(name: String, prefix: String) {
+    suspend fun setupMainPhone(name: String, prefix: String) {
         store.update { s ->
-            val self = Device(s.deviceId, name.trim(), prefix.trim().uppercase())
-            Catalog.validateDevice(ParentState(self = self), self.id, self.name, self.prefix)
-            s.copy(parent = ParentState(self = self))
+            val mainAccount = VintedAccount(s.deviceId, name.trim(), prefix.trim().uppercase())
+            Catalog.validateAccount(CatalogState(mainAccount = mainAccount), mainAccount.id, mainAccount.name, mainAccount.prefix)
+            s.copy(catalog = CatalogState(mainAccount = mainAccount))
         }
     }
 
@@ -54,35 +54,35 @@ class Repo(context: Context) {
     suspend fun newArticle(listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?): Int {
         var number = -1
         store.update { s ->
-            val (created, n) = Catalog.create(s.parent!!, System.currentTimeMillis())
+            val (created, n) = Catalog.create(s.catalog!!, System.currentTimeMillis())
             number = n
-            s.copy(parent = Catalog.updateArticle(created, n, listing, lotId, cost, ai))
+            s.copy(catalog = Catalog.updateArticle(created, n, listing, lotId, cost, ai))
         }
         return number
     }
 
     suspend fun updateArticle(number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult?) {
-        store.update { s -> s.copy(parent = Catalog.updateArticle(s.parent!!, number, listing, lotId, cost, ai)) }
+        store.update { s -> s.copy(catalog = Catalog.updateArticle(s.catalog!!, number, listing, lotId, cost, ai)) }
     }
 
     suspend fun applyAi(number: Int, suggestion: AiSuggestion, model: String, seconds: Int) {
-        store.update { s -> s.copy(parent = Catalog.applyAi(s.parent!!, number, suggestion, model, seconds)) }
+        store.update { s -> s.copy(catalog = Catalog.applyAi(s.catalog!!, number, suggestion, model, seconds)) }
     }
 
     suspend fun setPhotos(number: Int, photos: List<String>) {
-        store.update { s -> s.copy(parent = Catalog.setPhotos(s.parent!!, number, photos)) }
+        store.update { s -> s.copy(catalog = Catalog.setPhotos(s.catalog!!, number, photos)) }
     }
 
     suspend fun setPrice(number: Int, price: Long?) {
-        store.update { s -> s.copy(parent = Catalog.setPrice(s.parent!!, number, price)) }
+        store.update { s -> s.copy(catalog = Catalog.setPrice(s.catalog!!, number, price)) }
     }
 
     /** Updates [number]'s draft status with [block] (it receives the current one). */
-    suspend fun updateDesk(number: Int, block: (dev.catalogo.core.Desk?) -> dev.catalogo.core.Desk?) {
+    suspend fun updatePcTask(number: Int, block: (dev.catalogo.core.PcTask?) -> dev.catalogo.core.PcTask?) {
         store.update { s ->
-            val p = s.parent ?: return@update s
+            val p = s.catalog ?: return@update s
             val a = Catalog.article(p, number) ?: return@update s
-            s.copy(parent = Catalog.setDesk(p, number, block(a.desk)))
+            s.copy(catalog = Catalog.setPcTask(p, number, block(a.pcTask)))
         }
     }
 
@@ -96,17 +96,17 @@ class Repo(context: Context) {
 
     /** The finished [job] with the PDF just saved, and the [orders] inside it. */
     suspend fun keepLabels(job: dev.catalogo.core.LabelJob, orders: List<String>) {
-        store.update { Labels.saved(it, job, orders) }
+        store.update { ShippingLabels.saved(it, job, orders) }
     }
 
     /** Deletes from Descargas the label PDFs whose sales are paid. One that resists is tried again later. */
     suspend fun discardSpentLabels() {
-        val p = state.parent ?: return
-        val spent = Labels.spent(p, state.labelPdfs)
+        val p = state.catalog ?: return
+        val spent = ShippingLabels.spent(p, state.labelPdfs)
         if (spent.isEmpty()) return
         val gone = withContext(Dispatchers.IO) { spent.filter { labelFiles.delete(Uri.parse(it.file)) } }
         if (gone.isEmpty()) return
-        store.update { Labels.discard(it, gone) }
+        store.update { ShippingLabels.discard(it, gone) }
         AppLog.i("etiquetas", "borrados ${gone.size} PDF de ventas completadas")
     }
 
@@ -118,8 +118,8 @@ class Repo(context: Context) {
         store.update { it.copy(geminiKey = key.trim()) }
     }
 
-    suspend fun setUploaded(number: Int, deviceId: String, uploaded: Boolean) {
-        store.update { s -> s.copy(parent = Catalog.setUploaded(s.parent!!, number, deviceId, uploaded)) }
+    suspend fun setUploaded(number: Int, accountId: String, uploaded: Boolean) {
+        store.update { s -> s.copy(catalog = Catalog.setUploaded(s.catalog!!, number, accountId, uploaded)) }
     }
 
     /**
@@ -129,7 +129,7 @@ class Repo(context: Context) {
      * was still waiting.
      */
     suspend fun setAccounts(number: Int, accounts: Set<String>) {
-        store.update { s -> s.copy(parent = Catalog.setAccounts(s.parent!!, number, accounts)) }
+        store.update { s -> s.copy(catalog = Catalog.setAccounts(s.catalog!!, number, accounts)) }
         refreshCopies(number)
     }
 
@@ -139,17 +139,17 @@ class Repo(context: Context) {
      * photos taken for another account, or already delivered, are left alone.
      */
     suspend fun refreshCopies(number: Int) = withContext(Dispatchers.IO) {
-        val p = parent()
+        val p = catalog()
         val a = Catalog.article(p, number) ?: return@withContext
-        val own = gallery.albumPhotos(base, sku(p.self, number, p.digits))
-        for (c in p.children) {
-            if (outbox.hasOriginals(c.id, number)) continue
+        val own = gallery.albumPhotos(base, sku(p.mainAccount, number, p.digits))
+        for (c in p.otherAccounts) {
+            if (accountPhotos.hasOriginals(c.id, number)) continue
             val wanted = c.id in a.accounts
             val delivered = (a.delivered[c.id] ?: 0) > 0
             when {
                 delivered && wanted -> Unit
-                !wanted || delivered || own.isEmpty() -> outbox.deleteCopies(c.id, number)
-                else -> outbox.replaceCopies(c.id, number, own.mapNotNull { uri -> resolver.openInputStream(uri)?.use { it.readBytes() } })
+                !wanted || delivered || own.isEmpty() -> accountPhotos.deleteCopies(c.id, number)
+                else -> accountPhotos.replaceCopies(c.id, number, own.mapNotNull { uri -> resolver.openInputStream(uri)?.use { it.readBytes() } })
             }
         }
     }
@@ -160,29 +160,29 @@ class Repo(context: Context) {
      * and this phone if its album has photos. Runs once per article.
      */
     suspend fun adoptAccounts() {
-        val p = state.parent ?: return
+        val p = state.catalog ?: return
         val legacy = p.articles.filter { !it.released && it.accounts.isEmpty() }
         if (legacy.isEmpty()) return
         val found = withContext(Dispatchers.IO) {
             val counts = runCatching { gallery.counts(base) }.getOrDefault(emptyMap())
             legacy.associate { a ->
-                val own = if ((counts[sku(p.self, a.number, p.digits)] ?: 0) > 0) setOf(p.self.id) else emptySet()
-                val waiting = p.children.filter { outbox.count(it.id, a.number) > 0 }.map { it.id }.toSet()
+                val own = if ((counts[sku(p.mainAccount, a.number, p.digits)] ?: 0) > 0) setOf(p.mainAccount.id) else emptySet()
+                val waiting = p.otherAccounts.filter { accountPhotos.count(it.id, a.number) > 0 }.map { it.id }.toSet()
                 a.number to (a.targets + own + waiting)
             }
         }
         store.update { s ->
-            var next = s.parent ?: return@update s
+            var next = s.catalog ?: return@update s
             for ((n, accounts) in found) {
                 if (accounts.isEmpty() || Catalog.article(next, n)?.accounts?.isNotEmpty() == true) continue
                 next = Catalog.setAccounts(next, n, accounts)
             }
-            s.copy(parent = next)
+            s.copy(catalog = next)
         }
     }
 
-    suspend fun setAccount(id: String, account: String, profile: String) {
-        store.update { s -> s.copy(parent = Catalog.setAccount(s.parent!!, id, account, profile)) }
+    suspend fun setVintedProfile(id: String, account: String, profile: String) {
+        store.update { s -> s.copy(catalog = Catalog.setVintedProfile(s.catalog!!, id, account, profile)) }
     }
 
     // ---------- photo editing (order, cover, crop) ----------
@@ -191,23 +191,23 @@ class Repo(context: Context) {
     data class EditedPhoto(val source: Uri, val bytes: ByteArray? = null)
 
     /**
-     * Rewrites the photos of [number] for [deviceId] in the given order, with
+     * Rewrites the photos of [number] for [accountId] in the given order, with
      * the crops applied and without the ones left out. New copies are written
      * first and the old ones deleted after, so nothing is lost if it stops
      * halfway. Returns photos only the user can allow deleting.
      */
-    suspend fun rewritePhotos(number: Int, deviceId: String, photos: List<EditedPhoto>): List<Uri> = withContext(Dispatchers.IO) {
-        val p = parent()
+    suspend fun rewritePhotos(number: Int, accountId: String, photos: List<EditedPhoto>): List<Uri> = withContext(Dispatchers.IO) {
+        val p = catalog()
         val bytes = photos.map { e ->
             e.bytes ?: resolver.openInputStream(e.source)?.use { it.readBytes() } ?: throw CatalogException("No se pudo leer una foto")
         }
-        if (deviceId == p.self.id) {
-            val album = sku(p.self, number, p.digits)
+        if (accountId == p.mainAccount.id) {
+            val album = sku(p.mainAccount, number, p.digits)
             val old = gallery.albumPhotos(base, album)
             for (b in bytes) gallery.save(base, album, b)
             gallery.delete(old).also { refreshCopies(number) }
         } else {
-            outbox.replace(deviceId, number, bytes)
+            accountPhotos.replace(accountId, number, bytes)
             emptyList()
         }
     }
@@ -216,34 +216,34 @@ class Repo(context: Context) {
 
     suspend fun saveLot(id: String?, name: String, price: Long, quantity: Int) {
         store.update { s ->
-            val p = s.parent!!
-            s.copy(parent = if (id == null) Ledger.addLot(p, Ids.newId(), name, price, quantity, System.currentTimeMillis())
+            val p = s.catalog!!
+            s.copy(catalog = if (id == null) Ledger.addLot(p, Ids.newId(), name, price, quantity, System.currentTimeMillis())
             else Ledger.updateLot(p, id, name, price, quantity))
         }
     }
 
     suspend fun deleteLot(id: String) {
-        store.update { s -> s.copy(parent = Ledger.deleteLot(s.parent!!, id)) }
+        store.update { s -> s.copy(catalog = Ledger.deleteLot(s.catalog!!, id)) }
     }
 
     suspend fun setStyle(id: String, style: Int, template: String) {
-        store.update { s -> s.copy(parent = Catalog.styleAndTemplate(s.parent!!, id, style, template)) }
+        store.update { s -> s.copy(catalog = Catalog.styleAndTemplate(s.catalog!!, id, style, template)) }
     }
 
-    suspend fun startSession(number: Int, deviceId: String) {
+    suspend fun startSession(number: Int, accountId: String) {
         store.update { s ->
-            val p = s.parent!!
+            val p = s.catalog!!
             if (Catalog.article(p, number)?.inStock != true) throw CatalogException("Artículo no disponible")
-            s.copy(parent = p.copy(session = Session(number, deviceId, System.currentTimeMillis())))
+            s.copy(catalog = p.copy(session = Session(number, accountId, System.currentTimeMillis())))
         }
     }
 
     suspend fun endSession() {
-        store.update { s -> s.copy(parent = s.parent?.copy(session = null)) }
+        store.update { s -> s.copy(catalog = s.catalog?.copy(session = null)) }
     }
 
     suspend fun sessionPhotos(): List<Gallery.Photo> {
-        val session = parent().session ?: return emptyList()
+        val session = catalog().session ?: return emptyList()
         return withContext(Dispatchers.IO) { gallery.cameraPhotosSince(session.startedAt) }
     }
 
@@ -252,19 +252,19 @@ class Repo(context: Context) {
      * Returns the originals, which only the user can allow deleting.
      */
     suspend fun saveSession(photos: List<Uri>, progress: (Int) -> Unit): List<Uri> {
-        val p = parent()
+        val p = catalog()
         val session = p.session ?: throw CatalogException("No hay sesión")
-        val target = Catalog.device(p, session.deviceId) ?: throw CatalogException("Dispositivo no encontrado")
+        val target = Catalog.findAccount(p, session.accountId) ?: throw CatalogException("Dispositivo no encontrado")
         withContext(Dispatchers.IO) {
             photos.forEachIndexed { i, uri ->
-                val clean = Cleaner.clean(resolver, uri)
-                if (target.id == p.self.id) gallery.save(base, sku(target, session.number, p.digits), clean)
-                else outbox.add(target.id, session.number, clean)
+                val clean = PhotoCleaner.clean(resolver, uri)
+                if (target.id == p.mainAccount.id) gallery.save(base, sku(target, session.number, p.digits), clean)
+                else accountPhotos.add(target.id, session.number, clean)
                 withContext(Dispatchers.Main) { progress(i + 1) }
             }
         }
         endSession()
-        if (target.id == p.self.id) refreshCopies(session.number)
+        if (target.id == p.mainAccount.id) refreshCopies(session.number)
         return photos
     }
 
@@ -276,8 +276,8 @@ class Repo(context: Context) {
      * behind; a picture of each is kept for its sale. Returns the originals only the user
      * can allow deleting.
      */
-    suspend fun changeSales(block: (ParentState) -> ParentState): List<Uri> {
-        val before = parent()
+    suspend fun changeSales(block: (CatalogState) -> CatalogState): List<Uri> {
+        val before = catalog()
         val after = block(before) // an impossible change throws here, before anything is touched
         val gone = Sales.freed(before, after)
         val consent = ArrayList<Uri>()
@@ -286,9 +286,9 @@ class Repo(context: Context) {
             cover(before, number)?.let { uri ->
                 for (sale in after.sales.filter { it.number == number && it.listedAt == listedAt }) saleImages.keep(sale.id, uri)
             }
-            consent += deleteLocalForParent(number)
+            consent += deleteLocalPhotos(number)
         }
-        store.update { s -> s.copy(parent = block(s.parent!!)) }
+        store.update { s -> s.copy(catalog = block(s.catalog!!)) }
         discardSpentLabels()
         return consent
     }
@@ -301,7 +301,7 @@ class Repo(context: Context) {
         val id = Ids.newId()
         val now = System.currentTimeMillis()
         return changeSales {
-            val sold = Sales.register(it, number, id, account ?: it.self.id, price, cost, now)
+            val sold = Sales.register(it, number, id, account ?: it.mainAccount.id, price, cost, now)
             when {
                 paid -> Sales.complete(sold, id, now)
                 freeNumber -> Sales.release(sold, id)
@@ -312,22 +312,22 @@ class Repo(context: Context) {
 
     /** When the PC last read the sales: shown even when it cannot be reached. */
     suspend fun salesRead(at: Long) {
-        store.update { s -> s.parent?.let { s.copy(parent = it.copy(salesReadAt = at)) } ?: s }
+        store.update { s -> s.catalog?.let { s.copy(catalog = it.copy(salesReadAt = at)) } ?: s }
     }
 
     suspend fun ensureSaleIds() {
-        store.update { s -> s.parent?.let { s.copy(parent = Sales.ensureIds(it)) } ?: s }
+        store.update { s -> s.catalog?.let { s.copy(catalog = Sales.ensureIds(it)) } ?: s }
     }
 
     /** The PC dropped the job [ref] of an article that is gone. */
     suspend fun heard(ref: String) {
-        store.update { s -> s.parent?.let { s.copy(parent = Sales.heard(it, ref)) } ?: s }
+        store.update { s -> s.catalog?.let { s.copy(catalog = Sales.heard(it, ref)) } ?: s }
     }
 
-    private suspend fun cover(p: ParentState, number: Int): Uri? = withContext(Dispatchers.IO) {
-        runCatching { gallery.albumPhotos(base, sku(p.self, number, p.digits)).firstOrNull() }.getOrNull()
-            ?: p.children.firstNotNullOfOrNull { d -> outbox.files(d.id, number).firstOrNull() }?.let { Uri.fromFile(it) }
-            ?: previews.files(number).firstOrNull()?.let { Uri.fromFile(it) }
+    private suspend fun cover(p: CatalogState, number: Int): Uri? = withContext(Dispatchers.IO) {
+        runCatching { gallery.albumPhotos(base, sku(p.mainAccount, number, p.digits)).firstOrNull() }.getOrNull()
+            ?: p.otherAccounts.firstNotNullOfOrNull { d -> accountPhotos.files(d.id, number).firstOrNull() }?.let { Uri.fromFile(it) }
+            ?: legacyPreviews.files(number).firstOrNull()?.let { Uri.fromFile(it) }
     }
 
     /**
@@ -335,68 +335,68 @@ class Repo(context: Context) {
      * sale) and the article keeps everything else. See [Catalog.relist].
      */
     suspend fun relist(number: Int, keepPhotos: Boolean = false): List<Uri> {
-        if (Catalog.article(parent(), number)?.inStock != true) throw CatalogException("Artículo no disponible")
+        if (Catalog.article(catalog(), number)?.inStock != true) throw CatalogException("Artículo no disponible")
         // keepPhotos: the new photos were already taken (without pressing «Resubir»): they stay, only the state changes.
-        val consent = if (keepPhotos) emptyList() else deleteLocalForParent(number)
-        store.update { s -> s.copy(parent = Catalog.relist(s.parent!!, number)) }
+        val consent = if (keepPhotos) emptyList() else deleteLocalPhotos(number)
+        store.update { s -> s.copy(catalog = Catalog.relist(s.catalog!!, number)) }
         return consent
     }
 
     /** The AI wrote a title and hashtags that differ from the old listing's. */
     suspend fun finishRelist(number: Int) {
-        store.update { s -> s.copy(parent = Catalog.finishRelist(s.parent!!, number)) }
+        store.update { s -> s.copy(catalog = Catalog.finishRelist(s.catalog!!, number)) }
     }
 
     /** Removed by mistake: delete it everywhere without recording a sale. */
     suspend fun deleteArticle(number: Int): List<Uri> = changeSales { Catalog.delete(it, number) }
 
     suspend fun ensureDistinctStyles() {
-        store.update { s -> s.parent?.let { s.copy(parent = Catalog.ensureDistinctStyles(it)) } ?: s }
+        store.update { s -> s.catalog?.let { s.copy(catalog = Catalog.ensureDistinctStyles(it)) } ?: s }
     }
 
-    private suspend fun deleteLocalForParent(number: Int): List<Uri> = withContext(Dispatchers.IO) {
-        val p = parent()
-        outbox.deleteNumber(number)
-        previews.deleteNumber(number)
-        gallery.deleteAlbum(base, sku(p.self, number, p.digits))
+    private suspend fun deleteLocalPhotos(number: Int): List<Uri> = withContext(Dispatchers.IO) {
+        val p = catalog()
+        accountPhotos.deleteNumber(number)
+        legacyPreviews.deleteNumber(number)
+        gallery.deleteAlbum(base, sku(p.mainAccount, number, p.digits))
     }
 
     // ---------- accounts ----------
 
     /** Another Vinted account (the one a second PC publishes in). */
-    suspend fun addChild(device: Device): ParentState {
+    suspend fun addAccount(vintedAccount: VintedAccount): CatalogState {
         val s = store.update { s ->
-            val p = s.parent!!
-            s.copy(parent = Catalog.addChild(p, device.copy(style = Catalog.nextStyle(p))))
+            val p = s.catalog!!
+            s.copy(catalog = Catalog.addAccount(p, vintedAccount.copy(style = Catalog.nextStyle(p))))
         }
-        return s.parent!!
+        return s.catalog!!
     }
 
-    suspend fun removeChild(id: String) {
-        withContext(Dispatchers.IO) { outbox.deleteDevice(id) }
-        store.update { s -> s.copy(parent = Catalog.removeChild(s.parent!!, id)) }
+    suspend fun removeAccount(id: String) {
+        withContext(Dispatchers.IO) { accountPhotos.deleteAccount(id) }
+        store.update { s -> s.copy(catalog = Catalog.removeAccount(s.catalog!!, id)) }
     }
 
     // ---------- settings ----------
 
     /** Returns how many photos could not be moved (not created by this app). */
-    suspend fun renameDevice(id: String, name: String, prefix: String): Int {
-        val p = parent()
-        val old = Catalog.device(p, id) ?: return 0
-        val next = Catalog.renameDevice(p, id, name, prefix)
+    suspend fun renameAccount(id: String, name: String, prefix: String): Int {
+        val p = catalog()
+        val old = Catalog.findAccount(p, id) ?: return 0
+        val next = Catalog.renameAccount(p, id, name, prefix)
         var failed = 0
-        if (id == p.self.id && old.prefix != next.self.prefix) {
-            failed = moveOwnAlbums(p) { n -> sku(next.self, n, p.digits) }
+        if (id == p.mainAccount.id && old.prefix != next.mainAccount.prefix) {
+            failed = moveOwnAlbums(p) { n -> sku(next.mainAccount, n, p.digits) }
         }
-        store.update { it.copy(parent = next) }
+        store.update { it.copy(catalog = next) }
         return failed
     }
 
     suspend fun setDigits(digits: Int): Int {
-        val p = parent()
+        val p = catalog()
         val next = Catalog.setDigits(p, digits)
-        val failed = if (next.digits != p.digits) moveOwnAlbums(p) { n -> sku(p.self, n, next.digits) } else 0
-        store.update { it.copy(parent = next) }
+        val failed = if (next.digits != p.digits) moveOwnAlbums(p) { n -> sku(p.mainAccount, n, next.digits) } else 0
+        store.update { it.copy(catalog = next) }
         return failed
     }
 
@@ -406,7 +406,7 @@ class Repo(context: Context) {
      */
     suspend fun adoptFolder(folder: String): Int {
         val s = state
-        val (prefix, digits) = s.parent?.let { it.self.prefix to it.digits } ?: (null to 0)
+        val (prefix, digits) = s.catalog?.let { it.mainAccount.prefix to it.digits } ?: (null to 0)
         var failed = 0
         if (prefix != null) {
             withContext(Dispatchers.IO) {
@@ -425,14 +425,14 @@ class Repo(context: Context) {
     /** Fills the fixed "0 Subir" folder with this phone's album of [number]. */
     suspend fun stage(number: Int): Int {
         val s = state
-        val album = s.parent?.let { sku(it.self, number, it.digits) }
+        val album = s.catalog?.let { sku(it.mainAccount, number, it.digits) }
             ?: throw CatalogException("Este móvil no está configurado")
         val count = withContext(Dispatchers.IO) { gallery.stage(base, album) }
         if (count == 0) throw CatalogException("$album no tiene fotos")
         return count
     }
 
-    private suspend fun moveOwnAlbums(p: ParentState, newName: (Int) -> String): Int = withContext(Dispatchers.IO) {
-        p.articles.sumOf { a -> gallery.move(base, sku(p.self, a.number, p.digits), base, newName(a.number)) }
+    private suspend fun moveOwnAlbums(p: CatalogState, newName: (Int) -> String): Int = withContext(Dispatchers.IO) {
+        p.articles.sumOf { a -> gallery.move(base, sku(p.mainAccount, a.number, p.digits), base, newName(a.number)) }
     }
 }

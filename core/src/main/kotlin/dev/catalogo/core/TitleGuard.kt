@@ -32,7 +32,7 @@ object TitleGuard {
             listing.keywords.mapNotNull(Garments::keyword).forEach { k -> k.en.forEach { addAll(tokens(it)) } }
         }
         // What the seller wrote («es lana») also backs a fabric word.
-        val backed = (materials + Reader.materials(listOf(listing.aiNotes))).distinct()
+        val backed = (materials + TagReader.materials(listOf(listing.aiNotes))).distinct()
         return Facts(typeId, backed, colors, tokens(listing.brand) + tokens(listing.model), chosen)
     }
 

@@ -9,21 +9,21 @@ import kotlin.test.assertTrue
 
 class RelistTest {
 
-    private val samsung = Device("p", "Samsung", "SH", account = "shiorawear")
-    private val poco = Device("c1", "Poco", "SA", account = "otra")
+    private val samsung = VintedAccount("p", "Samsung", "SH", vintedName = "shiorawear")
+    private val poco = VintedAccount("c1", "Poco", "SA", vintedName = "otra")
     private val levis = Listing(type = "jeans", brand = "Levi's", model = "501", size = "W32 L34", gender = Gender.MEN, notes = "Tiene un roto")
     private val oldTags = listOf("levis", "levis501", "jeans", "vaqueros", "straightjeans", "vaquerosrectos", "90s", "vintage", "levisvintage", "denim")
 
     /** A published article: AI data, price, cost, draft on the PC, uploaded and seen in the wardrobe. */
-    private fun published(): Pair<ParentState, Int> {
-        val (s, n) = Catalog.create(ParentState(self = samsung, children = listOf(poco)), 1_700_000_000_000)
+    private fun published(): Pair<CatalogState, Int> {
+        val (s, n) = Catalog.create(CatalogState(mainAccount = samsung, otherAccounts = listOf(poco)), 1_700_000_000_000)
         val a = Catalog.article(s, n)!!.copy(
             listing = levis, price = 1500, cost = 400, accounts = setOf("p", "c1"),
             ai = AiResult(Ai.basis(levis), "Hombre › Ropa › Vaqueros › Vaqueros rectos", listOf("Azul"),
                 mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Blue", "c1" to "Vintage 90s Levis 501 Straight Leg Jeans Blue"),
                 hashtags = oldTags),
             photos = listOf("content://foto/1"),
-            desk = Desk("SH0001-x", "publicado", url = "https://vinted/old"),
+            pcTask = PcTask("SH0001-x", "publicado", url = "https://vinted/old"),
             uploaded = setOf("p", "c1"),
             vinted = mapOf("p" to VintedItem("9", status = "active"), "c1" to VintedItem("10")),
         )
@@ -39,7 +39,7 @@ class RelistTest {
         assertEquals(400L, a.cost)
         assertEquals(setOf("p", "c1"), a.accounts)
         assertNull(a.ai, "a new title and hashtags have to be written")
-        assertNull(a.desk)
+        assertNull(a.pcTask)
         assertTrue(a.photos.isEmpty())
         assertEquals(setOf("c1"), a.uploaded, "only this phone's account goes back to «por subir»")
         assertEquals(setOf("c1"), a.vinted.keys)
@@ -62,8 +62,8 @@ class RelistTest {
         val s = s0.copy(articles = s0.articles.map { it.copy(ai = null) })
         val a = Catalog.article(Catalog.relist(s, n), n)!!
         assertEquals(Relist(), a.relist)
-        assertEquals(emptyList(), Relisting.repeated(a.relist!!, emptyMap(), emptyList()))
-        assertTrue(Draft.build(s, a, samsung).problems.isNotEmpty())
+        assertEquals(emptyList(), RelistRules.repeated(a.relist!!, emptyMap(), emptyList()))
+        assertTrue(PcPayload.build(s, a, samsung).problems.isNotEmpty())
     }
 
     @Test
@@ -80,8 +80,8 @@ class RelistTest {
         val (s, n) = published()
         val before = Catalog.article(s, n)!!
         val after = Catalog.article(Catalog.relist(s, n), n)!!
-        assertNotEquals(Draft.ref(samsung, before, 4), Draft.ref(samsung, after, 4))
-        assertEquals("SH" + n.toString().padStart(4, '0') + "-" + before.createdAt.toString(36), Draft.ref(samsung, before, 4), "first listings keep their code")
+        assertNotEquals(PcPayload.ref(samsung, before, 4), PcPayload.ref(samsung, after, 4))
+        assertEquals("SH" + n.toString().padStart(4, '0') + "-" + before.createdAt.toString(36), PcPayload.ref(samsung, before, 4), "first listings keep their code")
     }
 
     @Test
@@ -90,10 +90,10 @@ class RelistTest {
         val a = Catalog.article(Catalog.relist(s, n), n)!!
         // even with AI data in place (the same as before), the draft is blocked until the re-listing is settled
         val withAi = a.copy(ai = AiResult(Ai.basis(levis), "Hombre › Ropa › Vaqueros › Vaqueros rectos", listOf("Azul"), mapOf("p" to "x Jeans"), hashtags = oldTags))
-        assertTrue(Draft.build(s, withAi, samsung).problems.any { "resubir" in it.lowercase() })
+        assertTrue(PcPayload.build(s, withAi, samsung).problems.any { "resubir" in it.lowercase() })
         val done = Catalog.article(Catalog.finishRelist(s.copy(articles = s.articles.map { if (it.number == n) withAi else it }), n), n)!!
         assertNull(done.relist)
-        assertFalse(Draft.build(s, done, samsung).problems.any { "resubir" in it.lowercase() })
+        assertFalse(PcPayload.build(s, done, samsung).problems.any { "resubir" in it.lowercase() })
     }
 
     @Test
@@ -108,28 +108,28 @@ class RelistTest {
     fun `the same title or hashtags are refused, other words are accepted`() {
         val avoid = Relist(mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Blue"), oldTags)
         val sameTags = oldTags
-        assertEquals(listOf("título", "hashtags"), Relisting.repeated(avoid, mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Blue"), sameTags))
+        assertEquals(listOf("título", "hashtags"), RelistRules.repeated(avoid, mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Blue"), sameTags))
         // only reordered: the same words
-        assertTrue("título" in Relisting.repeated(avoid, mapOf("p" to "Vintage Levi's 501 Straight Fit Jeans Blue"), sameTags))
+        assertTrue("título" in RelistRules.repeated(avoid, mapOf("p" to "Vintage Levi's 501 Straight Fit Jeans Blue"), sameTags))
         // a different case or accents is not a change either
-        assertTrue("título" in Relisting.repeated(avoid, mapOf("p" to "LEVI'S 501 JEANS VINTAGE STRAIGHT FIT BLUE"), sameTags))
+        assertTrue("título" in RelistRules.repeated(avoid, mapOf("p" to "LEVI'S 501 JEANS VINTAGE STRAIGHT FIT BLUE"), sameTags))
         // one word changed is still too little; two new words are enough
-        assertTrue("título" in Relisting.repeated(avoid, mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Navy"), sameTags))
+        assertTrue("título" in RelistRules.repeated(avoid, mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Navy"), sameTags))
         val newTitle = "Levi's 501 Denim Pants Vintage 90s Straight Fit Blue"
-        assertFalse("título" in Relisting.repeated(avoid, mapOf("p" to newTitle), sameTags))
+        assertFalse("título" in RelistRules.repeated(avoid, mapOf("p" to newTitle), sameTags))
         // hashtags: two new ones are not enough, three are
         val two = oldTags.dropLast(2) + listOf("denimjeans", "levis90s")
         val three = oldTags.dropLast(3) + listOf("denimjeans", "levis90s", "pantalonesvaqueros")
-        assertTrue("hashtags" in Relisting.repeated(avoid, mapOf("p" to newTitle), two))
-        assertEquals(emptyList(), Relisting.repeated(avoid, mapOf("p" to newTitle), three))
-        assertEquals(emptyList(), Relisting.repeated(avoid, mapOf("p" to newTitle), three.map { it.uppercase() }.filter { it.lowercase() !in oldTags } + oldTags.take(7)))
+        assertTrue("hashtags" in RelistRules.repeated(avoid, mapOf("p" to newTitle), two))
+        assertEquals(emptyList(), RelistRules.repeated(avoid, mapOf("p" to newTitle), three))
+        assertEquals(emptyList(), RelistRules.repeated(avoid, mapOf("p" to newTitle), three.map { it.uppercase() }.filter { it.lowercase() !in oldTags } + oldTags.take(7)))
     }
 
     @Test
     fun `an account the AI wrote no new title for counts as repeating`() {
         val avoid = Relist(mapOf("p" to "A B C D", "c1" to "E F G H"), emptyList())
-        assertEquals(listOf("título"), Relisting.repeated(avoid, mapOf("p" to "A B X Y"), listOf("x")))
-        assertEquals(emptyList(), Relisting.repeated(avoid, mapOf("p" to "A B X Y", "c1" to "E F Z W"), emptyList()))
+        assertEquals(listOf("título"), RelistRules.repeated(avoid, mapOf("p" to "A B X Y"), listOf("x")))
+        assertEquals(emptyList(), RelistRules.repeated(avoid, mapOf("p" to "A B X Y", "c1" to "E F Z W"), emptyList()))
     }
 
     @Test
@@ -156,16 +156,16 @@ class RelistTest {
             titles = mapOf("p" to "Levi's 511 Slim Fit Jeans Vintage Y2K Classic Black", "c1" to "Vintage Y2K Levis 511 Slim Leg Denim Trousers Black"),
             findings = emptyList(), hashtags = oldTags + "pantalonesnegros",
         )
-        assertEquals(listOf("p"), RelistFix.stale(avoid, current.titles))
-        val edit = RelistFix.parse(
+        assertEquals(listOf("p"), RelistRepair.stale(avoid, current.titles))
+        val edit = RelistRepair.parse(
             """{"titulos":{"SH":"Levi's 511 Slim Leg Denim Original Retro Y2K Washed Black","SA":"Igual"},"hashtags":["pantalonesslim","levis511slim","blackdenim","jeans"]}""", accounts)
-        val fixed = RelistFix.merge(avoid, current, edit, accounts)
-        assertTrue(Relisting.titleChanged(avoid.titles["p"]!!, fixed.titles["p"]!!))
+        val fixed = RelistRepair.merge(avoid, current, edit, accounts)
+        assertTrue(RelistRules.titleChanged(avoid.titles["p"]!!, fixed.titles["p"]!!))
         assertEquals(current.titles["c1"], fixed.titles["c1"])
-        assertTrue(Relisting.hashtagsChanged(avoid.hashtags, fixed.hashtags), fixed.hashtags.toString())
-        assertTrue(fixed.hashtags.size <= RelistFix.MAX_TAGS)
-        assertEquals(emptyList(), Relisting.repeated(avoid, fixed.titles, fixed.hashtags))
-        val untouched = RelistFix.merge(avoid, current, RelistFix.parse("no es json", accounts), accounts)
+        assertTrue(RelistRules.hashtagsChanged(avoid.hashtags, fixed.hashtags), fixed.hashtags.toString())
+        assertTrue(fixed.hashtags.size <= RelistRepair.MAX_TAGS)
+        assertEquals(emptyList(), RelistRules.repeated(avoid, fixed.titles, fixed.hashtags))
+        val untouched = RelistRepair.merge(avoid, current, RelistRepair.parse("no es json", accounts), accounts)
         assertEquals(current.titles, untouched.titles)
         assertEquals(current.hashtags, untouched.hashtags)
     }

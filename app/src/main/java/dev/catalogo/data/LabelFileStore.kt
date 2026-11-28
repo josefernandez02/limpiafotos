@@ -8,7 +8,7 @@ import android.provider.MediaStore
 import dev.catalogo.core.CatalogException
 
 /** The label PDFs, kept in the phone's Descargas where any app (and the user) can find them. */
-class LabelFiles(private val resolver: ContentResolver) {
+class LabelFileStore(private val resolver: ContentResolver) {
 
     /** Saves [bytes] as [name] (the system renames it if there is one already) and returns its address. */
     fun save(name: String, bytes: ByteArray): Uri {

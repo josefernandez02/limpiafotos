@@ -11,29 +11,29 @@ import kotlinx.serialization.json.Json
 
 private const val DAY = 86_400_000L
 
-private val samsung = Device("p", "Samsung", "SH", account = "tienda", vintedId = "111")
-private val poco = Device("c1", "Poco", "SA", style = 1, vintedId = "222")
+private val samsung = VintedAccount("p", "Samsung", "SH", vintedName = "tienda", vintedId = "111")
+private val poco = VintedAccount("c1", "Poco", "SA", style = 1, vintedId = "222")
 
 /** Three articles (0, 1, 2) created on day 10; 0 is published and on the PC. */
-private fun shop(): ParentState {
-    var s = ParentState(self = samsung, children = listOf(poco))
+private fun shop(): CatalogState {
+    var s = CatalogState(mainAccount = samsung, otherAccounts = listOf(poco))
     s = Ledger.addLot(s, "L1", "Lote", 3_000, 3, 0)
     repeat(3) {
         val (next, n) = Catalog.create(s, 10 * DAY)
         s = Catalog.updateArticle(next, n, Listing(type = "jeans", brand = "Levi's"), "L1", null)
     }
     s = Catalog.setUploaded(s, 0, "p", true)
-    return Catalog.setDesk(s, 0, Desk(ref = "SH0000-x", status = "publicado", url = "https://www.vinted.es/items/900"))
+    return Catalog.setPcTask(s, 0, PcTask(ref = "SH0000-x", status = "publicado", url = "https://www.vinted.es/items/900"))
 }
 
-private fun ParentState.article(n: Int) = Catalog.article(this, n)
-private fun ParentState.only() = sales.single()
+private fun CatalogState.article(n: Int) = Catalog.article(this, n)
+private fun CatalogState.only() = sales.single()
 
 class SaleStatesTest {
     @Test
     fun `deleting an article the PC has tells the PC to leave it`() {
         for (status in listOf("publicado", "borrador", "pendiente", "enviando", "error")) {
-            val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = status))
+            val s = Catalog.setPcTask(shop(), 0, PcTask(ref = "SH0000-x", status = status))
             val job = Catalog.delete(s, 0).retired.single()
             assertEquals("SH0000-x" to "fuera", job.ref to job.pending, status)
         }
@@ -42,8 +42,8 @@ class SaleStatesTest {
     @Test
     fun `deleting an article that never left the phone says nothing to the PC`() {
         assertTrue(Catalog.delete(shop(), 1).retired.isEmpty())
-        for (status in listOf(Desk.PREPARING, Desk.REVIEW)) {
-            val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = status))
+        for (status in listOf(PcTask.PREPARING, PcTask.REVIEW)) {
+            val s = Catalog.setPcTask(shop(), 0, PcTask(ref = "SH0000-x", status = status))
             assertTrue(Catalog.delete(s, 0).retired.isEmpty(), status)
         }
     }
@@ -59,7 +59,7 @@ class SaleStatesTest {
         assertTrue(a.held)
         assertFalse(a.inStock)
         assertEquals(3, Catalog.nextFree(s), "the number is not given to anyone else")
-        assertEquals(Stage.SOLD, Catalog.stage(s, a, s.self))
+        assertEquals(Stage.SOLD, Catalog.stage(s, a, s.mainAccount))
         assertEquals(a, Sales.article(s, sale))
         assertFailsWith<CatalogException> { Sales.register(s, 0, "m2", "p", 100, null, 21 * DAY) }
     }
@@ -108,33 +108,33 @@ class SaleStatesTest {
     @Test
     fun `the PC leaves a held article alone and takes it back when cancelled`() {
         val held = Sales.register(shop(), 0, "m1", "p", 2_500, null, 20 * DAY)
-        assertEquals("fuera", held.article(0)!!.desk!!.pending)
-        assertEquals("publicado", held.article(0)!!.desk!!.status, "what it was is remembered")
+        assertEquals("fuera", held.article(0)!!.pcTask!!.pending)
+        assertEquals("publicado", held.article(0)!!.pcTask!!.status, "what it was is remembered")
         val back = Sales.cancel(held, "m1", 21 * DAY)
-        assertEquals("publicado", back.article(0)!!.desk!!.pending)
+        assertEquals("publicado", back.article(0)!!.pcTask!!.pending)
     }
 
     @Test
     fun `a job the PC had not finished goes back to por subir`() {
-        var s = Catalog.setDesk(shop(), 1, Desk(ref = "SH0001-x", status = "revisar"))
+        var s = Catalog.setPcTask(shop(), 1, PcTask(ref = "SH0001-x", status = "revisar"))
         s = Sales.register(s, 1, "m1", "p", 900, null, 20 * DAY)
-        assertNull(Sales.cancel(s, "m1", 21 * DAY).article(1)!!.desk)
-        var local = Catalog.setDesk(shop(), 2, Desk(ref = "SH0002-x", status = Desk.PREPARING))
+        assertNull(Sales.cancel(s, "m1", 21 * DAY).article(1)!!.pcTask)
+        var local = Catalog.setPcTask(shop(), 2, PcTask(ref = "SH0002-x", status = PcTask.PREPARING))
         local = Sales.register(local, 2, "m2", "p", 900, null, 20 * DAY)
-        assertEquals("", local.article(2)!!.desk!!.pending, "the PC never heard of it")
-        assertEquals(Desk.PREPARING, Sales.cancel(local, "m2", 21 * DAY).article(2)!!.desk!!.status)
+        assertEquals("", local.article(2)!!.pcTask!!.pending, "the PC never heard of it")
+        assertEquals(PcTask.PREPARING, Sales.cancel(local, "m2", 21 * DAY).article(2)!!.pcTask!!.status)
     }
 
     @Test
     fun `an article the PC dropped is a new one for it when it comes back`() {
-        for (status in listOf("pendiente", "revisar", Desk.SENDING)) {
-            var s = Catalog.setDesk(shop(), 1, Desk(ref = "x", status = status))
-            val old = Draft.ref(s.self, s.article(1)!!, s.digits)
+        for (status in listOf("pendiente", "revisar", PcTask.SENDING)) {
+            var s = Catalog.setPcTask(shop(), 1, PcTask(ref = "x", status = status))
+            val old = PcPayload.ref(s.mainAccount, s.article(1)!!, s.digits)
             s = Sales.register(s, 1, "m1", "p", 900, null, 20 * DAY)
-            assertEquals("fuera", s.article(1)!!.desk!!.pending, status)
+            assertEquals("fuera", s.article(1)!!.pcTask!!.pending, status)
             s = Sales.cancel(s, "m1", 21 * DAY)
-            assertNull(s.article(1)!!.desk, status)
-            assertTrue(Draft.ref(s.self, s.article(1)!!, s.digits) != old, "the PC would ignore the old ref: $status")
+            assertNull(s.article(1)!!.pcTask, status)
+            assertTrue(PcPayload.ref(s.mainAccount, s.article(1)!!, s.digits) != old, "the PC would ignore the old ref: $status")
         }
     }
 
@@ -220,7 +220,7 @@ class SaleStatesTest {
         val old = """{"self":{"id":"p","name":"Samsung","prefix":"SH"},
             "sales":[{"number":3,"deviceId":"p","price":1000,"cost":null,"lotId":null,"soldAt":5},
                      {"number":3,"deviceId":"p","price":1000,"cost":null,"lotId":null,"soldAt":5}]}"""
-        val s = Sales.ensureIds(Json { ignoreUnknownKeys = true }.decodeFromString(ParentState.serializer(), old))
+        val s = Sales.ensureIds(Json { ignoreUnknownKeys = true }.decodeFromString(CatalogState.serializer(), old))
         assertTrue(s.sales.all { it.status == SaleStatus.COMPLETED })
         assertEquals(2, s.sales.map { it.id }.filter { it.isNotBlank() }.distinct().size)
         assertEquals(s, Sales.ensureIds(s))
@@ -237,7 +237,7 @@ class VintedSalesTest {
 
     private fun one(code: String, item: String = "900") = deal(item to "Vaqueros azules\n#levis #denim #$code")
 
-    private fun ParentState.sync(o: VintedSales.Order, d: VintedSales.Deal? = null, now: Long = 40 * DAY) =
+    private fun CatalogState.sync(o: VintedSales.Order, d: VintedSales.Deal? = null, now: Long = 40 * DAY) =
         VintedSales.apply(this, "p", o, d, now)
 
     @Test
@@ -299,16 +299,16 @@ class VintedSalesTest {
     }
 
     /** Article 0 given as sold and paid by hand: it is gone. */
-    private fun paidByHand(price: Long = 1_620, base: ParentState = shop()) =
+    private fun paidByHand(price: Long = 1_620, base: CatalogState = shop()) =
         Sales.complete(Sales.register(base, 0, "m1", "p", price, null, 28 * DAY), "m1", 28 * DAY)
 
     /** The same, with the listing of article 0 known to the app. */
-    private fun listed(item: String = "900") = Catalog.setDesk(shop(), 0, Desk(ref = "r", status = "publicado", itemId = item))
+    private fun listed(item: String = "900") = Catalog.setPcTask(shop(), 0, PcTask(ref = "r", status = "publicado", itemId = item))
 
     /** What an earlier version left: a hand sale already joined to the order "1". */
     private fun joinedBefore() = paidByHand().let { it.copy(sales = listOf(it.only().copy(order = "1"))) }
 
-    private fun ParentState.hand() = Sales.sale(this, "m1")!!
+    private fun CatalogState.hand() = Sales.sale(this, "m1")!!
 
     @Test
     fun `sales an earlier version joined and left as paid go back to waiting`() {
@@ -397,7 +397,7 @@ class VintedSalesTest {
     @Test
     fun `two orders with the same code are told apart by their listing`() {
         // Number 0 was sold as listing 500, reused, and the new garment sold as listing 900.
-        val base = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-y", status = "jugado", itemId = "900"))
+        val base = Catalog.setPcTask(shop(), 0, PcTask(ref = "SH0000-y", status = "jugado", itemId = "900"))
         val orders = listOf(
             order("1", date = 9 * DAY) to deal("500" to "#SH0000", soldAt = 9 * DAY + DAY / 2),
             order("2", date = 20 * DAY) to deal("900" to "#SH0000", soldAt = 20 * DAY),
@@ -411,7 +411,7 @@ class VintedSalesTest {
     fun `an order kept apart takes its article once the listing is known`() {
         var s = shop().sync(order("1"), deal("901" to null)).first
         assertEquals(-1, s.only().number)
-        s = Catalog.setDesk(s, 1, Desk(ref = "r", status = "publicado", itemId = "901"))
+        s = Catalog.setPcTask(s, 1, PcTask(ref = "r", status = "publicado", itemId = "901"))
         s = s.sync(order("1")).first
         assertEquals(1, s.only().number)
         assertTrue(s.article(1)!!.held)
@@ -420,7 +420,7 @@ class VintedSalesTest {
     @Test
     fun `a number reused right after a sale is not taken by the older order`() {
         // The garment that has number 0 now is another listing, made hours after the old one was sold.
-        val s = Catalog.setDesk(shop(), 0, Desk(ref = "SH0000-x", status = "publicado", itemId = "900"))
+        val s = Catalog.setPcTask(shop(), 0, PcTask(ref = "SH0000-x", status = "publicado", itemId = "900"))
         val (after, _) = s.sync(order("1"), deal("555" to "#SH0000", soldAt = 10 * DAY - DAY / 2))
         assertNull(after.only().listedAt)
         assertTrue(after.article(0)!!.inStock)
@@ -454,7 +454,7 @@ class VintedSalesTest {
         assertEquals("SH0000", sale.code)
         assertEquals(1_620, sale.price)
         assertEquals(1_000, sale.cost)
-        assertEquals("p", sale.deviceId)
+        assertEquals("p", sale.accountId)
         assertEquals("Levi's", sale.brand)
         assertEquals(29 * DAY, sale.soldAt)
         assertTrue(s.article(0)!!.held)
@@ -533,7 +533,7 @@ class VintedSalesTest {
     @Test
     fun `without a code the listing id already linked is enough`() {
         var base = shop()
-        base = Catalog.setDesk(base, 1, Desk(ref = "r", status = "publicado", itemId = "901"))
+        base = Catalog.setPcTask(base, 1, PcTask(ref = "r", status = "publicado", itemId = "901"))
         val (s, _) = base.sync(order("1"), deal("901" to null))
         assertEquals(1, s.only().number)
         assertTrue(s.article(1)!!.held)
@@ -628,7 +628,7 @@ class VintedSalesTest {
     @Test
     fun `the account is the seller of the order`() {
         val (s, _) = shop().sync(order("1"), deal("999" to null, seller = "222"))
-        assertEquals("c1", s.only().deviceId)
+        assertEquals("c1", s.only().accountId)
     }
 
     @Test

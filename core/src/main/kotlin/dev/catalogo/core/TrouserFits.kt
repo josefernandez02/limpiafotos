@@ -6,7 +6,7 @@ package dev.catalogo.core
  * a fact and wins. The category then follows the cut and the gender in code, so
  * a straight pair never ends up in «Vaqueros ajustados».
  */
-object Fits {
+object TrouserFits {
     const val SKINNY = "skinny"
     const val SLIM = "slim"
     const val TAPERED = "tapered"
@@ -82,13 +82,13 @@ object Fits {
                 else -> null
             }
         } ?: return null
-        return "${gender.label} › Ropa › Vaqueros › $leaf".takeIf { it in Vinted.categories }
+        return "${gender.label} › Ropa › Vaqueros › $leaf".takeIf { it in VintedTaxonomy.categories }
     }
 
     /** Same category under the other gender, when Vinted has it («Hombre › … › X» → «Mujer › … › X»). */
     fun forGender(category: String, gender: Gender): String? {
         if (category.startsWith(gender.label + " ")) return category
         val rest = category.substringAfter(" › ", "")
-        return "${gender.label} › $rest".takeIf { rest.isNotEmpty() && it in Vinted.categories }
+        return "${gender.label} › $rest".takeIf { rest.isNotEmpty() && it in VintedTaxonomy.categories }
     }
 }

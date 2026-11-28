@@ -23,7 +23,7 @@ import kotlin.math.roundToInt
  */
 data class Framing(val scale: Float, val dx: Float, val dy: Float, val rotation: Float = 0f)
 
-object Crop {
+object PhotoCropper {
     const val RATIO = 3f / 4f // width / height, as Vinted shows the grid
     const val OUT_W = 1536
     private const val OUT_H = 2048

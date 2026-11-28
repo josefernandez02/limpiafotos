@@ -9,7 +9,7 @@ enum class Gender(val label: String) {
 }
 
 /** Closed lists of Vinted Spain: where a garment is filed and its colours. */
-object Vinted {
+object VintedTaxonomy {
 
     /** Colours exactly as the vinted.es upload form shows them (checked on 2026-11-12). */
     val colors: List<String> = listOf(

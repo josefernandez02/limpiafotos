@@ -7,73 +7,73 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-private val main = Device("p", "Samsung", "SH", account = "tienda", vintedId = "111")
-private val other = Device("c1", "Poco", "SA", style = 1, vintedId = "222")
+private val main = VintedAccount("p", "Samsung", "SH", vintedName = "tienda", vintedId = "111")
+private val other = VintedAccount("c1", "Poco", "SA", style = 1, vintedId = "222")
 
 private fun sale(
     order: String, detail: String = "Pago realizado correctamente", status: SaleStatus = SaleStatus.PENDING,
-    number: Int = 6, code: String = "", soldAt: Long = 1_000, device: String = "p", id: String = "v$order",
+    number: Int = 6, code: String = "", soldAt: Long = 1_000, vintedAccount: String = "p", id: String = "v$order",
     conflict: Boolean = false, title: String = "Pantalón",
 ) = Sale(
-    number, device, 1_900, null, null, soldAt, id = id, status = status, order = order, detail = detail, code = code,
+    number, vintedAccount, 1_900, null, null, soldAt, id = id, status = status, order = order, detail = detail, code = code,
     conflict = conflict, title = title,
 )
 
-private fun shop(vararg sales: Sale) = ParentState(self = main, children = listOf(other), sales = sales.toList())
+private fun shop(vararg sales: Sale) = CatalogState(mainAccount = main, otherAccounts = listOf(other), sales = sales.toList())
 
 private fun reply(
     working: Boolean = false, lot: Long = 7, done: String = "null", waiting: String = "", entries: String = "",
-) = Labels.parse(
+) = ShippingLabels.parse(
     """{"modo":"${if (working) "trabajando" else "parado"}","esperando":"$waiting","lote":$lot,"pedidos":[$entries],"hecho":$done}""",
 )
 
 private fun done(lot: Long = 7, file: String = "etiquetas-1.pdf", labels: Int = 2, warnings: String = "") =
     """{"lote":$lot,"ts":5,"archivo":"$file","paginas":$labels,"etiquetas":$labels,"avisos":[$warnings]}"""
 
-class LabelsTest {
+class ShippingLabelsTest {
     @Test
     fun `only the sales still to be sent can print a label`() {
-        assertTrue(Labels.canPrint(sale("a")))
-        assertTrue(Labels.canPrint(sale("a", detail = "")))
-        assertTrue(Labels.canPrint(sale("a", detail = "Se ha enviado la etiqueta de envío")))
+        assertTrue(ShippingLabels.canPrint(sale("a")))
+        assertTrue(ShippingLabels.canPrint(sale("a", detail = "")))
+        assertTrue(ShippingLabels.canPrint(sale("a", detail = "Se ha enviado la etiqueta de envío")))
         for (gone in listOf(
             "El pedido se ha enviado y está de camino", "El pedido ya se puede recoger en la oficina postal",
             "Pedido entregado", "El comprador ha recibido el pedido", "Devolución en curso",
-        )) assertEquals(false, Labels.canPrint(sale("a", detail = gone)), gone)
-        assertEquals(false, Labels.canPrint(sale("a", status = SaleStatus.COMPLETED)))
-        assertEquals(false, Labels.canPrint(sale("a", status = SaleStatus.CANCELLED)))
-        assertEquals(false, Labels.canPrint(sale("")))
-        assertEquals(false, Labels.canPrint(sale("a", conflict = true)))
+        )) assertEquals(false, ShippingLabels.canPrint(sale("a", detail = gone)), gone)
+        assertEquals(false, ShippingLabels.canPrint(sale("a", status = SaleStatus.COMPLETED)))
+        assertEquals(false, ShippingLabels.canPrint(sale("a", status = SaleStatus.CANCELLED)))
+        assertEquals(false, ShippingLabels.canPrint(sale("")))
+        assertEquals(false, ShippingLabels.canPrint(sale("a", conflict = true)))
     }
 
     @Test
     fun `asks for the oldest first with the code of each article`() {
-        val s = shop(sale("b", soldAt = 2_000, number = 12, device = "c1"), sale("a", soldAt = 1_000, code = "SH0044"))
+        val s = shop(sale("b", soldAt = 2_000, number = 12, vintedAccount = "c1"), sale("a", soldAt = 1_000, code = "SH0044"))
         assertEquals(
-            listOf(Labels.Request("a", "SH0044", "Pantalón"), Labels.Request("b", "SA0012", "Pantalón")),
-            Labels.requests(s),
+            listOf(ShippingLabels.Request("a", "SH0044", "Pantalón"), ShippingLabels.Request("b", "SA0012", "Pantalón")),
+            ShippingLabels.requests(s),
         )
     }
 
     @Test
     fun `a bundle is one label with all its codes`() {
         val two = shop(sale("a", number = 6, id = "va-0"), sale("a", number = 12, id = "va-1"))
-        assertEquals(listOf("SH0006-0012"), Labels.requests(two).map { it.code })
+        assertEquals(listOf("SH0006-0012"), ShippingLabels.requests(two).map { it.code })
         val three = shop(sale("a", number = 6, id = "va-0"), sale("a", number = 12, id = "va-1"), sale("a", number = 31, id = "va-2"))
-        assertEquals(listOf("SH0006#3"), Labels.requests(three).map { it.code })
-        val mixed = shop(sale("a", number = 6, id = "va-0"), sale("a", number = 12, id = "va-1", device = "c1"))
-        assertEquals(listOf("SH0006#2"), Labels.requests(mixed).map { it.code })
+        assertEquals(listOf("SH0006#3"), ShippingLabels.requests(three).map { it.code })
+        val mixed = shop(sale("a", number = 6, id = "va-0"), sale("a", number = 12, id = "va-1", vintedAccount = "c1"))
+        assertEquals(listOf("SH0006#2"), ShippingLabels.requests(mixed).map { it.code })
     }
 
     @Test
     fun `an unknown article asks without a code`() {
-        assertEquals("", Labels.requests(shop(sale("a", number = -1))).single().code)
+        assertEquals("", ShippingLabels.requests(shop(sale("a", number = -1))).single().code)
     }
 
     @Test
     fun `one sale can be asked for alone`() {
         val s = shop(sale("a"), sale("b", number = 7))
-        assertEquals(listOf("b"), Labels.requests(s, only = "b").map { it.id })
+        assertEquals(listOf("b"), ShippingLabels.requests(s, only = "b").map { it.id })
     }
 
     @Test
@@ -88,57 +88,57 @@ class LabelsTest {
         assertEquals(1, r.left)
         assertNull(r.done)
         val d = reply(done = done(warnings = """"SH0007: sin recortar"""")).done!!
-        assertEquals(Labels.Done(7, "etiquetas-1.pdf", 2, listOf("SH0007: sin recortar")), d)
-        assertFailsWith<CatalogException> { Labels.parse("""{"error":"x"}""") }
-        assertFailsWith<CatalogException> { Labels.parse("<html>") }
+        assertEquals(ShippingLabels.Done(7, "etiquetas-1.pdf", 2, listOf("SH0007: sin recortar")), d)
+        assertFailsWith<CatalogException> { ShippingLabels.parse("""{"error":"x"}""") }
+        assertFailsWith<CatalogException> { ShippingLabels.parse("<html>") }
     }
 
     @Test
     fun `knows what to do with each answer`() {
-        assertEquals(Labels.Step.Wait("Sacando etiquetas en el PC…"), Labels.step(7, reply(working = true)))
+        assertEquals(ShippingLabels.Step.Wait("Sacando etiquetas en el PC…"), ShippingLabels.step(7, reply(working = true)))
         assertEquals(
-            Labels.Step.Wait("PC: el programa del PC está en pausa"),
-            Labels.step(7, reply(working = true, waiting = "el programa del PC está en pausa")),
+            ShippingLabels.Step.Wait("PC: el programa del PC está en pausa"),
+            ShippingLabels.step(7, reply(working = true, waiting = "el programa del PC está en pausa")),
         )
         val pending = """{"id":"b","codigo":"SH0007","titulo":"y","estado":"pendiente","motivo":""}"""
         assertEquals(
-            Labels.Step.Wait("Sacando etiquetas en el PC · queda 1"),
-            Labels.step(7, reply(working = true, entries = pending)),
+            ShippingLabels.Step.Wait("Sacando etiquetas en el PC · queda 1"),
+            ShippingLabels.step(7, reply(working = true, entries = pending)),
         )
-        assertTrue(Labels.step(7, reply(done = done())) is Labels.Step.Fetch)
+        assertTrue(ShippingLabels.step(7, reply(done = done())) is ShippingLabels.Step.Fetch)
         assertEquals(
-            Labels.Step.Failed(listOf("SH0007: tu dirección no aparece rellena")),
-            Labels.step(7, reply(done = done(file = "", labels = 0, warnings = """"SH0007: tu dirección no aparece rellena""""))),
+            ShippingLabels.Step.Failed(listOf("SH0007: tu dirección no aparece rellena")),
+            ShippingLabels.step(7, reply(done = done(file = "", labels = 0, warnings = """"SH0007: tu dirección no aparece rellena""""))),
         )
         // Stopped on the PC before finishing, or another phone asked for something else.
-        assertEquals(Labels.Step.Dropped, Labels.step(7, reply(done = done(lot = 3))))
-        assertEquals(Labels.Step.Dropped, Labels.step(7, reply(working = true, lot = 9)))
+        assertEquals(ShippingLabels.Step.Dropped, ShippingLabels.step(7, reply(done = done(lot = 3))))
+        assertEquals(ShippingLabels.Step.Dropped, ShippingLabels.step(7, reply(working = true, lot = 9)))
     }
 
     @Test
     fun `takes the PDF and refuses anything else`() {
         val bytes = "%PDF-1.7 hola".toByteArray()
         val b64 = java.util.Base64.getEncoder().encodeToString(bytes)
-        val pdf = Labels.parsePdf("""{"lote":7,"nombre":"etiquetas-1.pdf","datos":"$b64"}""")
+        val pdf = ShippingLabels.parsePdf("""{"lote":7,"nombre":"etiquetas-1.pdf","datos":"$b64"}""")
         assertEquals(7, pdf.lot)
         assertEquals("etiquetas-1.pdf", pdf.name)
         assertContentEquals(bytes, pdf.bytes)
         val html = java.util.Base64.getEncoder().encodeToString("<html>".toByteArray())
-        assertFailsWith<CatalogException> { Labels.parsePdf("""{"lote":7,"nombre":"a.pdf","datos":"$html"}""") }
-        assertFailsWith<CatalogException> { Labels.parsePdf("""{"lote":7,"nombre":"a.pdf","datos":"%%%"}""") }
-        assertFailsWith<CatalogException> { Labels.parsePdf("""{}""") }
+        assertFailsWith<CatalogException> { ShippingLabels.parsePdf("""{"lote":7,"nombre":"a.pdf","datos":"$html"}""") }
+        assertFailsWith<CatalogException> { ShippingLabels.parsePdf("""{"lote":7,"nombre":"a.pdf","datos":"%%%"}""") }
+        assertFailsWith<CatalogException> { ShippingLabels.parsePdf("""{}""") }
     }
 
     @Test
     fun `the name it is saved with cannot leave the folder`() {
         val b64 = java.util.Base64.getEncoder().encodeToString("%PDF-1.7".toByteArray())
-        val pdf = Labels.parsePdf("""{"lote":7,"nombre":"../../x y.exe","datos":"$b64"}""")
+        val pdf = ShippingLabels.parsePdf("""{"lote":7,"nombre":"../../x y.exe","datos":"$b64"}""")
         assertEquals("x y.exe.pdf", pdf.name)
     }
 
     private fun pdf(vararg orders: String) = LabelFile("content://descargas/${orders.joinToString("-")}", orders.toList())
 
-    private fun spent(s: ParentState, vararg files: LabelFile) = Labels.spent(s, files.toList())
+    private fun spent(s: CatalogState, vararg files: LabelFile) = ShippingLabels.spent(s, files.toList())
 
     @Test
     fun `a PDF is spent once its sale is paid`() {
@@ -179,15 +179,15 @@ class LabelsTest {
 
     @Test
     fun `remembers each PDF saved and forgets the spent ones with their card`() {
-        val first = Labels.saved(AppState("p"), LabelJob(file = "content://1", count = 1), listOf("a"))
-        val second = Labels.saved(first, LabelJob(file = "content://2", count = 1), listOf("b"))
+        val first = ShippingLabels.saved(AppState("p"), LabelJob(file = "content://1", count = 1), listOf("a"))
+        val second = ShippingLabels.saved(first, LabelJob(file = "content://2", count = 1), listOf("b"))
         assertEquals(listOf(LabelFile("content://1", listOf("a")), LabelFile("content://2", listOf("b"))), second.labelPdfs)
         assertEquals("content://2", second.labels.file)
         // The card shows the second: forgetting the first leaves it alone.
-        val kept = Labels.discard(second, listOf(second.labelPdfs[0]))
+        val kept = ShippingLabels.discard(second, listOf(second.labelPdfs[0]))
         assertEquals(second.labels, kept.labels)
         assertEquals(listOf(second.labelPdfs[1]), kept.labelPdfs)
-        val none = Labels.discard(kept, kept.labelPdfs)
+        val none = ShippingLabels.discard(kept, kept.labelPdfs)
         assertEquals(LabelJob(), none.labels)
         assertEquals(emptyList(), none.labelPdfs)
     }
@@ -205,9 +205,9 @@ class LabelsTest {
     @Test
     fun `finds the printer app`() {
         val apps = listOf("com.google.drive" to "Drive", "com.xinye.barcode4" to "4Barcode", "a.b" to "4Barcode Pro")
-        assertEquals(1, Labels.printer(apps))
-        assertEquals(1, Labels.printer(listOf("a.pdf" to "Visor", "net.otro" to "4BarCode")))
-        assertEquals(0, Labels.printer(listOf("com.xinye.barcode4.es" to "Etiquetas")))
-        assertEquals(-1, Labels.printer(listOf("com.google.drive" to "Drive")))
+        assertEquals(1, ShippingLabels.printer(apps))
+        assertEquals(1, ShippingLabels.printer(listOf("a.pdf" to "Visor", "net.otro" to "4BarCode")))
+        assertEquals(0, ShippingLabels.printer(listOf("com.xinye.barcode4.es" to "Etiquetas")))
+        assertEquals(-1, ShippingLabels.printer(listOf("com.google.drive" to "Drive")))
     }
 }

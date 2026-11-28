@@ -415,7 +415,7 @@ object ListingWriter {
     fun size(listing: Listing, style: Int): String {
         val size = listing.size.trim()
         if (size.isEmpty()) return ""
-        val letter = Vinted.letterSize(size, listing.gender)
+        val letter = VintedTaxonomy.letterSize(size, listing.gender)
         val s0 = style.mod(Garments.STYLES) == 0
         return when {
             letter == null -> if (listing.noLabel) "$size aprox." else size

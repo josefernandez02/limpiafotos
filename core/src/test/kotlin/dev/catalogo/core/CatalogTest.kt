@@ -8,13 +8,13 @@ import kotlin.test.assertTrue
 
 class CatalogTest {
 
-    private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA")
-    private val third = Device("c2", "Tercero", "SB")
+    private val samsung = VintedAccount("p", "Samsung", "SH")
+    private val poco = VintedAccount("c1", "Poco", "SA")
+    private val third = VintedAccount("c2", "Tercero", "SB")
 
-    private fun state(vararg children: Device) = ParentState(self = samsung, children = children.toList())
+    private fun state(vararg otherAccounts: VintedAccount) = CatalogState(mainAccount = samsung, otherAccounts = otherAccounts.toList())
 
-    private fun ParentState.create(): Pair<ParentState, Int> = Catalog.create(this, 0)
+    private fun CatalogState.create(): Pair<CatalogState, Int> = Catalog.create(this, 0)
 
     @Test
     fun `sku format and parse`() {
@@ -36,7 +36,7 @@ class CatalogTest {
         s = Catalog.setUploaded(s, n, "c1", false)
         assertEquals(setOf("p"), Catalog.article(s, n)!!.uploaded)
         s = Catalog.setUploaded(s, n, "c1", true)
-        s = Catalog.removeChild(s, "c1")
+        s = Catalog.removeAccount(s, "c1")
         assertEquals(setOf("p"), Catalog.article(s, n)!!.uploaded)
     }
 
@@ -48,24 +48,24 @@ class CatalogTest {
     }
 
     @Test
-    fun `removing a child unblocks its pending releases`() {
+    fun `removing an account unblocks its pending releases`() {
         var s = state(poco)
         // as saved by earlier versions: sold, waiting for another phone to confirm
         s = s.copy(articles = listOf(Article(0, 0, released = true, pendingRelease = setOf("c1"))))
-        s = Catalog.removeChild(s, "c1")
+        s = Catalog.removeAccount(s, "c1")
         assertEquals(0, Catalog.nextFree(s))
     }
 
     @Test
-    fun `device validation`() {
+    fun `account validation`() {
         val s = state(poco)
-        assertFailsWith<CatalogException> { Catalog.addChild(s, third.copy(prefix = "SA")) }
-        assertFailsWith<CatalogException> { Catalog.addChild(s, third.copy(prefix = "s1")) }
-        assertFailsWith<CatalogException> { Catalog.addChild(s, third.copy(name = "poco")) }
-        assertFailsWith<CatalogException> { Catalog.addChild(s, third.copy(name = " ")) }
-        val renamed = Catalog.renameDevice(s, "c1", " Poco F3 ", "sx")
-        assertEquals("Poco F3", renamed.children.single().name)
-        assertEquals("SX", renamed.children.single().prefix)
+        assertFailsWith<CatalogException> { Catalog.addAccount(s, third.copy(prefix = "SA")) }
+        assertFailsWith<CatalogException> { Catalog.addAccount(s, third.copy(prefix = "s1")) }
+        assertFailsWith<CatalogException> { Catalog.addAccount(s, third.copy(name = "poco")) }
+        assertFailsWith<CatalogException> { Catalog.addAccount(s, third.copy(name = " ")) }
+        val renamed = Catalog.renameAccount(s, "c1", " Poco F3 ", "sx")
+        assertEquals("Poco F3", renamed.otherAccounts.single().name)
+        assertEquals("SX", renamed.otherAccounts.single().prefix)
     }
 
     @Test
@@ -92,12 +92,12 @@ class CatalogTest {
     fun `phones paired before styles get a distinct style`() {
         var s = state(poco.copy(style = 0), third.copy(style = 0))
         s = Catalog.ensureDistinctStyles(s)
-        assertTrue(s.children.none { it.style == s.self.style })
+        assertTrue(s.otherAccounts.none { it.style == s.mainAccount.style })
         assertEquals(s, Catalog.ensureDistinctStyles(s), "idempotent")
         s = Catalog.create(s, 0).first
         s = Catalog.updateArticle(s, 0, Listing(type = "jeans", brand = "Levi's", keywords = listOf("vintage", "90s")), null, null)
-        val a = Catalog.listingText(s, 0, s.self)!!
-        val b = Catalog.listingText(s, 0, s.children.first())!!
+        val a = Catalog.listingText(s, 0, s.mainAccount)!!
+        val b = Catalog.listingText(s, 0, s.otherAccounts.first())!!
         assertTrue(a.title != b.title && a.description != b.description)
     }
 }

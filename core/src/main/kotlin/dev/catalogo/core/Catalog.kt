@@ -5,34 +5,34 @@ class CatalogException(message: String) : Exception(message)
 /** Pure state transitions of the parent's catalogue. No I/O. */
 object Catalog {
 
-    fun devices(s: ParentState): List<Device> = listOf(s.self) + s.children
+    fun allAccounts(s: CatalogState): List<VintedAccount> = listOf(s.mainAccount) + s.otherAccounts
 
-    fun device(s: ParentState, id: String): Device? = devices(s).firstOrNull { it.id == id }
+    fun findAccount(s: CatalogState, id: String): VintedAccount? = allAccounts(s).firstOrNull { it.id == id }
 
-    fun article(s: ParentState, number: Int): Article? = s.articles.firstOrNull { it.number == number }
+    fun article(s: CatalogState, number: Int): Article? = s.articles.firstOrNull { it.number == number }
 
     /** Lowest number not used by any article (released ones still pending included). */
-    fun nextFree(s: ParentState): Int? {
+    fun nextFree(s: CatalogState): Int? {
         val used = s.articles.mapTo(HashSet()) { it.number }
         return (0..Sku.maxNumber(s.digits)).firstOrNull { it !in used }
     }
 
     /** Article details: listing data, lot and manual cost. */
-    fun updateArticle(s: ParentState, number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult? = null): ParentState {
+    fun updateArticle(s: CatalogState, number: Int, listing: Listing?, lotId: String?, cost: Long?, ai: AiResult? = null): CatalogState {
         val a = article(s, number) ?: return s
         if (lotId != null && s.lots.none { it.id == lotId }) throw CatalogException("Lote no encontrado")
         return replace(s, a.copy(listing = listing, lotId = lotId, cost = if (lotId != null) null else cost, ai = ai))
     }
 
     /** Price in cents [number] is listed at in Vinted. */
-    fun setPrice(s: ParentState, number: Int, price: Long?): ParentState {
+    fun setPrice(s: CatalogState, number: Int, price: Long?): CatalogState {
         val a = article(s, number) ?: return s
         if (price != null && price <= 0) throw CatalogException("Precio no válido")
         return replace(s, a.copy(price = price))
     }
 
     /** Photos of [number] the AI looks at, in order; empty = every photo of the album. */
-    fun setPhotos(s: ParentState, number: Int, photos: List<String>): ParentState {
+    fun setPhotos(s: CatalogState, number: Int, photos: List<String>): CatalogState {
         val a = article(s, number) ?: return s
         val clean = photos.distinct()
         return if (a.photos == clean) s else replace(s, a.copy(photos = clean))
@@ -49,32 +49,32 @@ object Catalog {
     }
 
     /**
-     * One word for where [article] is in [device]'s account. This phone's account
+     * One word for where [article] is in [vintedAccount]'s account. This phone's account
      * follows the PC (or what was set by hand); other accounts only have the mark
      * «subido» from their own phones.
      */
-    fun stage(s: ParentState, article: Article, device: Device): Stage {
-        if (article.held || article.vinted[device.id]?.status == "sold") return Stage.SOLD
-        val desk = article.desk.takeIf { device.id == s.self.id }
+    fun stage(s: CatalogState, article: Article, vintedAccount: VintedAccount): Stage {
+        if (article.held || article.vinted[vintedAccount.id]?.status == "sold") return Stage.SOLD
+        val pcTask = article.pcTask.takeIf { vintedAccount.id == s.mainAccount.id }
         return when {
-            desk?.status == "jugado" -> Stage.PLAYED
-            desk?.status == "publicado" -> Stage.UPLOADED
-            device.id in article.uploaded -> Stage.UPLOADED
-            desk == null -> Stage.TO_UPLOAD
-            desk.status == "borrador" -> Stage.DRAFT
-            desk.needsUser -> Stage.REVIEW
+            pcTask?.status == "jugado" -> Stage.PLAYED
+            pcTask?.status == "publicado" -> Stage.UPLOADED
+            vintedAccount.id in article.uploaded -> Stage.UPLOADED
+            pcTask == null -> Stage.TO_UPLOAD
+            pcTask.status == "borrador" -> Stage.DRAFT
+            pcTask.needsUser -> Stage.REVIEW
             else -> Stage.WORKING
         }
     }
 
     /** Where [number] stands on its way to the PC (null = never sent). */
-    fun setDesk(s: ParentState, number: Int, desk: Desk?): ParentState {
+    fun setPcTask(s: CatalogState, number: Int, pcTask: PcTask?): CatalogState {
         val a = article(s, number) ?: return s
-        return if (a.desk == desk) s else replace(s, a.copy(desk = desk))
+        return if (a.pcTask == pcTask) s else replace(s, a.copy(pcTask = pcTask))
     }
 
     /** Applies an AI answer to [number]: listing data the user left empty and the titles. */
-    fun applyAi(s: ParentState, number: Int, suggestion: AiSuggestion, model: String, seconds: Int = 0): ParentState {
+    fun applyAi(s: CatalogState, number: Int, suggestion: AiSuggestion, model: String, seconds: Int = 0): CatalogState {
         val a = article(s, number) ?: return s
         if (a.released) return s
         val applied = suggestion.applyTo(a.listing ?: Listing())
@@ -86,56 +86,56 @@ object Catalog {
      * what the old publication left behind goes: the AI's answer, the photo choice, the draft on the PC and this phone's
      * «subido» and wardrobe marks. The titles and hashtags it had are kept apart, as what the new ones must not repeat.
      */
-    fun relist(s: ParentState, number: Int): ParentState {
+    fun relist(s: CatalogState, number: Int): CatalogState {
         val a = article(s, number) ?: return s
         if (!a.inStock) return s
-        val me = s.self
+        val me = s.mainAccount
         // What it was published with is what the AI wrote (a draft is never sent without it); without AI data there is nothing to avoid.
         val avoid = a.relist ?: Relist(
             titles = a.ai?.titles.orEmpty().mapValues { Ai.distinctWords(it.value) }.filterValues { it.isNotBlank() },
             hashtags = a.ai?.hashtags.orEmpty(),
         )
         return replace(s, a.copy(
-            ai = null, photos = emptyList(), desk = null,
+            ai = null, photos = emptyList(), pcTask = null,
             uploaded = a.uploaded - me.id, vinted = a.vinted - me.id,
             round = a.round + 1, relist = avoid,
         ))
     }
 
     /** The AI wrote titles and hashtags that differ: the re-listing no longer waits for them. */
-    fun finishRelist(s: ParentState, number: Int): ParentState {
+    fun finishRelist(s: CatalogState, number: Int): CatalogState {
         val a = article(s, number) ?: return s
         return if (a.relist == null) s else replace(s, a.copy(relist = null))
     }
 
     /** AI data of [number] while it still matches the listing (null when stale or absent). */
-    fun freshAi(s: ParentState, number: Int): AiResult? {
+    fun freshAi(s: CatalogState, number: Int): AiResult? {
         val a = article(s, number) ?: return null
         val listing = a.listing ?: return null
         return a.ai?.takeIf { it.basis == Ai.basis(listing) }
     }
 
     /** Accounts the AI writes titles for: every phone, in order. */
-    fun aiAccounts(s: ParentState): List<Ai.Account> = devices(s).map { Ai.Account(it.id, it.prefix, it.style) }
+    fun aiAccounts(s: CatalogState): List<Ai.Account> = allAccounts(s).map { Ai.Account(it.id, it.prefix, it.style) }
 
-    /** Marks whether [deviceId]'s account already has [number] published on Vinted (and so is one of its accounts). */
-    fun setUploaded(s: ParentState, number: Int, deviceId: String, uploaded: Boolean): ParentState {
+    /** Marks whether [accountId]'s account already has [number] published on Vinted (and so is one of its accounts). */
+    fun setUploaded(s: CatalogState, number: Int, accountId: String, uploaded: Boolean): CatalogState {
         val a = article(s, number) ?: return s
-        if (!a.inStock || device(s, deviceId) == null) return s
+        if (!a.inStock || findAccount(s, accountId) == null) return s
         return replace(
             s,
             a.copy(
-                uploaded = if (uploaded) a.uploaded + deviceId else a.uploaded - deviceId,
-                accounts = if (uploaded) a.targets + deviceId else a.targets,
+                uploaded = if (uploaded) a.uploaded + accountId else a.uploaded - accountId,
+                accounts = if (uploaded) a.targets + accountId else a.targets,
             ),
         )
     }
 
     /** Accounts [number] will be published in. Unknown devices are ignored. */
-    fun setAccounts(s: ParentState, number: Int, accounts: Set<String>): ParentState {
+    fun setAccounts(s: CatalogState, number: Int, accounts: Set<String>): CatalogState {
         val a = article(s, number) ?: return s
         if (!a.inStock) return s
-        val known = devices(s).map { it.id }.toSet()
+        val known = allAccounts(s).map { it.id }.toSet()
         val chosen = accounts.filter { it in known }.toSet()
         return replace(s, a.copy(accounts = chosen, uploaded = a.uploaded.filter { it in chosen }.toSet()))
     }
@@ -144,38 +144,38 @@ object Catalog {
      * Makes sure no secondary phone writes with the main phone's style (phones
      * paired before styles existed all had style 0).
      */
-    fun ensureDistinctStyles(s: ParentState): ParentState {
-        if (s.children.none { it.style == s.self.style }) return s
-        val other = (s.self.style + 1) % Garments.STYLES
-        val children = s.children.map { c -> if (c.style != s.self.style) c else c.copy(style = other) }
-        return s.copy(children = children)
+    fun ensureDistinctStyles(s: CatalogState): CatalogState {
+        if (s.otherAccounts.none { it.style == s.mainAccount.style }) return s
+        val other = (s.mainAccount.style + 1) % Garments.STYLES
+        val otherAccounts = s.otherAccounts.map { c -> if (c.style != s.mainAccount.style) c else c.copy(style = other) }
+        return s.copy(otherAccounts = otherAccounts)
     }
 
     /** Style for a newly paired phone: never the main phone's own style. */
-    fun nextStyle(s: ParentState): Int = (s.self.style + 1) % Garments.STYLES
+    fun nextStyle(s: CatalogState): Int = (s.mainAccount.style + 1) % Garments.STYLES
 
-    fun styleAndTemplate(s: ParentState, id: String, style: Int, template: String): ParentState {
+    fun styleAndTemplate(s: CatalogState, id: String, style: Int, template: String): CatalogState {
         val clean = template.trim().take(ListingWriter.DESCRIPTION_MAX)
-        return if (id == s.self.id) {
-            s.copy(self = s.self.copy(style = style.mod(Garments.STYLES), template = clean))
+        return if (id == s.mainAccount.id) {
+            s.copy(mainAccount = s.mainAccount.copy(style = style.mod(Garments.STYLES), template = clean))
         } else {
             s.copy(
-                children = s.children.map { if (it.id == id) it.copy(style = style.mod(Garments.STYLES), template = clean) else it },
+                otherAccounts = s.otherAccounts.map { if (it.id == id) it.copy(style = style.mod(Garments.STYLES), template = clean) else it },
             )
         }
     }
 
-    /** Title and description of [number] as [device] publishes it. */
-    fun listingText(s: ParentState, number: Int, device: Device): ListingText? {
+    /** Title and description of [number] as [vintedAccount] publishes it. */
+    fun listingText(s: CatalogState, number: Int, vintedAccount: VintedAccount): ListingText? {
         val listing = article(s, number)?.listing ?: return null
         val ai = freshAi(s, number)
-        val text = ListingWriter.text(listing, device.style, device.template, Sku.format(device.prefix, number, s.digits), ai?.hashtags)
+        val text = ListingWriter.text(listing, vintedAccount.style, vintedAccount.template, Sku.format(vintedAccount.prefix, number, s.digits), ai?.hashtags)
         // (also for titles generated before repeats were removed)
-        val title = ai?.titles?.get(device.id)?.let(Ai::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
+        val title = ai?.titles?.get(vintedAccount.id)?.let(Ai::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
         return text.copy(title = title)
     }
 
-    fun create(s: ParentState, now: Long): Pair<ParentState, Int> {
+    fun create(s: CatalogState, now: Long): Pair<CatalogState, Int> {
         val number = nextFree(s) ?: throw CatalogException("No quedan números libres")
         val articles = (s.articles + Article(number, now)).sortedBy { it.number }
         return s.copy(articles = articles) to number
@@ -185,20 +185,20 @@ object Catalog {
      * Removes an article added by mistake, without a sale: its number is free at
      * once (other accounts have no phone of their own left to confirm anything).
      */
-    fun delete(s: ParentState, number: Int): ParentState {
+    fun delete(s: CatalogState, number: Int): CatalogState {
         val a = article(s, number) ?: return s
         if (a.held) throw CatalogException("Tiene una venta en curso: anúlala primero")
         // Its number becomes free, and the PC, if it has it, must drop it.
         return Sales.free(s, a)
     }
 
-    fun addChild(s: ParentState, device: Device): ParentState {
-        validateDevice(s, device.id, device.name, device.prefix)
-        return s.copy(children = s.children.filter { it.id != device.id } + device)
+    fun addAccount(s: CatalogState, vintedAccount: VintedAccount): CatalogState {
+        validateAccount(s, vintedAccount.id, vintedAccount.name, vintedAccount.prefix)
+        return s.copy(otherAccounts = s.otherAccounts.filter { it.id != vintedAccount.id } + vintedAccount)
     }
 
-    fun removeChild(s: ParentState, id: String): ParentState {
-        var next = s.copy(children = s.children.filter { it.id != id })
+    fun removeAccount(s: CatalogState, id: String): CatalogState {
+        var next = s.copy(otherAccounts = s.otherAccounts.filter { it.id != id })
         for (a in next.articles) {
             next = if (a.released) settle(next, a.copy(pendingRelease = a.pendingRelease - id))
             else replace(next, a.copy(delivered = a.delivered - id, uploaded = a.uploaded - id, vinted = a.vinted - id, accounts = a.accounts - id))
@@ -206,15 +206,15 @@ object Catalog {
         return next
     }
 
-    fun renameDevice(s: ParentState, id: String, name: String, prefix: String): ParentState {
+    fun renameAccount(s: CatalogState, id: String, name: String, prefix: String): CatalogState {
         val cleanName = name.trim()
         val cleanPrefix = prefix.trim().uppercase()
-        validateDevice(s, id, cleanName, cleanPrefix)
-        return if (id == s.self.id) {
-            s.copy(self = s.self.copy(name = cleanName, prefix = cleanPrefix))
+        validateAccount(s, id, cleanName, cleanPrefix)
+        return if (id == s.mainAccount.id) {
+            s.copy(mainAccount = s.mainAccount.copy(name = cleanName, prefix = cleanPrefix))
         } else {
-            val children = s.children.map { if (it.id == id) it.copy(name = cleanName, prefix = cleanPrefix) else it }
-            s.copy(children = children)
+            val otherAccounts = s.otherAccounts.map { if (it.id == id) it.copy(name = cleanName, prefix = cleanPrefix) else it }
+            s.copy(otherAccounts = otherAccounts)
         }
     }
 
@@ -223,20 +223,20 @@ object Catalog {
      * ("https://www.vinted.es/member/123456-shiorawear"), from which the
      * member id is taken. A link without a name fills the name too.
      */
-    fun setAccount(s: ParentState, id: String, account: String, profile: String): ParentState {
+    fun setVintedProfile(s: CatalogState, id: String, account: String, profile: String): CatalogState {
         val link = VintedProfile.parse(profile)
         if (profile.isNotBlank() && link == null) throw CatalogException("Enlace de perfil no válido")
         val name = account.trim().removePrefix("@").ifBlank { link?.second.orEmpty() }
         if (name.length > 40) throw CatalogException("Nombre de cuenta demasiado largo")
-        if (name.isNotBlank() && devices(s).any { it.id != id && it.account.equals(name, ignoreCase = true) }) {
+        if (name.isNotBlank() && allAccounts(s).any { it.id != id && it.vintedName.equals(name, ignoreCase = true) }) {
             throw CatalogException("Esa cuenta ya está en otro móvil")
         }
-        fun Device.update() = copy(account = name, vintedId = link?.first.orEmpty())
-        return if (id == s.self.id) s.copy(self = s.self.update())
-        else s.copy(children = s.children.map { if (it.id == id) it.update() else it })
+        fun VintedAccount.update() = copy(vintedName = name, vintedId = link?.first.orEmpty())
+        return if (id == s.mainAccount.id) s.copy(mainAccount = s.mainAccount.update())
+        else s.copy(otherAccounts = s.otherAccounts.map { if (it.id == id) it.update() else it })
     }
 
-    fun setDigits(s: ParentState, digits: Int): ParentState {
+    fun setDigits(s: CatalogState, digits: Int): CatalogState {
         if (digits !in Sku.MIN_DIGITS..Sku.MAX_DIGITS) throw CatalogException("Entre ${Sku.MIN_DIGITS} y ${Sku.MAX_DIGITS} dígitos")
         val highest = s.articles.maxOfOrNull { it.number } ?: -1
         if (highest > Sku.maxNumber(digits)) throw CatalogException("Hay artículos que no caben en $digits dígitos")
@@ -244,17 +244,17 @@ object Catalog {
         return s.copy(digits = digits)
     }
 
-    fun validateDevice(s: ParentState, id: String, name: String, prefix: String) {
+    fun validateAccount(s: CatalogState, id: String, name: String, prefix: String) {
         if (name.isBlank() || name.length > 24) throw CatalogException("Nombre de 1 a 24 caracteres")
         if (!Sku.isValidPrefix(prefix)) throw CatalogException("Prefijo de 1 a 4 letras (A-Z)")
-        if (devices(s).any { it.id != id && it.prefix == prefix }) throw CatalogException("Ese prefijo ya está en uso")
-        if (devices(s).any { it.id != id && it.name.equals(name, ignoreCase = true) }) throw CatalogException("Ese nombre ya está en uso")
+        if (allAccounts(s).any { it.id != id && it.prefix == prefix }) throw CatalogException("Ese prefijo ya está en uso")
+        if (allAccounts(s).any { it.id != id && it.name.equals(name, ignoreCase = true) }) throw CatalogException("Ese nombre ya está en uso")
     }
 
-    private fun settle(s: ParentState, a: Article): ParentState =
+    private fun settle(s: CatalogState, a: Article): CatalogState =
         if (a.released && a.pendingRelease.isEmpty()) s.copy(articles = s.articles.filter { it.number != a.number })
         else replace(s, a)
 
-    private fun replace(s: ParentState, a: Article): ParentState =
+    private fun replace(s: CatalogState, a: Article): CatalogState =
         s.copy(articles = s.articles.map { if (it.number == a.number) a else it })
 }

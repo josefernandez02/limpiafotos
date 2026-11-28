@@ -12,7 +12,7 @@ import kotlinx.serialization.json.Json
 import java.io.File
 
 /** The whole app state as one JSON file, written atomically on every change. */
-class Store(dir: File) {
+class StateStore(dir: File) {
     private val file = AtomicFile(File(dir, "state.json"))
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val mutex = Mutex()

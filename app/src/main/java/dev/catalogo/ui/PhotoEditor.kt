@@ -89,12 +89,12 @@ import dev.catalogo.core.CoverFrame
 import dev.catalogo.core.CropEdit
 import dev.catalogo.core.CropHistory
 import dev.catalogo.core.Placement
-import dev.catalogo.data.CropLog
-import dev.catalogo.core.ParentState
+import dev.catalogo.data.CropHistoryStore
+import dev.catalogo.core.CatalogState
 import dev.catalogo.data.AutoFrame
-import dev.catalogo.data.Crop
+import dev.catalogo.data.PhotoCropper
 import dev.catalogo.data.Framing
-import dev.catalogo.data.Repo
+import dev.catalogo.data.CatalogRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -107,8 +107,8 @@ private data class Slot(val source: Uri, val bytes: ByteArray? = null, val key: 
  * Nothing is written until "Guardar".
  */
 @Composable
-fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: String) {
-    val device = Catalog.device(p, deviceId)
+fun PhotosScreen(vm: MainViewModel, p: CatalogState, number: Int, accountId: String) {
+    val vintedAccount = Catalog.findAccount(p, accountId)
     val saving by vm.savingPhotos.collectAsStateWithLifecycle()
     var slots by remember { mutableStateOf<List<Slot>?>(null) }
     var original by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -119,10 +119,10 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
     val scope = rememberCoroutineScope()
     var autoWorking by remember { mutableStateOf(false) }
 
-    LaunchedEffect(number, deviceId) {
-        val photos = vm.editablePhotos(number, deviceId)
+    LaunchedEffect(number, accountId) {
+        val photos = vm.editablePhotos(number, accountId)
         original = photos
-        val log = CropHistory.aligned(CropLog.load(context, deviceId, number), photos.size)
+        val log = CropHistory.aligned(CropHistoryStore.load(context, accountId, number), photos.size)
         slots = photos.mapIndexed { i, uri -> Slot(uri, key = i, edit = log.getOrNull(i)) }
     }
     val list = slots
@@ -180,11 +180,11 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
 
     Scaffold(
         topBar = {
-            Bar(device?.label?.let { "Fotos de $it" } ?: "Fotos", onBack = if (saving) null else leave, actions = {
+            Bar(vintedAccount?.label?.let { "Fotos de $it" } ?: "Fotos", onBack = if (saving) null else leave, actions = {
                 Button(
                     onClick = {
-                        CropLog.save(context, deviceId, number, list.orEmpty().map { it.edit })
-                        vm.savePhotos(number, deviceId, list.orEmpty().map { Repo.EditedPhoto(it.source, it.bytes) })
+                        CropHistoryStore.save(context, accountId, number, list.orEmpty().map { it.edit })
+                        vm.savePhotos(number, accountId, list.orEmpty().map { CatalogRepository.EditedPhoto(it.source, it.bytes) })
                     },
                     enabled = changed && !saving,
                     modifier = Modifier.padding(end = 8.dp),
@@ -252,7 +252,7 @@ fun PhotosScreen(vm: MainViewModel, p: ParentState, number: Int, deviceId: Strin
                 Box(
                     Modifier
                         .animateItem()
-                        .aspectRatio(Crop.RATIO)
+                        .aspectRatio(PhotoCropper.RATIO)
                         .clip(shape)
                         .border(if (on) 3.dp else 0.dp, if (on) MaterialTheme.colorScheme.primary else Color.Transparent, shape)
                         .clickable { selected = if (on) null else i },
@@ -358,7 +358,7 @@ private fun boxOf(f: Framing, g: Geo): FloatArray {
     val bw = g.d * g.imgW / f.scale
     val bx = g.cx - f.dx * bw
     val by = g.cy - f.dy * bw
-    val bh = bw / Crop.RATIO
+    val bh = bw / PhotoCropper.RATIO
     return floatArrayOf(bx - bw / 2, by - bh / 2, bx + bw / 2, by + bh / 2)
 }
 
@@ -391,21 +391,21 @@ private fun dragged(f: Framing, grip: Grip, mx: Float, my: Float, g: Geo): Frami
     var l = b[0]; var t = b[1]; var r = b[2]; var bt = b[3]
     val w0 = r - l
     val grow = when (grip) {
-        Grip.BR -> (mx + my * Crop.RATIO) / 2
-        Grip.BL -> (-mx + my * Crop.RATIO) / 2
-        Grip.TR -> (mx - my * Crop.RATIO) / 2
-        Grip.TL -> (-mx - my * Crop.RATIO) / 2
+        Grip.BR -> (mx + my * PhotoCropper.RATIO) / 2
+        Grip.BL -> (-mx + my * PhotoCropper.RATIO) / 2
+        Grip.TR -> (mx - my * PhotoCropper.RATIO) / 2
+        Grip.TL -> (-mx - my * PhotoCropper.RATIO) / 2
         else -> 0f
     }
     val h0 = bt - t
     val w = when (grip) {
-        Grip.T -> (h0 - my) * Crop.RATIO
-        Grip.B -> (h0 + my) * Crop.RATIO
+        Grip.T -> (h0 - my) * PhotoCropper.RATIO
+        Grip.B -> (h0 + my) * PhotoCropper.RATIO
         Grip.L -> w0 - mx
         Grip.R -> w0 + mx
         else -> w0 + grow
     }.coerceAtLeast(g.minW)
-    val h = w / Crop.RATIO
+    val h = w / PhotoCropper.RATIO
     val midX = (l + r) / 2
     val midY = (t + bt) / 2
     when (grip) {
@@ -492,7 +492,7 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
             }
             if (guide && garment != null) {
                 // where the garment is: the space between this box and the frame is what the numbers above measure
-                val k = bw / Crop.OUT_W
+                val k = bw / PhotoCropper.OUT_W
                 drawRect(
                     color = Color(0xFF4DD0E1).copy(alpha = 0.9f),
                     topLeft = Offset(b[0] + garment[2] * k, b[1] + garment[0] * k),
@@ -509,7 +509,7 @@ private fun CropArea(img: ImageBitmap, f: Framing, guide: Boolean, garment: IntA
                     c.nativeCanvas.drawText("Zona segura (la prenda debe caber)", b[0] + sb[0] * bw + 6.dp.toPx(), b[1] + sb[1] * bw + 14.dp.toPx(), tp)
                     if (garment != null) {
                         tp.color = 0xFF4DD0E1.toInt()
-                        c.nativeCanvas.drawText("Prenda detectada", b[0] + garment[2] * (bw / Crop.OUT_W) + 6.dp.toPx(), b[3] - garment[1] * (bw / Crop.OUT_W) - 6.dp.toPx(), tp)
+                        c.nativeCanvas.drawText("Prenda detectada", b[0] + garment[2] * (bw / PhotoCropper.OUT_W) + 6.dp.toPx(), b[3] - garment[1] * (bw / PhotoCropper.OUT_W) - 6.dp.toPx(), tp)
                     }
                 }
             }
@@ -643,7 +643,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
         if (img != null) {
             val cur = framing
             if (cur == null) {
-                framing = Crop.cover(img.width, img.height)
+                framing = PhotoCropper.cover(img.width, img.height)
                 if (isCover && slot.edit == null) auto(true)
             } else if (!cur.covers(img.width, img.height)) {
                 framing = CoverFrame.settle(cur.placement(), img.width, img.height, CoverFrame.fillLimit(cur.rotation)).framing()      // an old crop with made-up edges is tidied
@@ -743,7 +743,7 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
                             modifier = Modifier.weight(1f).height(44.dp),
                         ) { OneLine("Centrar") }
                         OutlinedButton(
-                            onClick = { touched = true; manual = true; framing = Crop.cover(img.width, img.height); note = "" },
+                            onClick = { touched = true; manual = true; framing = PhotoCropper.cover(img.width, img.height); note = "" },
                             modifier = Modifier.weight(1f).height(44.dp),
                         ) { OneLine("Original") }
                     }
@@ -753,14 +753,14 @@ private fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCancel
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize().padding(horizontal = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             val g = garment
-            val m = if (isCover && fr != null && g != null && img != null) remember(fr, g, img) { CoverFrame.margins(g, img.width, fr.placement(), Crop.OUT_W) } else null
+            val m = if (isCover && fr != null && g != null && img != null) remember(fr, g, img) { CoverFrame.margins(g, img.width, fr.placement(), PhotoCropper.OUT_W) } else null
             // the work area takes everything the panel leaves
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 if (img == null || fr == null) return@Box
                 if (marking) MarkArea(img, markRect) { markRect = it }
                 else CropArea(img, fr, isCover, m) { framing = it; touched = true; manual = true; note = "" }
             }
-            val off = if (m != null && g != null && img != null && fr != null) remember(fr, g, img) { CoverFrame.offCentre(g, img.width, img.height, fr.placement(), Crop.OUT_W) } else 0
+            val off = if (m != null && g != null && img != null && fr != null) remember(fr, g, img) { CoverFrame.offCentre(g, img.width, img.height, fr.placement(), PhotoCropper.OUT_W) } else 0
             if (m != null) MarginChip(m, off, Modifier.padding(top = 8.dp))
             if (note.isNotBlank()) {
                 Text(note, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 4.dp))
@@ -839,8 +839,8 @@ private fun PreviewScreen(source: Uri, quick: ImageBitmap, f: Framing, ratio: Fl
                     .graphicsLayer { scaleX = zoom; scaleY = zoom; translationX = pan.x; translationY = pan.y },
             ) {
                 Canvas(Modifier.fillMaxSize().background(Color(0xFF2A2C2F))) {
-                    val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
-                    val fh = fw / Crop.RATIO
+                    val fw = if (ratio >= PhotoCropper.RATIO) size.width else size.height * PhotoCropper.RATIO
+                    val fh = fw / PhotoCropper.RATIO
                     val left = (size.width - fw) / 2f
                     val top = (size.height - fh) / 2f
                     drawFramed(img, f, left, top, fw)
@@ -900,8 +900,8 @@ private fun StraightenRow(rotation: Float, onChange: (Float) -> Unit) {
 @Composable
 private fun MarginChip(m: IntArray, offCentre: Int, modifier: Modifier = Modifier) {
     val sb = CoverFrame.safeBox()
-    val needX = sb[0] * Crop.OUT_W * 0.8f       // what the narrowest preview leaves the garment, with a little tolerance
-    val needY = sb[1] * Crop.OUT_W * 0.8f
+    val needX = sb[0] * PhotoCropper.OUT_W * 0.8f       // what the narrowest preview leaves the garment, with a little tolerance
+    val needY = sb[1] * PhotoCropper.OUT_W * 0.8f
     val tone = when {
         m.any { it < 0 } -> Color(0xFFFF6B6B)                                                  // the garment is cut
         m[2] < needX || m[3] < needX || m[0] < needY || m[1] < needY -> Color(0xFFFFC857)      // too close to an edge for some preview
@@ -927,8 +927,8 @@ private fun MarginChip(m: IntArray, offCentre: Int, modifier: Modifier = Modifie
 private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, label: String, height: Dp, modifier: Modifier = Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Canvas(Modifier.height(height).aspectRatio(ratio).clip(RoundedCornerShape(6.dp)).background(bg)) {
-            val fw = if (ratio >= Crop.RATIO) size.width else size.height * Crop.RATIO
-            val fh = fw / Crop.RATIO
+            val fw = if (ratio >= PhotoCropper.RATIO) size.width else size.height * PhotoCropper.RATIO
+            val fh = fw / PhotoCropper.RATIO
             val left = (size.width - fw) / 2f
             val top = (size.height - fh) / 2f
             drawFramed(img, f, left, top, fw)
@@ -937,7 +937,7 @@ private fun FramePreview(img: ImageBitmap, f: Framing, bg: Color, ratio: Float, 
     }
 }
 
-/** The same drawing the saved JPEG gets (see [Crop.draw]), so the previews do not lie. */
+/** The same drawing the saved JPEG gets (see [PhotoCropper.draw]), so the previews do not lie. */
 private fun DrawScope.drawFramed(img: ImageBitmap, f: Framing, left: Float, top: Float, fw: Float) {
-    drawIntoCanvas { Crop.draw(it.nativeCanvas, img.asAndroidBitmap(), f, left, top, fw) }
+    drawIntoCanvas { PhotoCropper.draw(it.nativeCanvas, img.asAndroidBitmap(), f, left, top, fw) }
 }

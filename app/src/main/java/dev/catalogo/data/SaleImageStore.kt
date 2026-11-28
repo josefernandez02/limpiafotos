@@ -12,7 +12,7 @@ import java.io.File
  * One small picture per sale, kept in the app: the garment's own photos are
  * deleted when its sale is completed.
  */
-class SaleImages(dir: File, private val resolver: ContentResolver) {
+class SaleImageStore(dir: File, private val resolver: ContentResolver) {
     private val folder = File(dir, "sales")
 
     fun file(saleId: String): File = File(folder, saleId.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".jpg")

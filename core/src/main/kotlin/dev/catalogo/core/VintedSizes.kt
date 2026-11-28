@@ -14,7 +14,7 @@ package dev.catalogo.core
  * [resolve] only answers when it is sure; otherwise the size goes to «Revisar»
  * with [options] to choose from.
  */
-object Sizes {
+object VintedSizes {
     const val ONE_SIZE = "Talla única"
 
     private val WOMEN_LETTERS = listOf(
@@ -37,7 +37,7 @@ object Sizes {
     /** Sizes the form offers for [category]; empty when it asks for none (bags, beauty…). */
     fun options(category: String): List<String> {
         val out = LinkedHashSet<String>()
-        for (g in SizeTable.groups[category].orEmpty()) {
+        for (g in VintedSizeTable.groups[category].orEmpty()) {
             when (g) {
                 4, 80 -> out += WOMEN_LETTERS
                 81, 82, 83, 84, 85 -> Unit                  // other tabs of the same women's list
@@ -45,7 +45,7 @@ object Sizes {
                 77 -> out += WAIST
                 74 -> out += COLLAR
                 7, 38 -> out += SHOES
-                else -> SizeTable.raw[g].orEmpty().forEach { v ->
+                else -> VintedSizeTable.raw[g].orEmpty().forEach { v ->
                     when (v) {
                         "Other" -> Unit
                         "One size" -> out += ONE_SIZE
@@ -87,7 +87,7 @@ object Sizes {
         // Waist sizes («W30 L32», «W 30», «30/32» stays out: it could be anything).
         Regex("(?i)\\bW\\s?(\\d{2})\\b").find(size)?.groupValues?.get(1)?.let { w ->
             if ("W$w" in opts) return "W$w"
-            val letter = Vinted.letterSize("W$w", gender(category)) ?: return null
+            val letter = VintedTaxonomy.letterSize("W$w", gender(category)) ?: return null
             return letter.takeIf { it in opts }
         }
 

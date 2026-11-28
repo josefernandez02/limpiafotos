@@ -77,13 +77,13 @@ object VintedSales {
     }
 
     /** The article prefixes the PC must recognise in the hashtags. */
-    fun prefixes(s: ParentState): List<String> = Catalog.devices(s).map { it.prefix }
+    fun prefixes(s: CatalogState): List<String> = Catalog.allAccounts(s).map { it.prefix }
 
     /**
      * Brings in a whole reading and counts what happened to the orders that changed. One
      * already cancelled when first seen was never a sale.
      */
-    fun applyAll(s: ParentState, accountId: String, orders: List<Pair<Order, Deal?>>, now: Long): Pair<ParentState, Map<Kind, Int>> {
+    fun applyAll(s: CatalogState, accountId: String, orders: List<Pair<Order, Deal?>>, now: Long): Pair<CatalogState, Map<Kind, Int>> {
         val counts = LinkedHashMap<Kind, Int>()
         val state = orders.fold(s) { state, (order, deal) ->
             if (order.status == SaleStatus.CANCELLED && state.sales.none { it.order == order.id }) return@fold state
@@ -94,11 +94,11 @@ object VintedSales {
         return state to counts
     }
 
-    private fun byListing(s: ParentState, itemId: String): Article? =
+    private fun byListing(s: CatalogState, itemId: String): Article? =
         if (itemId.isBlank()) null else s.articles.firstOrNull { !it.released && itemId in with(Sales) { it.listings() } }
 
     /** An order kept apart takes its article as soon as the listing is known to be one of the app's. */
-    private fun relink(s: ParentState, id: String): ParentState {
+    private fun relink(s: CatalogState, id: String): CatalogState {
         val sale = Sales.sale(s, id) ?: return s
         if (sale.status != SaleStatus.PENDING || sale.listedAt != null) return s
         // A cancelled hand sale may be the only one that knows which article the listing was.
@@ -108,13 +108,13 @@ object VintedSales {
     }
 
     /** The account and article number of the last hashtag, if it is one of the app's codes. */
-    fun code(description: String, s: ParentState): Pair<Device, Int>? {
+    fun code(description: String, s: CatalogState): Pair<VintedAccount, Int>? {
         val tag = Regex("#([\\p{L}\\p{N}_]+)").findAll(description).lastOrNull()?.groupValues?.get(1)?.uppercase() ?: return null
-        return Catalog.devices(s).firstNotNullOfOrNull { d -> Sku.parse(tag, d.prefix, s.digits)?.let { d to it } }
+        return Catalog.allAccounts(s).firstNotNullOfOrNull { d -> Sku.parse(tag, d.prefix, s.digits)?.let { d to it } }
     }
 
     /** Brings one order up to date. [accountId] is used when [deal] does not say who sold it. */
-    fun apply(s: ParentState, accountId: String, order: Order, deal: Deal?, now: Long): Pair<ParentState, Kind> {
+    fun apply(s: CatalogState, accountId: String, order: Order, deal: Deal?, now: Long): Pair<CatalogState, Kind> {
         val known = s.sales.filter { it.order == order.id }
         if (known.isNotEmpty()) {
             var state = s
@@ -140,8 +140,8 @@ object VintedSales {
     }
 
     private fun add(
-        s: ParentState, id: String, accountId: String, order: Order, deal: Deal?, item: Item, price: Long, now: Long,
-    ): Pair<ParentState, Kind> {
+        s: CatalogState, id: String, accountId: String, order: Order, deal: Deal?, item: Item, price: Long, now: Long,
+    ): Pair<CatalogState, Kind> {
         val soldAt = deal?.soldAt ?: order.date
         val code = item.description?.let { code(it, s) }
         // The listing says which article it was for certain. The code only says its number, and
@@ -149,7 +149,7 @@ object VintedSales {
         val found = if (deal == null) null else byListing(s, item.id) ?: code?.let { (_, n) ->
             Catalog.article(s, n)?.takeIf { !it.released && it.createdAt <= soldAt + DAY && with(Sales) { it.listings() }.isEmpty() }
         }
-        val account = Catalog.devices(s).firstOrNull { it.vintedId.isNotBlank() && it.vintedId == deal?.sellerId }?.id
+        val account = Catalog.allAccounts(s).firstOrNull { it.vintedId.isNotBlank() && it.vintedId == deal?.sellerId }?.id
             ?: code?.first?.id ?: accountId
         val codeText = code?.let { (d, n) -> Sku.format(d.prefix, n, s.digits) }.orEmpty()
 
@@ -176,7 +176,7 @@ object VintedSales {
         return next to kind
     }
 
-    private fun update(s: ParentState, id: String, order: Order, now: Long): Pair<ParentState, Kind> {
+    private fun update(s: CatalogState, id: String, order: Order, now: Long): Pair<CatalogState, Kind> {
         val before = Sales.sale(s, id) ?: return s to Kind.UNCHANGED
         // Finished in Vinted is finished: nothing it says later changes it.
         if (before.settled) return s to Kind.UNCHANGED
@@ -218,7 +218,7 @@ object VintedSales {
     }
 
     /** The order is about an article a hand sale keeps: that sale learns the listing, so it can warn. */
-    private fun heard(s: ParentState, a: Article?, itemId: String): ParentState {
+    private fun heard(s: CatalogState, a: Article?, itemId: String): CatalogState {
         val hand = a?.let { Sales.sale(s, it.soldIn) }?.takeIf { it.order.isEmpty() && itemId.isNotBlank() } ?: return s
         return Sales.replace(s, hand.copy(listings = (hand.listings + itemId).distinct()))
     }

@@ -10,7 +10,7 @@ import java.util.Locale
 /**
  * Everything the app does with articles, the AI and the PC, in a file that
  * rewrites itself (two files of [MAX_BYTES] at most). It also goes to the PC
- * ([Drafts] uploads it), so a failure can be traced next to the PC's own log:
+ * ([PcSync] uploads it), so a failure can be traced next to the PC's own log:
  * what failed, where, when and why. Keys and tokens are never written.
  */
 object AppLog {

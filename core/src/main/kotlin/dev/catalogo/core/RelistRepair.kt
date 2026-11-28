@@ -18,7 +18,7 @@ import kotlinx.serialization.json.putJsonObject
  * given title or adding to a given list is an easy task: this builds that small text-only request and merges its
  * answer into the one that fell short.
  */
-object RelistFix {
+object RelistRepair {
     /** What came back: new titles by account prefix and extra hashtags. */
     data class Edit(val titles: Map<String, String>, val hashtags: List<String>)
 
@@ -26,7 +26,7 @@ object RelistFix {
 
     /** Accounts whose title still repeats the old one. */
     fun stale(avoid: Relist, titles: Map<String, String>): List<String> =
-        avoid.titles.filter { (id, old) -> !Relisting.titleChanged(old, titles[id].orEmpty()) }.keys.toList()
+        avoid.titles.filter { (id, old) -> !RelistRules.titleChanged(old, titles[id].orEmpty()) }.keys.toList()
 
     /**
      * What is true of the garment, so a rewrite cannot swap «Wool» for «Cashmere» or «Grey» for «Blue» to get new words
@@ -46,7 +46,7 @@ object RelistFix {
         append("Eres redactor de anuncios de Vinted. Una prenda se vuelve a subir y el anuncio nuevo no puede parecerse al anterior.\n")
         if (facts != null) append(truth(facts))
         if (stale.isNotEmpty()) {
-            append("\nTÍTULOS: reescribe cada título cambiando al menos ${Relisting.MIN_WORDS + 1} palabras por sinónimos REALES (misma prenda, mismo material, mismo color) o por otra palabra cierta que también se busque ")
+            append("\nTÍTULOS: reescribe cada título cambiando al menos ${RelistRules.MIN_WORDS + 1} palabras por sinónimos REALES (misma prenda, mismo material, mismo color) o por otra palabra cierta que también se busque ")
             append("(Jeans / Denim, Pants / Trousers, Slim Fit / Slim Leg, Classic / Original, Vintage / Retro, Black / Washed Black). ")
             append("Mismo orden y estructura, sin repetir palabras, sin inventar datos nuevos, Title Case, máximo ${ListingWriter.TITLE_MAX} caracteres, sin talla, estado, precio ni emojis. ")
             append("Cada cuenta lleva un título distinto.\n")
@@ -115,13 +115,13 @@ object RelistFix {
         val used = titles.values.map { it.lowercase() }.toMutableSet()
         for (a in accounts) {
             val old = avoid.titles[a.id] ?: continue
-            if (Relisting.titleChanged(old, titles[a.id].orEmpty())) continue
+            if (RelistRules.titleChanged(old, titles[a.id].orEmpty())) continue
             // With [facts], a title with a false fabric, colour or garment is repaired or rejected like the AI's first answer.
             val new = edit.titles[a.prefix]?.let { t -> if (facts == null) t else TitleGuard.fix(t, facts) } ?: continue
-            if (Relisting.titleChanged(old, new) && used.add(new.lowercase())) titles[a.id] = new
+            if (RelistRules.titleChanged(old, new) && used.add(new.lowercase())) titles[a.id] = new
         }
         var tags = current.hashtags
-        if (avoid.hashtags.isNotEmpty() && !Relisting.hashtagsChanged(avoid.hashtags, tags)) {
+        if (avoid.hashtags.isNotEmpty() && !RelistRules.hashtagsChanged(avoid.hashtags, tags)) {
             val seen = (avoid.hashtags + tags).map { it.lowercase() }.toSet()
             val fresh = edit.hashtags.filter { it.lowercase() !in seen && (facts == null || TitleGuard.hashtagTrue(it, facts)) }
             val old = avoid.hashtags.map { it.lowercase() }.toSet()

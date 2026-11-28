@@ -39,10 +39,10 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.Labels
+import dev.catalogo.core.ShippingLabels
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sale
 import dev.catalogo.core.SaleStatus
 import dev.catalogo.core.Sales
@@ -53,7 +53,7 @@ private enum class Ask { CANCEL, COMPLETE, ACCEPT, RELEASE, UNPAY }
 
 /** One sale: what it was, where it is, and what can still be done with it. */
 @Composable
-fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
+fun SaleScreen(vm: MainViewModel, p: CatalogState, id: String) {
     val sale = Sales.sale(p, id)
     var ask by remember { mutableStateOf<Ask?>(null) }
     var assigning by remember { mutableStateOf(false) }
@@ -91,7 +91,7 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
                 if (sale.detail.isNotBlank()) Muted("En Vinted: ${sale.detail}", Modifier.padding(top = 4.dp))
             }
 
-            if (Labels.canPrint(sale)) LabelsCard(vm, p, only = sale.order)
+            if (ShippingLabels.canPrint(sale)) LabelsCard(vm, p, only = sale.order)
 
             Tile {
                 Fact("Código", saleCode(p, sale) ?: "Sin código")
@@ -101,7 +101,7 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
                 Fact("Vendida", longDate(sale.soldAt))
                 sale.closedAt?.let { Fact(if (sale.status == SaleStatus.CANCELLED) "Anulada" else "Completada", longDate(it)) }
                 Stats.daysToSell(sale)?.let { Fact("Tardó en venderse", if (it == 1) "1 día" else "$it días") }
-                Catalog.device(p, sale.deviceId)?.let { Fact("Cuenta", it.label) }
+                Catalog.findAccount(p, sale.accountId)?.let { Fact("Cuenta", it.label) }
                 Ledger.lot(p, sale.lotId)?.let { Fact("Lote", it.name) }
                 if (sale.brand.isNotBlank()) Fact("Marca", sale.brand)
                 if (sale.order.isNotBlank()) Fact("Pedido de Vinted", sale.order) else Fact("Origen", "Apuntada a mano")
@@ -171,7 +171,7 @@ fun SaleScreen(vm: MainViewModel, p: ParentState, id: String) {
     if (assigning) AssignDialog(vm, p, sale, onDismiss = { assigning = false })
 }
 
-private fun explain(p: ParentState, sale: Sale, article: Article?): Pair<String, String> = when {
+private fun explain(p: CatalogState, sale: Sale, article: Article?): Pair<String, String> = when {
     sale.conflict -> "Hay que revisarla" to "Aquí está anulada, pero Vinted dice otra cosa. Si el dinero ha entrado, confírmala."
     sale.status == SaleStatus.PENDING -> "En curso: aún puede anularse" to when {
         article != null -> "La prenda está guardada con su número. " +
@@ -190,7 +190,7 @@ private fun explain(p: ParentState, sale: Sale, article: Article?): Pair<String,
 }
 
 /** The number in the sale's code belongs now to a garment made after the sale. */
-private fun reused(p: ParentState, sale: Sale): Boolean =
+private fun reused(p: CatalogState, sale: Sale): Boolean =
     sale.code.isNotBlank() && Catalog.article(p, sale.number)?.let { it.createdAt > sale.soldAt } == true
 
 @Composable
@@ -202,7 +202,7 @@ private fun Fact(label: String, value: String) {
 }
 
 @Composable
-private fun SaleActions(vm: MainViewModel, p: ParentState, sale: Sale, onAsk: (Ask) -> Unit, onAssign: () -> Unit) {
+private fun SaleActions(vm: MainViewModel, p: CatalogState, sale: Sale, onAsk: (Ask) -> Unit, onAssign: () -> Unit) {
     val unlinked = sale.listedAt == null && sale.status != SaleStatus.CANCELLED && p.articles.any { it.inStock }
     val manual = sale.status == SaleStatus.PENDING && sale.order.isBlank()
     val reopen = Sales.canReopen(p, sale)
@@ -243,7 +243,7 @@ private fun SaleActions(vm: MainViewModel, p: ParentState, sale: Sale, onAsk: (A
 
 /** Which article was it? Only those in stock. */
 @Composable
-private fun AssignDialog(vm: MainViewModel, p: ParentState, sale: Sale, onDismiss: () -> Unit) {
+private fun AssignDialog(vm: MainViewModel, p: CatalogState, sale: Sale, onDismiss: () -> Unit) {
     var picked by remember { mutableStateOf<Int?>(null) }
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val stock = p.articles.filter { it.inStock }.sortedByDescending { it.number }
@@ -293,12 +293,12 @@ fun articleName(a: Article): String =
 
 /** The article's page while a sale holds it: nothing to edit until the sale ends. */
 @Composable
-fun HeldArticle(vm: MainViewModel, p: ParentState, a: Article) {
+fun HeldArticle(vm: MainViewModel, p: CatalogState, a: Article) {
     val sale = Sales.sale(p, a.soldIn)
     var cancelling by remember { mutableStateOf(false) }
     val number = Sku.number(a.number, p.digits)
     val strip by produceState(emptyList<android.net.Uri>(), a.number) {
-        value = vm.albumPhotos(Sku.format(p.self.prefix, a.number, p.digits)).ifEmpty { vm.aiPhotos(a.number) }
+        value = vm.albumPhotos(Sku.format(p.mainAccount.prefix, a.number, p.digits)).ifEmpty { vm.aiPhotos(a.number) }
     }
     Scaffold(topBar = { Bar("", onBack = { vm.back() }) }) { padding ->
         Column(

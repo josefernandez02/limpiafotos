@@ -75,7 +75,7 @@ import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Ledger
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stage
 
@@ -94,29 +94,29 @@ private fun openCamera(context: Context, vm: MainViewModel) {
 private sealed interface Filter {
     data object All : Filter
     data class InStage(val stage: Stage) : Filter
-    data class Account(val deviceId: String) : Filter
+    data class Account(val accountId: String) : Filter
 }
 
 private fun Article.soldInVinted() = vinted.values.any { it.status == "sold" }
 
 @Composable
-fun ParentHome(vm: MainViewModel, p: ParentState) {
+fun ArticleListScreen(vm: MainViewModel, p: CatalogState) {
     val appState by vm.state.collectAsStateWithLifecycle()
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
-    val outbox by vm.outbox.collectAsStateWithLifecycle()
+    val accountPhotos by vm.accountPhotos.collectAsStateWithLifecycle()
     var filter by remember { mutableStateOf<Filter>(Filter.All) }
     // Long press: select several to change their status at once.
     var selected by remember { mutableStateOf(setOf<Int>()) }
     var bulk by remember { mutableStateOf(false) }
     androidx.activity.compose.BackHandler(enabled = selected.isNotEmpty()) { selected = emptySet() }
-    val devices = Catalog.devices(p)
+    val allAccounts = Catalog.allAccounts(p)
     // Articles in a sale in progress are in Ventas, not here.
     val active = p.articles.filter { it.inStock }.sortedByDescending { it.number }
     val shown = active.filter { a ->
         when (val f = filter) {
             Filter.All -> true
-            is Filter.InStage -> Catalog.stage(p, a, p.self) == f.stage
-            is Filter.Account -> f.deviceId in a.targets
+            is Filter.InStage -> Catalog.stage(p, a, p.mainAccount) == f.stage
+            is Filter.Account -> f.accountId in a.targets
         }
     }
     Scaffold(
@@ -168,13 +168,13 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 2.dp)) {
                     item { Choice("Todos", filter == Filter.All) { filter = Filter.All } }
                     // One filter per status that has articles, in the order they move.
-                    val byStage = active.groupingBy { Catalog.stage(p, it, p.self) }.eachCount()
+                    val byStage = active.groupingBy { Catalog.stage(p, it, p.mainAccount) }.eachCount()
                     for (st in Stage.entries) {
                         val n = byStage[st] ?: 0
                         if (n > 0) item(key = st.name) { Choice("${st.label} ($n)", filter == Filter.InStage(st)) { filter = Filter.InStage(st) } }
                     }
-                    if (devices.size > 1) {
-                        items(devices, key = { it.id }) { d ->
+                    if (allAccounts.size > 1) {
+                        items(allAccounts, key = { it.id }) { d ->
                             val n = active.count { d.id in it.targets }
                             Choice("${d.label} ($n)", filter == Filter.Account(d.id)) { filter = Filter.Account(d.id) }
                         }
@@ -185,7 +185,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
             items(shown, key = { it.number }) { a ->
                 val n = a.number
                 ArticleRow(
-                    vm, p, a, covers[n], outbox.values.sumOf { it[n] ?: 0 }, Modifier.animateItem(),
+                    vm, p, a, covers[n], accountPhotos.values.sumOf { it[n] ?: 0 }, Modifier.animateItem(),
                     selected = n in selected,
                     onClick = { if (selected.isEmpty()) vm.go(Screen.Article(n)) else selected = if (n in selected) selected - n else selected + n },
                     onLongClick = { selected = if (n in selected) selected - n else selected + n },
@@ -201,7 +201,7 @@ fun ParentHome(vm: MainViewModel, p: ParentState) {
 @Composable
 private fun ArticleRow(
     vm: MainViewModel,
-    p: ParentState,
+    p: CatalogState,
     a: Article,
     cover: android.net.Uri?,
     sending: Int,
@@ -216,7 +216,7 @@ private fun ArticleRow(
         val what = l.model.ifBlank { dev.catalogo.core.Garments.type(l.type)?.label.orEmpty().lowercase() }
         listOf(l.brand, what).filter { it.isNotBlank() }.joinToString(" ").ifBlank { null }
     }
-    val devices = Catalog.devices(p)
+    val allAccounts = Catalog.allAccounts(p)
     val favourites = a.vinted.values.sumOf { it.favourites ?: 0 }
     Tile(modifier, onClick = onClick, onLongClick = onLongClick, selected = selected) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -236,7 +236,7 @@ private fun ArticleRow(
                     overflow = TextOverflow.Ellipsis,
                 )
                 // Each chosen account with how far the article is there: usually one line.
-                val targets = devices.filter { it.id in a.targets }.ifEmpty { if (devices.size == 1) devices else emptyList() }
+                val targets = allAccounts.filter { it.id in a.targets }.ifEmpty { if (allAccounts.size == 1) allAccounts else emptyList() }
                 if (targets.isEmpty()) Muted("Sin cuenta elegida", maxLines = 1)
                 for (d in targets) AccountLine(d.label, Catalog.stage(p, a, d))
                 val extra = listOfNotNull(
@@ -253,16 +253,16 @@ private fun ArticleRow(
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
+fun ArticleScreen(vm: MainViewModel, p: CatalogState, number: Int) {
     val context = LocalContext.current
     val counts by vm.counts.collectAsStateWithLifecycle()
-    val outbox by vm.outbox.collectAsStateWithLifecycle()
+    val accountPhotos by vm.accountPhotos.collectAsStateWithLifecycle()
     val article = Catalog.article(p, number)
     var selling by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf(false) }
     var relisting by remember { mutableStateOf(false) }
     var soldBy by remember(article?.vinted) {
-        mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.self.id)
+        mutableStateOf(article?.vinted?.entries?.firstOrNull { it.value.status == "sold" }?.key ?: p.mainAccount.id)
     }
 
     if (article != null && article.held) {
@@ -324,22 +324,22 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 }
             }
 
-            article.vinted.entries.firstOrNull { it.value.status == "sold" }?.let { (deviceId, item) ->
+            article.vinted.entries.firstOrNull { it.value.status == "sold" }?.let { (accountId, item) ->
                 Tile {
                     Text("Vendido en Vinted", style = MaterialTheme.typography.titleMedium)
-                    Muted(listOfNotNull(Catalog.device(p, deviceId)?.label, item.price?.let(Money::format)).joinToString(GAP))
+                    Muted(listOfNotNull(Catalog.findAccount(p, accountId)?.label, item.price?.let(Money::format)).joinToString(GAP))
                     Muted("No hace falta marcarla: el PC la apunta al leer tus ventas.")
                 }
             }
 
             Section("Vinted")
             val appState by vm.state.collectAsStateWithLifecycle()
-            VintedCard(vm, p, article, appState, outbox.mapValues { it.value[number] ?: 0 })
+            VintedCard(vm, p, article, appState, accountPhotos.mapValues { it.value[number] ?: 0 })
 
             // Photos are always taken here; other accounts get a copy when chosen.
-            val ownSku = Sku.format(p.self.prefix, number, p.digits)
+            val ownSku = Sku.format(p.mainAccount.prefix, number, p.digits)
             val ownCount = counts[ownSku] ?: 0
-            val waitingAll = outbox.values.sumOf { it[number] ?: 0 }
+            val waitingAll = accountPhotos.values.sumOf { it[number] ?: 0 }
             val strip by produceState(emptyList<android.net.Uri>(), ownSku, ownCount, waitingAll) {
                 value = vm.albumPhotos(ownSku).ifEmpty { vm.aiPhotos(number) }
             }
@@ -348,12 +348,12 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
                 if (strip.isEmpty()) Muted("Sin fotos") else PhotoStrip(strip, onOpen = { vm.openViewer(strip, it) })
                 Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
-                        onClick = { vm.startSession(number, p.self.id) { openCamera(context, vm) } },
+                        onClick = { vm.startSession(number, p.mainAccount.id) { openCamera(context, vm) } },
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(14.dp),
                     ) { OneLine(if (ownCount == 0) "Hacer fotos" else "Añadir fotos") }
                     FilledTonalButton(
-                        onClick = { vm.go(Screen.Photos(number, p.self.id)) },
+                        onClick = { vm.go(Screen.Photos(number, p.mainAccount.id)) },
                         enabled = ownCount > 0,
                         modifier = Modifier.weight(1f).height(48.dp),
                         shape = RoundedCornerShape(14.dp),
@@ -417,11 +417,11 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
             costHint = Ledger.lot(p, article.lotId)?.let { "Coste por prenda de ${it.name}" },
             onDismiss = { selling = false },
             onConfirm = { price, c, paid, free -> vm.registerSale(number, price, c, soldBy, paid, free) },
-            extra = if (Catalog.devices(p).size > 1) {
+            extra = if (Catalog.allAccounts(p).size > 1) {
                 {
                     Muted("Vendido en")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (d in Catalog.devices(p)) Choice(d.label, soldBy == d.id) { soldBy = d.id }
+                        for (d in Catalog.allAccounts(p)) Choice(d.label, soldBy == d.id) { soldBy = d.id }
                     }
                 }
             } else null,
@@ -430,11 +430,11 @@ fun ArticleScreen(vm: MainViewModel, p: ParentState, number: Int) {
 }
 
 @Composable
-fun SessionScreen(vm: MainViewModel, p: ParentState) {
+fun CameraSessionScreen(vm: MainViewModel, p: CatalogState) {
     val context = LocalContext.current
     val session = p.session ?: return
-    val device = Catalog.device(p, session.deviceId)
-    val sku = Sku.format(device?.prefix ?: "", session.number, p.digits)
+    val vintedAccount = Catalog.findAccount(p, session.accountId)
+    val sku = Sku.format(vintedAccount?.prefix ?: "", session.number, p.digits)
     var confirmCancel by remember { mutableStateOf(false) }
     val withMedia = rememberWithPermissions(Perms.media, onDenied = { vm.say("Permite el acceso a las fotos") }) { vm.finishSession() }
 
@@ -444,7 +444,7 @@ fun SessionScreen(vm: MainViewModel, p: ParentState) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Spacer(Modifier.weight(1f))
-            Muted(device?.name ?: "")
+            Muted(vintedAccount?.name ?: "")
             Text(sku, style = Mono.copy(fontSize = 40.sp), modifier = Modifier.padding(vertical = 8.dp))
             Text(
                 "Haz las fotos y edítalas si quieres.\nLuego vuelve y pulsa Terminar.",
@@ -478,13 +478,13 @@ fun SessionScreen(vm: MainViewModel, p: ParentState) {
 }
 
 @Composable
-fun ReviewScreen(vm: MainViewModel, p: ParentState) {
+fun SessionPhotosScreen(vm: MainViewModel, p: CatalogState) {
     val photos by vm.review.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val progress by vm.progress.collectAsStateWithLifecycle()
     val session = p.session
-    val device = session?.let { Catalog.device(p, it.deviceId) }
-    val title = if (session != null && device != null) Sku.format(device.prefix, session.number, p.digits) else ""
+    val vintedAccount = session?.let { Catalog.findAccount(p, it.accountId) }
+    val title = if (session != null && vintedAccount != null) Sku.format(vintedAccount.prefix, session.number, p.digits) else ""
     val goBack: () -> Unit = { vm.back() }
 
     Scaffold(

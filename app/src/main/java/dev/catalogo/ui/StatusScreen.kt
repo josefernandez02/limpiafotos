@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sku
 import dev.catalogo.core.Stage
 import kotlinx.coroutines.delay
@@ -55,7 +55,7 @@ import java.util.Locale
  * opens it, where its status can also be changed by hand.
  */
 @Composable
-fun StatusScreen(vm: MainViewModel, p: ParentState) {
+fun StatusScreen(vm: MainViewModel, p: CatalogState) {
     val pc by vm.pc.collectAsStateWithLifecycle()
     val incidents by vm.incidents.collectAsStateWithLifecycle()
     val offers by vm.offers.collectAsStateWithLifecycle()
@@ -69,8 +69,8 @@ fun StatusScreen(vm: MainViewModel, p: ParentState) {
     var allAlerts by rememberSaveable { mutableStateOf(false) }
     val shownAlerts = if (allAlerts) incidents else incidents.take(ALERTS_SHOWN)
     val groups = listOf(Stage.REVIEW, Stage.WORKING, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED).associateWith { st ->
-        articles.filter { Catalog.stage(p, it, p.self) == st }.sortedByDescending { it.desk?.at ?: 0 }
-            .let { if (st == Stage.PLAYED) it.filter { a -> now - (a.desk?.at ?: 0) < 24 * 3_600_000L } else it }
+        articles.filter { Catalog.stage(p, it, p.mainAccount) == st }.sortedByDescending { it.pcTask?.at ?: 0 }
+            .let { if (st == Stage.PLAYED) it.filter { a -> now - (a.pcTask?.at ?: 0) < 24 * 3_600_000L } else it }
     }.filterValues { it.isNotEmpty() }
 
     Scaffold(topBar = { Header("Estado") }, bottomBar = { MainTabs(vm, Screen.Status) }) { padding ->
@@ -155,8 +155,8 @@ private const val ALERTS_SHOWN = 3
 
 /** «0031  Levi's 505 W32 ·········· ● En curso», and below what is happening, if anything. */
 @Composable
-private fun StatusRow(vm: MainViewModel, p: ParentState, a: Article) {
-    val title = Catalog.freshAi(p, a.number)?.titles?.get(p.self.id)
+private fun StatusRow(vm: MainViewModel, p: CatalogState, a: Article) {
+    val title = Catalog.freshAi(p, a.number)?.titles?.get(p.mainAccount.id)
         ?: a.listing?.let { l -> listOf(l.brand, l.model, l.size).filter { it.isNotBlank() }.joinToString(" ") }.orEmpty()
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { vm.go(Screen.Article(a.number)) }.padding(vertical = 2.dp),
@@ -173,9 +173,9 @@ private fun StatusRow(vm: MainViewModel, p: ParentState, a: Article) {
                 modifier = Modifier.weight(1f),
             )
             Spacer(Modifier.width(8.dp))
-            StatusChip(Catalog.stage(p, a, p.self))
+            StatusChip(Catalog.stage(p, a, p.mainAccount))
         }
-        val d = a.desk
+        val d = a.pcTask
         val line = when {
             d == null -> null
             d.pending.isNotBlank() -> "Pendiente de avisar al PC"
@@ -189,7 +189,7 @@ private fun StatusRow(vm: MainViewModel, p: ParentState, a: Article) {
 
 /** The PC: what it is doing, when that was checked, and the buttons that matter (pause / go on now / stop). */
 @Composable
-private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.Drafts.Pc) {
+private fun PcPanel(vm: MainViewModel, pc: dev.catalogo.data.PcSync.Pc) {
     val status = pc.status
     var asking by remember { mutableStateOf(false) }
     var starting by remember { mutableStateOf(false) }
@@ -323,7 +323,7 @@ fun GamesPanel(vm: MainViewModel, off: Set<String>) {
 
 /** Automatic offers: one button. It goes through the likes until it reaches what was already offered, then stops. */
 @Composable
-private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.Desk.Offers) {
+private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.PcClient.Offers) {
     var showLast by rememberSaveable { mutableStateOf(false) }
     Tile {
         Text(if (o.working) "Ofertas: trabajando" else "Ofertas", style = MaterialTheme.typography.titleMedium)
@@ -362,7 +362,7 @@ private fun OffersPanel(vm: MainViewModel, o: dev.catalogo.data.Desk.Offers) {
 
 /** One notice from the PC: a watchdog warning or a single link without like. Compact; tap it for what to do. */
 @Composable
-private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -> Unit, onDone: () -> Unit) {
+private fun IncidentRow(inc: dev.catalogo.data.PcClient.Incident, onOpen: (String) -> Unit, onDone: () -> Unit) {
     var open by remember(inc.id) { mutableStateOf(false) }
     val color = when (inc.level) {
         "grave" -> MaterialTheme.colorScheme.error
@@ -408,7 +408,7 @@ private fun IncidentRow(inc: dev.catalogo.data.Desk.Incident, onOpen: (String) -
 /** Today's games, one line each: ✔ perfect, ⚠ to check, ✖ not played; what went wrong only for the last two. */
 @Composable
 private fun HealthTile(
-    h: dev.catalogo.data.Desk.Health?, today: List<dev.catalogo.data.Desk.GameDay>, notices: List<dev.catalogo.data.Desk.Incident>,
+    h: dev.catalogo.data.PcClient.Health?, today: List<dev.catalogo.data.PcClient.GameDay>, notices: List<dev.catalogo.data.PcClient.Incident>,
 ) {
     val games = h?.today.orEmpty()
     Tile {

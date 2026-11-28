@@ -15,7 +15,7 @@ import kotlinx.serialization.json.putJsonArray
  * [Built.doubts] are fields filled without certainty that the user confirms
  * in «Revisar» before the article goes to the PC.
  */
-object Draft {
+object PcPayload {
     data class Built(
         val ref: String,
         val payload: JsonObject?,
@@ -37,8 +37,8 @@ object Draft {
     )
 
     /** Unique for this article's life: the number plus when it was created (numbers are reused), and which listing it is (re-listed ones are new to the PC). */
-    fun ref(device: Device, article: Article, digits: Int): String =
-        Sku.format(device.prefix, article.number, digits) + "-" + article.createdAt.toString(36) +
+    fun ref(vintedAccount: VintedAccount, article: Article, digits: Int): String =
+        Sku.format(vintedAccount.prefix, article.number, digits) + "-" + article.createdAt.toString(36) +
             if (article.round > 0) "r${article.round}" else ""
 
     fun condition(c: Condition): String = when (c) {
@@ -49,14 +49,14 @@ object Draft {
         Condition.FAIR -> "satisfactorio"
     }
 
-    fun build(p: ParentState, article: Article, device: Device, fixes: Fixes = Fixes()): Built {
-        val ref = ref(device, article, p.digits)
+    fun build(p: CatalogState, article: Article, vintedAccount: VintedAccount, fixes: Fixes = Fixes()): Built {
+        val ref = ref(vintedAccount, article, p.digits)
         val problems = mutableListOf<String>()
         val doubts = linkedSetOf<String>()
         val listing = article.listing
         val ai = Catalog.freshAi(p, article.number)
         if (listing == null) problems += "Faltan los datos del artículo"
-        if (device.account.isBlank()) problems += "La cuenta de ${device.name} no tiene nombre de Vinted (Ajustes)"
+        if (vintedAccount.vintedName.isBlank()) problems += "La cuenta de ${vintedAccount.name} no tiene nombre de Vinted (Ajustes)"
         if (article.price == null || article.price <= 0) problems += "Falta el precio de Vinted"
         // Always written by hand now (also old «Sin marca» articles: «Vintage Dressing», «Vintage»…).
         if (listing != null && listing.brand.isBlank()) problems += "Falta la marca (escríbela en Editar)"
@@ -64,23 +64,23 @@ object Draft {
         if (article.relist != null) problems += "Al resubir, el título y los hashtags tienen que cambiar (los escribe la IA al preparar el borrador)"
         if (listing == null || ai == null) return Built(ref, null, problems, emptyList())
 
-        val text = Catalog.listingText(p, article.number, device)
+        val text = Catalog.listingText(p, article.number, vintedAccount)
         if (text == null || text.title.isBlank()) problems += "No hay título"
 
-        val category = (fixes.category ?: ai.category)?.takeIf { it in Vinted.categories }
+        val category = (fixes.category ?: ai.category)?.takeIf { it in VintedTaxonomy.categories }
         if (category == null) doubts += "categoria"
         // The size exactly as the form offers it for this category; without certainty, «Revisar».
-        val options = category?.let(Sizes::options).orEmpty()
+        val options = category?.let(VintedSizes::options).orEmpty()
         val size = when {
             category == null || options.isEmpty() -> ""          // no category yet, or it asks for no size
             fixes.size != null && fixes.size in options -> fixes.size
-            else -> Sizes.resolve(category, listing) ?: "".also { doubts += "talla" }
+            else -> VintedSizes.resolve(category, listing) ?: "".also { doubts += "talla" }
         }
-        val colors = (fixes.colors ?: ai.colors.mapNotNull(Vinted::color)).filter { it in Vinted.colors }
-            .distinct().take(Vinted.MAX_COLORS)
+        val colors = (fixes.colors ?: ai.colors.mapNotNull(VintedTaxonomy::color)).filter { it in VintedTaxonomy.colors }
+            .distinct().take(VintedTaxonomy.MAX_COLORS)
         if (colors.isEmpty()) doubts += "colores"
-        val materials = (fixes.materials ?: ai.materials).filter { it in Vinted.materials }.distinct()
-            .take(Vinted.MAX_MATERIALS)
+        val materials = (fixes.materials ?: ai.materials).filter { it in VintedTaxonomy.materials }.distinct()
+            .take(VintedTaxonomy.MAX_MATERIALS)
 
         // The AI's own doubts, unless the user already settled that field.
         for (d in ai.doubts) {
@@ -100,8 +100,8 @@ object Draft {
         if (problems.isNotEmpty()) return Built(ref, null, problems, doubts.toList())
         val payload = buildJsonObject {
             put("ref", ref)
-            put("cuenta", device.account)
-            put("modo", article.desk?.mode ?: Mode.UPLOAD_PLAY)
+            put("cuenta", vintedAccount.vintedName)
+            put("modo", article.pcTask?.mode ?: Mode.UPLOAD_PLAY)
             put("titulo", text!!.title.take(ListingWriter.TITLE_MAX))
             put("descripcion", text.description.take(ListingWriter.DESCRIPTION_MAX))
             put("categoria", category)

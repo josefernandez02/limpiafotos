@@ -7,11 +7,11 @@ import kotlin.test.assertNull
 
 class LedgerTest {
 
-    private val samsung = Device("p", "Samsung", "SH")
-    private val poco = Device("c1", "Poco", "SA", style = 1)
+    private val samsung = VintedAccount("p", "Samsung", "SH")
+    private val poco = VintedAccount("c1", "Poco", "SA", style = 1)
 
-    private fun withLot(): ParentState {
-        var s = ParentState(self = samsung, children = listOf(poco))
+    private fun withLot(): CatalogState {
+        var s = CatalogState(mainAccount = samsung, otherAccounts = listOf(poco))
         s = Ledger.addLot(s, "L1", "Lote vaqueros", 10_000, 20, 0)
         repeat(3) { s = Catalog.create(s, 0).first }
         s = Catalog.updateArticle(s, 0, Listing(type = "jeans"), "L1", null)
@@ -87,5 +87,5 @@ class LedgerTest {
 }
 
 /** Sold and paid. */
-internal fun ParentState.sold(number: Int, account: String, price: Long, cost: Long?, now: Long): ParentState =
+internal fun CatalogState.sold(number: Int, account: String, price: Long, cost: Long?, now: Long): CatalogState =
     Sales.complete(Sales.register(this, number, "t$number-$now", account, price, cost, now), "t$number-$now", now)

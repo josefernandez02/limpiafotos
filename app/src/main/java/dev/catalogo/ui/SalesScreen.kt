@@ -50,7 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Garments
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.Sale
 import dev.catalogo.core.SaleStatus
 import dev.catalogo.core.Sales
@@ -100,8 +100,8 @@ fun SaleChip(sale: Sale) {
 }
 
 /** «SH0012», or null while nobody knows which article it was. */
-fun saleCode(p: ParentState, sale: Sale): String? = sale.code.ifBlank {
-    if (sale.number < 0) "" else Sku.format(Catalog.device(p, sale.deviceId)?.prefix ?: p.self.prefix, sale.number, p.digits)
+fun saleCode(p: CatalogState, sale: Sale): String? = sale.code.ifBlank {
+    if (sale.number < 0) "" else Sku.format(Catalog.findAccount(p, sale.accountId)?.prefix ?: p.mainAccount.prefix, sale.number, p.digits)
 }.ifBlank { null }
 
 fun saleTitle(sale: Sale): String = sale.title.ifBlank {
@@ -110,7 +110,7 @@ fun saleTitle(sale: Sale): String = sale.title.ifBlank {
 
 /** The picture of a sale: its article's cover while there is one, else the one kept or Vinted's. */
 @Composable
-fun SaleImage(vm: MainViewModel, p: ParentState, sale: Sale, modifier: Modifier, edge: Int = 256) {
+fun SaleImage(vm: MainViewModel, p: CatalogState, sale: Sale, modifier: Modifier, edge: Int = 256) {
     val covers by vm.articleCovers.collectAsStateWithLifecycle()
     val cover: Uri? = Sales.article(p, sale)?.let { covers[it.number] }
     val context = LocalContext.current
@@ -136,7 +136,7 @@ fun SaleImage(vm: MainViewModel, p: ParentState, sale: Sale, modifier: Modifier,
 
 /** «Ventas»: where the money is, what needs the user, and every sale. The numbers behind are in their own screen. */
 @Composable
-fun SalesScreen(vm: MainViewModel, p: ParentState) {
+fun SalesScreen(vm: MainViewModel, p: CatalogState) {
     val view by vm.salesView.collectAsStateWithLifecycle()
     val reading by vm.reading.collectAsStateWithLifecycle()
     val working = reading?.working == true
@@ -231,7 +231,7 @@ private fun costNote(sales: List<Sale>, status: SaleStatus): String {
 
 /** A Vinted order about a garment already sold by hand: the user is told, nothing is touched. */
 @Composable
-fun DoubtCard(vm: MainViewModel, p: ParentState, order: Sale, hand: Sale) {
+fun DoubtCard(vm: MainViewModel, p: CatalogState, order: Sale, hand: Sale) {
     Tile {
         Text("Ya la marcaste como vendida", style = MaterialTheme.typography.titleMedium, color = Tone.Warn.color)
         Text(saleTitle(order), style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -258,7 +258,7 @@ private fun saleState(sale: Sale): String = when {
 
 /** Photo, then three lines that are never cut short: title and price, code and account with profit, date and state. */
 @Composable
-private fun SaleCard(vm: MainViewModel, p: ParentState, sale: Sale) {
+private fun SaleCard(vm: MainViewModel, p: CatalogState, sale: Sale) {
     val cancelled = sale.status == SaleStatus.CANCELLED
     Tile(onClick = { vm.go(Screen.Sale(sale.id)) }) {
         Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -278,7 +278,7 @@ private fun SaleCard(vm: MainViewModel, p: ParentState, sale: Sale) {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Muted(
-                        listOfNotNull(saleCode(p, sale) ?: "Sin código", Catalog.device(p, sale.deviceId)?.label).joinToString(" · "),
+                        listOfNotNull(saleCode(p, sale) ?: "Sin código", Catalog.findAccount(p, sale.accountId)?.label).joinToString(" · "),
                         Modifier.weight(1f),
                     )
                     val cost = sale.cost
@@ -303,7 +303,7 @@ private fun SaleCard(vm: MainViewModel, p: ParentState, sale: Sale) {
 
 /** The numbers behind the sales, for the period chosen. */
 @Composable
-fun SalesStatsScreen(vm: MainViewModel, p: ParentState) {
+fun SalesStatsScreen(vm: MainViewModel, p: CatalogState) {
     val view by vm.salesView.collectAsStateWithLifecycle()
     val now = remember(p) { System.currentTimeMillis() }
     val inPeriod = remember(p, view.period) { Stats.within(p.sales, view.period, now) }

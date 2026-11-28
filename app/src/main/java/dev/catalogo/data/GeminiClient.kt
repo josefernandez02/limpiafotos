@@ -6,12 +6,12 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import dev.catalogo.core.Ai
-import dev.catalogo.core.ModelPool
+import dev.catalogo.core.GeminiModelPool
 import dev.catalogo.core.AiException
 import dev.catalogo.core.AiSuggestion
 import dev.catalogo.core.Listing
-import dev.catalogo.core.Reader
-import dev.catalogo.core.Reading
+import dev.catalogo.core.TagReader
+import dev.catalogo.core.TagReading
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -31,19 +31,19 @@ import java.net.UnknownHostException
  * key can use, tries the best Flash first and falls back to Flash-Lite when
  * one runs out of free quota, so new model names need no app update.
  */
-class Gemini(private val resolver: ContentResolver) {
+class GeminiClient(private val resolver: ContentResolver) {
 
     data class Answer(val suggestion: AiSuggestion, val model: String, val seconds: Int)
 
     private var models: List<String>? = null
-    private val pool = ModelPool()
+    private val pool = GeminiModelPool()
     /** The reading of the last articles, by photo: asking again for the same photos does not read the labels again. */
-    private val readings = object : LinkedHashMap<List<String>, Reading>() {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<List<String>, Reading>?) = size > 8
+    private val readings = object : LinkedHashMap<List<String>, TagReading>() {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<List<String>, TagReading>?) = size > 8
     }
 
     /**
-     * Two calls, like a careful seller: first only reading ([Reader]: every chosen
+     * Two calls, like a careful seller: first only reading ([TagReader]: every chosen
      * photo, larger, to catch the labels), then the listing with that reading as
      * facts. If the reading fails (quota, timeout) the listing is still written
      * without it rather than leaving the article stuck.
@@ -52,11 +52,11 @@ class Gemini(private val resolver: ContentResolver) {
         withContext(Dispatchers.IO) {
             if (key.isBlank()) throw AiException("Pon tu clave de Gemini en Ajustes")
             val started = System.currentTimeMillis()
-            val photoKey = photos.take(Reader.PHOTOS).map { it.toString() }
+            val photoKey = photos.take(TagReader.PHOTOS).map { it.toString() }
             val reading = runCatching {
                 readings[photoKey] ?: run {
-                    val big = photos.take(Reader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
-                    if (big.isEmpty()) null else Reader.parse(generate(key, lite = true) { m, t -> Reader.request(big, m, t) }.first)
+                    val big = photos.take(TagReader.PHOTOS).mapNotNull { runCatching { jpeg(it, READ_SIDE) }.getOrNull() }
+                    if (big.isEmpty()) null else TagReader.parse(generate(key, lite = true) { m, t -> TagReader.request(big, m, t) }.first)
                         ?.also { readings[photoKey] = it }
                 }
             }.onSuccess { r ->
@@ -77,18 +77,18 @@ class Gemini(private val resolver: ContentResolver) {
 
     /**
      * A re-listed article whose answer still repeats the old title or hashtags: a short text-only call that edits just
-     * those (see [dev.catalogo.core.RelistFix]) and merges the result into [current].
+     * those (see [dev.catalogo.core.RelistRepair]) and merges the result into [current].
      */
     suspend fun fixRepeated(key: String, listing: Listing, avoid: dev.catalogo.core.Relist, current: dev.catalogo.core.AiSuggestion, accounts: List<Ai.Account>): dev.catalogo.core.AiSuggestion =
         withContext(Dispatchers.IO) {
             // What is true of the garment: the rewrite must not change fabric, colour or garment to get new words.
             val facts = dev.catalogo.core.TitleGuard.facts(listing, current)
             val fresh = current.hashtags.count { t -> t.lowercase() !in avoid.hashtags.map { it.lowercase() }.toSet() }
-            val needTags = if (avoid.hashtags.isNotEmpty()) (dev.catalogo.core.Relisting.MIN_TAGS - fresh).coerceAtLeast(0) else 0
-            val (text, model) = generate(key, lite = true) { _, _ -> dev.catalogo.core.RelistFix.request(avoid, current, accounts, needTags, facts) }
-            val edit = dev.catalogo.core.RelistFix.parse(text, accounts)
+            val needTags = if (avoid.hashtags.isNotEmpty()) (dev.catalogo.core.RelistRules.MIN_TAGS - fresh).coerceAtLeast(0) else 0
+            val (text, model) = generate(key, lite = true) { _, _ -> dev.catalogo.core.RelistRepair.request(avoid, current, accounts, needTags, facts) }
+            val edit = dev.catalogo.core.RelistRepair.parse(text, accounts)
             AppLog.i("ia", "arreglo de repetidos con $model: títulos=${edit.titles.values} hashtags=${edit.hashtags}")
-            dev.catalogo.core.RelistFix.merge(avoid, current, edit, accounts, facts)
+            dev.catalogo.core.RelistRepair.merge(avoid, current, edit, accounts, facts)
         }
 
     /**
@@ -111,9 +111,9 @@ class Gemini(private val resolver: ContentResolver) {
                 val wait = pool.wait(all)
                 if (System.currentTimeMillis() + wait > deadline) {
                     throw AiException(when (pool.why(all)) {
-                        ModelPool.Why.DAILY -> "Se ha acabado el uso gratis de hoy. Prueba mañana."
-                        ModelPool.Why.MINUTE -> "Gemini está al límite de uso por minuto, prueba en un rato"
-                        ModelPool.Why.BUSY -> "Gemini no responde ahora, prueba en un rato"
+                        GeminiModelPool.Why.DAILY -> "Se ha acabado el uso gratis de hoy. Prueba mañana."
+                        GeminiModelPool.Why.MINUTE -> "Gemini está al límite de uso por minuto, prueba en un rato"
+                        GeminiModelPool.Why.BUSY -> "Gemini no responde ahora, prueba en un rato"
                     })
                 }
                 AppLog.i("ia", "ningún modelo libre: espero ${wait / 1000 + 1} s")
@@ -127,7 +127,7 @@ class Gemini(private val resolver: ContentResolver) {
                         post("$BASE/models/$model:generateContent", key, body(model, thinking))
                     } catch (e: SocketTimeoutException) {
                         AppLog.i("ia", "$model: sin respuesta a tiempo")
-                        pool.block(model, 10_000, ModelPool.Why.BUSY)
+                        pool.block(model, 10_000, GeminiModelPool.Why.BUSY)
                         break // next model
                     } catch (e: UnknownHostException) {
                         throw IOException("Sin internet", e)
@@ -149,10 +149,10 @@ class Gemini(private val resolver: ContentResolver) {
                             val daily = "PerDay" in text
                             val secs = Regex("\"retryDelay\"\\s*:\\s*\"(\\d+(?:\\.\\d+)?)s\"").find(text)?.groupValues?.get(1)?.toDoubleOrNull()
                             AppLog.i("ia", "$model 429: ${if (daily) "cuota del día" else "límite por minuto"}${secs?.let { ", Google pide esperar ${it.toInt()} s" } ?: ""}")
-                            if (daily) pool.daily(model) else pool.block(model, (Math.ceil(secs ?: 20.0).toLong().coerceIn(5L, 70L)) * 1000, ModelPool.Why.MINUTE)
+                            if (daily) pool.daily(model) else pool.block(model, (Math.ceil(secs ?: 20.0).toLong().coerceIn(5L, 70L)) * 1000, GeminiModelPool.Why.MINUTE)
                         }
                         code == 404 -> pool.missing(model)
-                        code >= 500 -> pool.block(model, 15_000, ModelPool.Why.BUSY)
+                        code >= 500 -> pool.block(model, 15_000, GeminiModelPool.Why.BUSY)
                         else -> throw AiException("Gemini ha dado un error ($code)")
                     }
                     break

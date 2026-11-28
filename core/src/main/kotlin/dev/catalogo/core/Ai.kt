@@ -29,7 +29,7 @@ data class AiResult(
     val hashtags: List<String> = emptyList(),
     /** How long the answer took, to see if the AI is getting slow. */
     val seconds: Int = 0,
-    /** Up to 3 of [Vinted.materials], as the label (or the fabric) shows. */
+    /** Up to 3 of [VintedTaxonomy.materials], as the label (or the fabric) shows. */
     val materials: List<String> = emptyList(),
     /** Fields the AI is not sure about ([Ai.DOUBT_FIELDS]): the user checks them before the draft. */
     val doubts: List<String> = emptyList(),
@@ -55,7 +55,7 @@ data class AiSuggestion(
     val materials: List<String> = emptyList(),
     val doubts: List<String> = emptyList(),
     /** What the first call read in the labels (null when it was not made or failed). */
-    val reading: Reading? = null,
+    val reading: TagReading? = null,
 ) {
     /** The listing with the suggestions applied; what the user typed always wins. */
     fun applyTo(listing: Listing): Listing {
@@ -75,14 +75,14 @@ data class AiSuggestion(
 
     fun result(applied: Listing, model: String, seconds: Int = 0) =
         AiResult(Ai.basis(applied), category, colors, titles, model, hashtags, seconds, materials, doubts,
-            Reader.compositionText(reading))
+            TagReader.compositionText(reading))
 }
 
 class AiException(message: String) : Exception(message)
 
 /**
  * Prompt, request and answer checking for the listing call. A first call
- * ([Reader]) reads the labels; this one gets that reading as facts, observes the
+ * ([TagReader]) reads the labels; this one gets that reading as facts, observes the
  * photos (findings) and writes the listing in the same answer.
  */
 object Ai {
@@ -122,7 +122,7 @@ object Ai {
 
     /**
      * The part of the prompt for a re-listed article: the titles and hashtags it had, which the new ones must not repeat
-     * (see [Relisting] for how much they must differ). Empty for a first listing.
+     * (see [RelistRules] for how much they must differ). Empty for a first listing.
      */
     fun relistingPrompt(avoid: Relist?, accounts: List<Account>, rejected: Relist? = null): String {
         if (avoid == null) return ""
@@ -130,12 +130,12 @@ object Ai {
         return buildString {
             append("\nREPUBLICACION (la prenda se vuelve a subir con fotos nuevas; el anuncio no puede ser el mismo)\n")
             if (titles.isNotEmpty()) append("- Títulos usados antes:\n").append(titles.joinToString("\n") { "  $it" }).append('\n')
-            append("- Cada título nuevo lleva al menos ${Relisting.MIN_WORDS} palabras que no estaban en el anterior de su cuenta: sinónimos REALES de la misma prenda (Jeans / Denim Pants, Sweater / Jumper, Pants / Trousers), otra palabra de corte, diseño, época o estilo que sea cierta, otro matiz del MISMO color. ")
+            append("- Cada título nuevo lleva al menos ${RelistRules.MIN_WORDS} palabras que no estaban en el anterior de su cuenta: sinónimos REALES de la misma prenda (Jeans / Denim Pants, Sweater / Jumper, Pants / Trousers), otra palabra de corte, diseño, época o estilo que sea cierta, otro matiz del MISMO color. ")
             append("Mismas reglas de arriba: orden de la cuenta, palabras que de verdad se buscan, nada inventado, y la VERDAD manda: nunca cambies de material (Wool no se cambia por Cashmere, Merino ni nada «más bonito»), de color ni de prenda para conseguir palabras nuevas. ")
             append("Si no te salen palabras nuevas verdaderas, usa época, estética, detalles visibles o el corte antes que un sinónimo falso. Cambiar solo el orden no vale.\n")
             if (avoid.hashtags.isNotEmpty()) {
                 append("- Hashtags usados antes: ").append(avoid.hashtags.joinToString(", ")).append('\n')
-                append("- Los nuevos incluyen al menos ${Relisting.MIN_TAGS} que no estén en esa lista (otras búsquedas ciertas: sinónimos, el otro idioma, estilo, época o un detalle visible). Conserva los esenciales (marca, prenda) y mantén de 10 a 12.\n")
+                append("- Los nuevos incluyen al menos ${RelistRules.MIN_TAGS} que no estén en esa lista (otras búsquedas ciertas: sinónimos, el otro idioma, estilo, época o un detalle visible). Conserva los esenciales (marca, prenda) y mantén de 10 a 12.\n")
             }
             if (rejected != null) {
                 // A retry: the same prompt gives the same answer, so the model is told what it already wrote and was refused.
@@ -146,7 +146,7 @@ object Ai {
         }
     }
 
-    fun prompt(listing: Listing, accounts: List<Account>, reading: Reading? = null, avoid: Relist? = null, rejected: Relist? = null): String {
+    fun prompt(listing: Listing, accounts: List<Account>, reading: TagReading? = null, avoid: Relist? = null, rejected: Relist? = null): String {
         val type = Garments.type(listing.type)
         val epochs = listing.keywords.mapNotNull(Garments::keyword).filter { it.kind == KeywordKind.EPOCH }
         val user = buildJsonObject {
@@ -229,7 +229,7 @@ object Ai {
 
             DATOS_DEL_USUARIO
             $user
-            ${Reader.facts(reading)?.let { "\nLECTURA_DE_ETIQUETAS\n$it\n" }.orEmpty()}
+            ${TagReader.facts(reading)?.let { "\nLECTURA_DE_ETIQUETAS\n$it\n" }.orEmpty()}
             CUENTAS (orden del título y ejemplos)
             ${accounts.joinToString("\n") { "${it.prefix}: ${VOICES[it.style.mod(VOICES.size)].trimIndent()}" }}
 
@@ -239,9 +239,9 @@ object Ai {
             PALABRAS (id|en inglés|qué significa)
             ${Garments.keywords.filter { it.kind != KeywordKind.EPOCH }.joinToString("\n") { "${it.id}|${it.en[0]}|${it.help}" }}
 
-            COLORES: ${Vinted.colors.joinToString(", ")}
+            COLORES: ${VintedTaxonomy.colors.joinToString(", ")}
 
-            MATERIALES: ${Vinted.materials.joinToString(", ")}
+            MATERIALES: ${VintedTaxonomy.materials.joinToString(", ")}
 
             CATEGORIAS
             ${categoriesFor(listing.gender, listing.type).joinToString("\n")}
@@ -257,7 +257,7 @@ object Ai {
      * which is where most wrong categories came from. Falls back to all when unsure.
      */
     fun categoriesFor(gender: Gender?, type: String = ""): List<String> {
-        val byGender = if (gender == null) Vinted.categories else Vinted.categories.filter { it.startsWith(gender.label + " ") }
+        val byGender = if (gender == null) VintedTaxonomy.categories else VintedTaxonomy.categories.filter { it.startsWith(gender.label + " ") }
         val family = FAMILIES[type] ?: return byGender
         val picked = byGender.filter { c -> family.any { c.contains(it) } }
         return if (picked.size >= 2) picked else byGender
@@ -321,13 +321,13 @@ object Ai {
     /** A category as the AI wrote it, matched to the list even with small differences. */
     fun matchCategory(raw: String): String? {
         val text = raw.trim()
-        Vinted.categories.firstOrNull { it == text }?.let { return it }
+        VintedTaxonomy.categories.firstOrNull { it == text }?.let { return it }
         fun norm(x: String) = x.lowercase().replace(Regex("\\s*[›>/|]\\s*"), "›").replace(Regex("\\s+"), " ").trim()
         val n = norm(text)
-        Vinted.categories.firstOrNull { norm(it) == n }?.let { return it }
+        VintedTaxonomy.categories.firstOrNull { norm(it) == n }?.let { return it }
         // The last two levels are usually enough to tell which one it is.
         val tail = n.split('›').takeLast(2).joinToString("›")
-        return Vinted.categories.filter { norm(it).endsWith(tail) }.singleOrNull()
+        return VintedTaxonomy.categories.filter { norm(it).endsWith(tail) }.singleOrNull()
     }
 
     /**
@@ -341,7 +341,7 @@ object Ai {
         photos: List<String>,
         model: String = "",
         thinking: Boolean = true,
-        reading: Reading? = null,
+        reading: TagReading? = null,
         avoid: Relist? = null,
         rejected: Relist? = null,
     ): String = buildJsonObject {
@@ -395,10 +395,10 @@ object Ai {
             "palabras" to arr(str(Garments.keywords.filter { it.kind != KeywordKind.EPOCH }.map { it.id })),
             "sexo" to str(listOf("hombre", "mujer"), nullable = true),
             // Free text checked afterwards: an enum of hundreds of paths makes the answer much slower.
-            "corte" to str(Fits.ALL, nullable = true),
+            "corte" to str(TrouserFits.ALL, nullable = true),
             "categoria" to str(nullable = true),
-            "colores" to arr(str(Vinted.colors), max = Vinted.MAX_COLORS),
-            "materiales" to arr(str(Vinted.materials), max = Vinted.MAX_MATERIALS),
+            "colores" to arr(str(VintedTaxonomy.colors), max = VintedTaxonomy.MAX_COLORS),
+            "materiales" to arr(str(VintedTaxonomy.materials), max = VintedTaxonomy.MAX_MATERIALS),
             "dudas" to arr(str(DOUBT_FIELDS)),
             "marca" to str(nullable = true),
             "modelo" to str(nullable = true),
@@ -423,7 +423,7 @@ object Ai {
     }
 
     /** Checks every value against the closed lists; anything unknown is dropped. */
-    fun parse(answer: String, listing: Listing, accounts: List<Account>, reading: Reading? = null): AiSuggestion {
+    fun parse(answer: String, listing: Listing, accounts: List<Account>, reading: TagReading? = null): AiSuggestion {
         val o = runCatching { json.parseToJsonElement(answer.trim().removePrefix("```json").removeSuffix("```")).jsonObject }
             .getOrNull() ?: throw AiException("Respuesta de la IA ilegible")
         val type = o["tipo_prenda"]?.str()?.takeIf { Garments.type(it) != null }
@@ -440,15 +440,15 @@ object Ai {
         val readGender = when (reading?.gender) { "hombre" -> Gender.MEN; "mujer" -> Gender.WOMEN; else -> null }
         val finalGender = listing.gender ?: readGender ?: gender
         var category = o["categoria"]?.str()?.let(::matchCategory)?.let { c ->
-            if (finalGender == null) c else Fits.forGender(c, finalGender) ?: c.takeIf { Fits.isJeans(it) }   // same category, right gender
+            if (finalGender == null) c else TrouserFits.forGender(c, finalGender) ?: c.takeIf { TrouserFits.isJeans(it) }   // same category, right gender
         }
-        val colors = o.strings("colores").filter { it in Vinted.colors }.distinct().take(2).let { c ->
+        val colors = o.strings("colores").filter { it in VintedTaxonomy.colors }.distinct().take(2).let { c ->
             if (c.size == 2 && SHADES.any { c[0] in it && c[1] in it }) c.take(1) else c
         }
         // A composition label decides the materials (a 100% cotton pair of jeans is «Algodón», not «Vaquero»).
         // Then what the seller wrote («es lana»): nothing to ask about it.
-        val read = reading?.materials.orEmpty().ifEmpty { Reader.materials(listOf(listing.aiNotes)) }
-        val materials = read.ifEmpty { o.strings("materiales").filter { it in Vinted.materials }.distinct().take(Vinted.MAX_MATERIALS) }
+        val read = reading?.materials.orEmpty().ifEmpty { TagReader.materials(listOf(listing.aiNotes)) }
+        val materials = read.ifEmpty { o.strings("materiales").filter { it in VintedTaxonomy.materials }.distinct().take(VintedTaxonomy.MAX_MATERIALS) }
         // With type, materials and colours settled, everything the AI writes about the garment is checked against them
         // (see [TitleGuard]): a wool and nylon jumper is never «Cashmere», a grey one never «Blue», a sweater never a «Puffer».
         val facts = TitleGuard.facts(listing, listing.type.ifEmpty { type.orEmpty() }.ifEmpty { null }, materials, colors)
@@ -472,11 +472,11 @@ object Ai {
         val findings = (o["hallazgos"] as? JsonArray).orEmpty().mapNotNull { (it as? JsonObject)?.get("detalle")?.str() }
         // Jeans: the cut decides the category. A model number is a fact (Levi's 511 → slim);
         // then the reading call's cut, then the listing call's.
-        val modelFit = Fits.ofModel(listing.brand.ifBlank { brand.orEmpty() }, listing.model.ifBlank { model.orEmpty() })
-        val fit = modelFit ?: reading?.fit ?: Fits.normalize(o["corte"]?.str())
-        val byFit = category?.takeIf { Fits.isJeans(it) }?.let { c ->
+        val modelFit = TrouserFits.ofModel(listing.brand.ifBlank { brand.orEmpty() }, listing.model.ifBlank { model.orEmpty() })
+        val fit = modelFit ?: reading?.fit ?: TrouserFits.normalize(o["corte"]?.str())
+        val byFit = category?.takeIf { TrouserFits.isJeans(it) }?.let { c ->
             val g = finalGender ?: if (c.startsWith(Gender.WOMEN.label)) Gender.WOMEN else Gender.MEN
-            fit?.let { Fits.jeansCategory(g, it) }
+            fit?.let { TrouserFits.jeansCategory(g, it) }
         }
         if (byFit != null) category = byFit
         if (finalGender != null && category?.startsWith(finalGender.label + " ") == false) category = null   // never the wrong gender

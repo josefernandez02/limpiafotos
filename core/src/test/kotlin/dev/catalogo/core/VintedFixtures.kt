@@ -1,7 +1,7 @@
 package dev.catalogo.core
 
 /** An article known to be listed in Vinted (data kept from earlier versions of the app). */
-fun inVinted(s: ParentState, number: Int, accountId: String, itemId: String, price: Long, status: String): ParentState =
+fun inVinted(s: CatalogState, number: Int, accountId: String, itemId: String, price: Long, status: String): CatalogState =
     s.copy(articles = s.articles.map { a ->
         if (a.number != number) a
         else a.copy(

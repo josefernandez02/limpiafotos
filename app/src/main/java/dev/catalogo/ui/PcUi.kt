@@ -54,13 +54,13 @@ import androidx.compose.ui.unit.dp
 import dev.catalogo.core.AppState
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.Desk
+import dev.catalogo.core.PcTask
 import dev.catalogo.core.Mode
 import dev.catalogo.core.Stage
-import dev.catalogo.core.ParentState
+import dev.catalogo.core.CatalogState
 import dev.catalogo.core.PcLink
-import dev.catalogo.core.Sizes
-import dev.catalogo.core.Vinted
+import dev.catalogo.core.VintedSizes
+import dev.catalogo.core.VintedTaxonomy
 
 /**
  * This phone's account in the article: what to do with it, how far it is, and the
@@ -68,17 +68,17 @@ import dev.catalogo.core.Vinted
  * (what is happening), the main button, and «Cambiar estado» at the bottom.
  */
 @Composable
-fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppState) {
-    val desk = article.desk
-    val stage = Catalog.stage(p, article, p.self)
+fun PcBlock(vm: MainViewModel, p: CatalogState, article: Article, state: AppState) {
+    val pcTask = article.pcTask
+    val stage = Catalog.stage(p, article, p.mainAccount)
     var reviewing by remember { mutableStateOf(false) }
     var choosing by remember { mutableStateOf(false) }
     var removing by remember { mutableStateOf(false) }
     var changing by remember { mutableStateOf(false) }
-    var mode by remember(desk?.mode) { mutableStateOf(desk?.mode ?: Mode.UPLOAD_PLAY) }
-    var link by remember(desk?.url) { mutableStateOf(desk?.url.orEmpty()) }
+    var mode by remember(pcTask?.mode) { mutableStateOf(pcTask?.mode ?: Mode.UPLOAD_PLAY) }
+    var link by remember(pcTask?.url) { mutableStateOf(pcTask?.url.orEmpty()) }
     // The PC already has photos and data: «Volver a intentarlo» asks it again, nothing is re-sent.
-    val onPc = desk != null && (desk.status == "revisar" || desk.status == "error")
+    val onPc = pcTask != null && (pcTask.status == "revisar" || pcTask.status == "error")
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (state.pc == null) {
@@ -108,48 +108,48 @@ fun DeskBlock(vm: MainViewModel, p: ParentState, article: Article, state: AppSta
                     CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
                     Spacer(Modifier.width(10.dp))
                     Muted(
-                        when (desk?.status) {
-                            Desk.PREPARING -> "La IA está leyendo las fotos"
-                            Desk.SENDING -> "Enviando fotos y datos al PC"
+                        when (pcTask?.status) {
+                            PcTask.PREPARING -> "La IA está leyendo las fotos"
+                            PcTask.SENDING -> "Enviando fotos y datos al PC"
                             "pendiente" -> "En cola en el PC"
                             else -> "El PC está rellenando el formulario"
-                        } + "  (${Mode.label(desk?.mode ?: Mode.UPLOAD_PLAY)})",
+                        } + "  (${Mode.label(pcTask?.mode ?: Mode.UPLOAD_PLAY)})",
                     )
                 }
-                desk?.message?.takeIf { it.isNotBlank() }?.let { Muted(it) }
+                pcTask?.message?.takeIf { it.isNotBlank() }?.let { Muted(it) }
                 SecondButton("Sacar de la cola") { removing = true }
             }
             Stage.REVIEW -> {
-                desk?.message?.takeIf { it.isNotBlank() }?.let {
+                pcTask?.message?.takeIf { it.isNotBlank() }?.let {
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                 }
-                if (desk != null && desk.status == Desk.REVIEW && desk.doubts.isNotEmpty()) {
-                    MainButton("Revisar ${desk.doubts.size} ${if (desk.doubts.size == 1) "dato" else "datos"}") { reviewing = true }
+                if (pcTask != null && pcTask.status == PcTask.REVIEW && pcTask.doubts.isNotEmpty()) {
+                    MainButton("Revisar ${pcTask.doubts.size} ${if (pcTask.doubts.size == 1) "dato" else "datos"}") { reviewing = true }
                 } else {
                     MainButton("Volver a intentarlo") { if (onPc) vm.retryDraft(article.number) else choosing = true }
                 }
                 SecondButton("Sacar de la cola") { removing = true }
             }
             Stage.DRAFT -> {
-                val onlyDraft = desk?.mode == Mode.DRAFT
+                val onlyDraft = pcTask?.mode == Mode.DRAFT
                 Muted(if (onlyDraft) "Se queda como borrador: el PC no lo publica." else "Se publicará justo antes del siguiente juego.")
                 if (onlyDraft) MainButton("Subir y jugar") { vm.setMode(article.number, Mode.UPLOAD_PLAY) }
                 else SecondButton("Dejar solo como borrador") { vm.setMode(article.number, Mode.DRAFT) }
             }
             Stage.UPLOADED -> {
-                val waiting = desk?.mode == Mode.PLAY || desk?.status == "publicado" && desk.mode == Mode.UPLOAD_PLAY
+                val waiting = pcTask?.mode == Mode.PLAY || pcTask?.status == "publicado" && pcTask.mode == Mode.UPLOAD_PLAY
                 Muted(if (waiting) "Sin jugar: irá al siguiente juego." else "Subido. No está en los juegos.")
                 if (!waiting) {
                     LinkField(link) { link = it }
                     MainButton("Meter en los juegos", enabled = vintedLink(link) != null) { vm.playOnly(article.number, vintedLink(link)!!) }
                 }
             }
-            Stage.PLAYED -> Muted(desk?.game?.takeIf { it.isNotBlank() }?.let { "Jugado en $it." } ?: "Jugado.")
+            Stage.PLAYED -> Muted(pcTask?.game?.takeIf { it.isNotBlank() }?.let { "Jugado en $it." } ?: "Jugado.")
             Stage.SOLD -> Muted("Vendido en Vinted.")
         }
         SecondButton("Cambiar estado") { changing = true }
     }
-    if (reviewing && desk != null) ReviewDialog(vm, p, article, desk, onDismiss = { reviewing = false })
+    if (reviewing && pcTask != null) PcReviewDialog(vm, p, article, pcTask, onDismiss = { reviewing = false })
     if (choosing) PhotoChoiceDialog(vm, article.number, mode, onDismiss = { choosing = false })
     if (removing) {
         Confirm(
@@ -259,7 +259,7 @@ fun StageManyDialog(vm: MainViewModel, numbers: List<Int>, onDismiss: () -> Unit
 private fun StageDialog(vm: MainViewModel, article: Article, current: Stage, onDismiss: () -> Unit) {
     val options = listOf(Stage.TO_UPLOAD, Stage.DRAFT, Stage.UPLOADED, Stage.PLAYED)
     var picked by remember { mutableStateOf(current.takeIf { it in options } ?: Stage.TO_UPLOAD) }
-    var link by remember { mutableStateOf(article.desk?.url.orEmpty()) }
+    var link by remember { mutableStateOf(article.pcTask?.url.orEmpty()) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Cambiar estado") },
@@ -296,7 +296,7 @@ private fun StageDialog(vm: MainViewModel, article: Article, current: Stage, onD
             }
         },
         confirmButton = {
-            TextButton(onClick = { onDismiss(); vm.setStage(article.number, picked, link) }, enabled = picked != current || link != article.desk?.url.orEmpty()) {
+            TextButton(onClick = { onDismiss(); vm.setStage(article.number, picked, link) }, enabled = picked != current || link != article.pcTask?.url.orEmpty()) {
                 Text("Guardar")
             }
         },
@@ -371,21 +371,21 @@ fun PhotoChoiceDialog(vm: MainViewModel, number: Int, mode: String = Mode.UPLOAD
 /** Only the doubtful fields, with the AI's choice already marked: one tap to confirm. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk, onDismiss: () -> Unit) {
+fun PcReviewDialog(vm: MainViewModel, p: CatalogState, article: Article, pcTask: PcTask, onDismiss: () -> Unit) {
     val ai = Catalog.freshAi(p, article.number)
     val listing = article.listing
-    var category by remember { mutableStateOf(desk.fixes.category ?: ai?.category?.takeIf { it in Vinted.categories }) }
+    var category by remember { mutableStateOf(pcTask.fixes.category ?: ai?.category?.takeIf { it in VintedTaxonomy.categories }) }
     var search by remember { mutableStateOf("") }
     var size by remember {
         mutableStateOf(
-            desk.fixes.size ?: (desk.fixes.category ?: ai?.category)?.takeIf { it in Vinted.categories }
-                ?.let { c -> listing?.let { Sizes.resolve(c, it) } }.orEmpty(),
+            pcTask.fixes.size ?: (pcTask.fixes.category ?: ai?.category)?.takeIf { it in VintedTaxonomy.categories }
+                ?.let { c -> listing?.let { VintedSizes.resolve(c, it) } }.orEmpty(),
         )
     }
-    var colors by remember { mutableStateOf(desk.fixes.colors ?: ai?.colors?.mapNotNull(Vinted::color).orEmpty()) }
-    var materials by remember { mutableStateOf(desk.fixes.materials ?: ai?.materials.orEmpty()) }
-    var brandOk by remember { mutableStateOf(desk.fixes.brandChecked) }
-    val doubts = desk.doubts
+    var colors by remember { mutableStateOf(pcTask.fixes.colors ?: ai?.colors?.mapNotNull(VintedTaxonomy::color).orEmpty()) }
+    var materials by remember { mutableStateOf(pcTask.fixes.materials ?: ai?.materials.orEmpty()) }
+    var brandOk by remember { mutableStateOf(pcTask.fixes.brandChecked) }
+    val doubts = pcTask.doubts
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -407,7 +407,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     )
                     if (search.length >= 2) {
                         val gender = listing?.gender?.label
-                        val found = Vinted.categories.filter { c ->
+                        val found = VintedTaxonomy.categories.filter { c ->
                             (gender == null || c.startsWith("$gender ")) && c.lowercase().contains(search.lowercase())
                         }.take(8)
                         Column(Modifier.heightIn(max = 260.dp)) {
@@ -421,7 +421,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     }
                 }
                 if ("talla" in doubts) {
-                    val options = category?.let(Sizes::options).orEmpty()
+                    val options = category?.let(VintedSizes::options).orEmpty()
                     Muted("Talla" + listing?.size?.takeIf { it.isNotBlank() }?.let { " (etiqueta $it)" }.orEmpty())
                     when {
                         category == null -> Muted("Elige antes la categoría")
@@ -432,14 +432,14 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     }
                 }
                 if ("colores" in doubts) {
-                    Muted("Color (hasta ${Vinted.MAX_COLORS})")
+                    Muted("Color (hasta ${VintedTaxonomy.MAX_COLORS})")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (c in Vinted.colors) {
+                        for (c in VintedTaxonomy.colors) {
                             val on = c in colors
                             Choice(c, on) {
                                 colors = when {
                                     on -> colors - c
-                                    colors.size < Vinted.MAX_COLORS -> colors + c
+                                    colors.size < VintedTaxonomy.MAX_COLORS -> colors + c
                                     else -> colors
                                 }
                             }
@@ -447,14 +447,14 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     }
                 }
                 if ("materiales" in doubts) {
-                    Muted("Material (hasta ${Vinted.MAX_MATERIALS}, opcional)")
+                    Muted("Material (hasta ${VintedTaxonomy.MAX_MATERIALS}, opcional)")
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (m in Vinted.materials) {
+                        for (m in VintedTaxonomy.materials) {
                             val on = m in materials
                             Choice(m, on) {
                                 materials = when {
                                     on -> materials - m
-                                    materials.size < Vinted.MAX_MATERIALS -> materials + m
+                                    materials.size < VintedTaxonomy.MAX_MATERIALS -> materials + m
                                     else -> materials
                                 }
                             }
@@ -471,7 +471,7 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
             }
         },
         confirmButton = {
-            val sizeOk = category?.let(Sizes::options)?.let { it.isEmpty() || size in it } ?: false
+            val sizeOk = category?.let(VintedSizes::options)?.let { it.isEmpty() || size in it } ?: false
             val ok = ("categoria" !in doubts || category != null) &&
                 ("talla" !in doubts || sizeOk) &&
                 ("colores" !in doubts || colors.isNotEmpty()) &&
@@ -481,12 +481,12 @@ fun ReviewDialog(vm: MainViewModel, p: ParentState, article: Article, desk: Desk
                     onDismiss()
                     vm.fixDraft(
                         article.number,
-                        desk.fixes.copy(
-                            category = if ("categoria" in doubts) category else desk.fixes.category,
-                            size = if ("talla" in doubts) size else desk.fixes.size,
-                            colors = if ("colores" in doubts) colors else desk.fixes.colors,
-                            materials = if ("materiales" in doubts) materials else desk.fixes.materials,
-                            brandChecked = desk.fixes.brandChecked || brandOk,
+                        pcTask.fixes.copy(
+                            category = if ("categoria" in doubts) category else pcTask.fixes.category,
+                            size = if ("talla" in doubts) size else pcTask.fixes.size,
+                            colors = if ("colores" in doubts) colors else pcTask.fixes.colors,
+                            materials = if ("materiales" in doubts) materials else pcTask.fixes.materials,
+                            brandChecked = pcTask.fixes.brandChecked || brandOk,
                         ),
                     )
                 },

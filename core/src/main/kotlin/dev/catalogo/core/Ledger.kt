@@ -1,5 +1,6 @@
 package dev.catalogo.core
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlin.math.roundToLong
 
@@ -24,7 +25,7 @@ enum class SaleStatus(val label: String) { PENDING("En curso"), COMPLETED("Compl
 data class Sale(
     /** Article number, or -1 while it is not known which article it was. */
     val number: Int,
-    val deviceId: String,
+    @SerialName("deviceId") val accountId: String,
     val price: Long,
     val cost: Long?,
     val lotId: String?,
@@ -93,25 +94,25 @@ object Ledger {
 
     data class Totals(val count: Int, val revenue: Long, val cost: Long, val profit: Long)
 
-    fun lot(s: ParentState, id: String?): Lot? = id?.let { i -> s.lots.firstOrNull { it.id == i } }
+    fun lot(s: CatalogState, id: String?): Lot? = id?.let { i -> s.lots.firstOrNull { it.id == i } }
 
     fun unitCost(lot: Lot): Long = if (lot.quantity <= 0) 0 else (lot.price.toDouble() / lot.quantity).roundToLong()
 
     /** Manual cost first, otherwise the lot's cost per garment. */
-    fun costOf(s: ParentState, a: Article): Long? = a.cost ?: lot(s, a.lotId)?.let(::unitCost)
+    fun costOf(s: CatalogState, a: Article): Long? = a.cost ?: lot(s, a.lotId)?.let(::unitCost)
 
-    fun addLot(s: ParentState, id: String, name: String, price: Long, quantity: Int, now: Long): ParentState {
+    fun addLot(s: CatalogState, id: String, name: String, price: Long, quantity: Int, now: Long): CatalogState {
         validateLot(name, price, quantity)
         return s.copy(lots = s.lots + Lot(id, name.trim(), price, quantity, now))
     }
 
-    fun updateLot(s: ParentState, id: String, name: String, price: Long, quantity: Int): ParentState {
+    fun updateLot(s: CatalogState, id: String, name: String, price: Long, quantity: Int): CatalogState {
         validateLot(name, price, quantity)
         return s.copy(lots = s.lots.map { if (it.id == id) it.copy(name = name.trim(), price = price, quantity = quantity) else it })
     }
 
     /** Removes a lot; its articles keep existing without a lot, past sales keep their numbers. */
-    fun deleteLot(s: ParentState, id: String): ParentState = s.copy(
+    fun deleteLot(s: CatalogState, id: String): CatalogState = s.copy(
         lots = s.lots.filter { it.id != id },
         articles = s.articles.map { if (it.lotId == id) it.copy(lotId = null) else it },
     )
@@ -123,7 +124,7 @@ object Ledger {
     }
 
     /** A lot's numbers: only finished sales have recovered money. */
-    fun stats(s: ParentState, lot: Lot): LotStats {
+    fun stats(s: CatalogState, lot: Lot): LotStats {
         val sales = s.sales.filter { it.lotId == lot.id }
         val done = sales.filter { it.status == SaleStatus.COMPLETED }
         val recovered = done.sumOf { it.price }

@@ -38,10 +38,10 @@ import dev.catalogo.core.AppState
 import dev.catalogo.core.Article
 import dev.catalogo.core.Catalog
 import dev.catalogo.core.Money
-import dev.catalogo.core.ParentState
-import dev.catalogo.core.Sizes
+import dev.catalogo.core.CatalogState
+import dev.catalogo.core.VintedSizes
 import dev.catalogo.core.Stage
-import dev.catalogo.core.Vinted
+import dev.catalogo.core.VintedTaxonomy
 
 /** How far an article is in one account, as a colour the eye finds at once. */
 enum class Tone(val color: Color) {
@@ -149,28 +149,28 @@ fun AccountLine(label: String, stage: Stage) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppState, waiting: Map<String, Int>) {
+fun VintedCard(vm: MainViewModel, p: CatalogState, article: Article, state: AppState, waiting: Map<String, Int>) {
     val number = article.number
-    val devices = Catalog.devices(p)
+    val allAccounts = Catalog.allAccounts(p)
     val targets = article.targets
     Tile {
-        if (devices.size > 1) {
+        if (allAccounts.size > 1) {
             Muted("Cuentas")
             FlowRow(
                 Modifier.padding(top = 6.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                for (d in devices) {
+                for (d in allAccounts) {
                     val on = d.id in targets
                     Choice(d.label, on) { vm.setAccounts(number, if (on) targets - d.id else targets + d.id) }
                 }
             }
             if (targets.isEmpty()) Muted("Elige en qué cuenta lo vas a subir")
         }
-        val shown = devices.filter { it.id in targets }.ifEmpty { if (devices.size == 1) devices else emptyList() }
+        val shown = allAccounts.filter { it.id in targets }.ifEmpty { if (allAccounts.size == 1) allAccounts else emptyList() }
         shown.forEachIndexed { i, d ->
-            if (i > 0 || devices.size > 1) HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
+            if (i > 0 || allAccounts.size > 1) HorizontalDivider(Modifier.padding(vertical = 12.dp), color = MaterialTheme.colorScheme.surfaceContainerHighest)
             val stage = Catalog.stage(p, article, d)
             // Same header in every state: account on the left, its status on the right.
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -191,8 +191,8 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
             }
             val uploaded = d.id in article.uploaded
             Spacer(Modifier.size(12.dp))
-            if (d.id == p.self.id) {
-                DeskBlock(vm, p, article, state)
+            if (d.id == p.mainAccount.id) {
+                PcBlock(vm, p, article, state)
                 return@forEachIndexed
             } else {
                 Muted("Lo sube su propio PC (${d.label})", Modifier.padding(top = 6.dp))
@@ -224,11 +224,11 @@ fun VintedCard(vm: MainViewModel, p: ParentState, article: Article, state: AppSt
 
 /** What goes to Vinted: title, description and the form's fields, as the PC will fill them. */
 @Composable
-fun ListingPreview(p: ParentState, article: Article, onEdit: () -> Unit) {
-    val text = Catalog.listingText(p, article.number, p.self)
+fun ListingPreview(p: CatalogState, article: Article, onEdit: () -> Unit) {
+    val text = Catalog.listingText(p, article.number, p.mainAccount)
     val ai = Catalog.freshAi(p, article.number)
     val listing = article.listing
-    val fixes = article.desk?.fixes
+    val fixes = article.pcTask?.fixes
     var open by remember { mutableStateOf(false) }
     Tile(Modifier.animateContentSize()) {
         if (listing == null) {
@@ -255,15 +255,15 @@ fun ListingPreview(p: ParentState, article: Article, onEdit: () -> Unit) {
                 modifier = Modifier.padding(top = 4.dp).clickable { open = !open },
             )
         }
-        val category = (fixes?.category ?: ai?.category)?.takeIf { it in Vinted.categories }
+        val category = (fixes?.category ?: ai?.category)?.takeIf { it in VintedTaxonomy.categories }
         val size = when {
             category == null -> listing.size.ifBlank { null }
-            !Sizes.asksForSize(category) -> "No lleva"
-            else -> (fixes?.size?.takeIf { it in Sizes.options(category) } ?: Sizes.resolve(category, listing))
+            !VintedSizes.asksForSize(category) -> "No lleva"
+            else -> (fixes?.size?.takeIf { it in VintedSizes.options(category) } ?: VintedSizes.resolve(category, listing))
                 ?.let { s -> if (listing.size.isNotBlank() && s != listing.size.trim()) "$s (etiqueta ${listing.size.trim()})" else s }
                 ?: "Por elegir (etiqueta ${listing.size.ifBlank { "sin talla" }})"
         }
-        val colors = (fixes?.colors ?: ai?.colors?.mapNotNull(Vinted::color)).orEmpty()
+        val colors = (fixes?.colors ?: ai?.colors?.mapNotNull(VintedTaxonomy::color)).orEmpty()
         val materials = (fixes?.materials ?: ai?.materials).orEmpty()
         val rows = listOf(
             "Categoría" to category,

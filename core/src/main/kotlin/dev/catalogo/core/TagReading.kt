@@ -26,7 +26,7 @@ import kotlinx.serialization.json.putJsonObject
  * composition also decides the materials in code, whatever the second call says.
  */
 @Serializable
-data class Reading(
+data class TagReading(
     /** "100% algodón", "98% algodón 2% elastano": as on the label, normalised. */
     val composition: List<String> = emptyList(),
     /** Country after «Made in» / «Hecho en», as written ("Argentina"). */
@@ -40,7 +40,7 @@ data class Reading(
     val details: List<String> = emptyList(),
     /** "hombre" | "mujer" when the photos make it clear (label, cut, buttons…), else null. */
     val gender: String? = null,
-    /** Cut of trousers/jeans as one of [Fits.ALL], else null. */
+    /** Cut of trousers/jeans as one of [TrouserFits.ALL], else null. */
     val fit: String? = null,
     /** What the gender and the cut were decided from (shown in the log). */
     val cues: List<String> = emptyList(),
@@ -50,10 +50,10 @@ data class Reading(
             flaws.isEmpty() && details.isEmpty() && gender == null && fit == null
 
     /** Vinted materials from the composition, largest share first (empty when it was not read). */
-    val materials: List<String> get() = Reader.materials(composition)
+    val materials: List<String> get() = TagReader.materials(composition)
 }
 
-object Reader {
+object TagReader {
     /** Photos read in the first call: enough to include the labels, usually the last ones taken. */
     const val PHOTOS = 8
 
@@ -104,7 +104,7 @@ object Reader {
             "defectos" to arr(5),
             "detalles" to arr(6),
             "sexo" to buildJsonObject { put("type", "STRING"); put("nullable", true); putJsonArray("enum") { add("hombre"); add("mujer") } },
-            "corte" to buildJsonObject { put("type", "STRING"); put("nullable", true); putJsonArray("enum") { Fits.ALL.forEach { add(it) } } },
+            "corte" to buildJsonObject { put("type", "STRING"); put("nullable", true); putJsonArray("enum") { TrouserFits.ALL.forEach { add(it) } } },
             "pistas" to arr(4),
         )
         return buildJsonObject {
@@ -117,7 +117,7 @@ object Reader {
 
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parse(answer: String): Reading {
+    fun parse(answer: String): TagReading {
         val o = runCatching { json.parseToJsonElement(answer.trim().removePrefix("```json").removeSuffix("```")).jsonObject }
             .getOrNull() ?: throw AiException("Respuesta de la IA ilegible")
         fun s(k: String) = o[k]?.str()?.replace(Regex("\\s+"), " ")?.trim()?.trim('"', '.')?.takeIf {
@@ -125,7 +125,7 @@ object Reader {
         }
         fun l(k: String, max: Int, len: Int) = (o[k] as? JsonArray).orEmpty().mapNotNull { it.str() }
             .map { it.replace(Regex("\\s+"), " ").trim().take(len) }.filter { it.isNotEmpty() }.distinct().take(max)
-        return Reading(
+        return TagReading(
             composition = l("composicion", 6, 60).filter { Regex("\\d").containsMatchIn(it) },
             origin = s("hecho_en")?.take(30),
             sizeLabel = s("talla_etiqueta")?.take(20),
@@ -134,7 +134,7 @@ object Reader {
             flaws = l("defectos", 5, 80),
             details = l("detalles", 6, 80),
             gender = s("sexo")?.lowercase()?.takeIf { it == "hombre" || it == "mujer" },
-            fit = Fits.normalize(s("corte")),
+            fit = TrouserFits.normalize(s("corte")),
             cues = l("pistas", 4, 80),
         )
     }
@@ -162,7 +162,7 @@ object Reader {
         "bamb[uú]|bamboo" to "Bambú",
     ).map { (re, m) -> Regex("\\b($re)") to m }
 
-    /** Composition lines to up to [Vinted.MAX_MATERIALS] materials, largest share first. */
+    /** Composition lines to up to [VintedTaxonomy.MAX_MATERIALS] materials, largest share first. */
     fun materials(composition: List<String>): List<String> {
         val found = mutableListOf<Pair<String, Int>>()
         for (line in composition) {
@@ -178,11 +178,11 @@ object Reader {
         }
         return found.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
             .entries.sortedByDescending { it.value }.map { it.key }
-            .filter { it in Vinted.materials }.take(Vinted.MAX_MATERIALS)
+            .filter { it in VintedTaxonomy.materials }.take(VintedTaxonomy.MAX_MATERIALS)
     }
 
     /** The reading as compact facts for the listing call (null when nothing was read). */
-    fun facts(r: Reading?): JsonObject? {
+    fun facts(r: TagReading?): JsonObject? {
         if (r == null || r.isEmpty) return null
         return buildJsonObject {
             putJsonArray("composicion") { r.composition.forEach { add(it) } }
@@ -199,7 +199,7 @@ object Reader {
     }
 
     /** «100% algodón»: lower case, one space, no trailing dot. */
-    fun compositionText(r: Reading?): String = r?.composition.orEmpty()
+    fun compositionText(r: TagReading?): String = r?.composition.orEmpty()
         .map { it.replace(Regex("\\s+"), " ").replace(Regex("(\\d)\\s*%"), "$1%").trim().trimEnd('.').lowercase() }
         .distinct().joinToString(", ")
 
