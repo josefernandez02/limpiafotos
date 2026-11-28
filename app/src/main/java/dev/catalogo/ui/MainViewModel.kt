@@ -51,7 +51,7 @@ sealed interface Screen {
     data class Article(val number: Int) : Screen
     /** New article when [number] is null. */
     data class Editor(val number: Int?) : Screen
-    data object Review : Screen
+    data object SessionPhotos : Screen
     data object Settings : Screen
     data class Template(val accountId: String) : Screen
     /** Order, cover and crop of [accountId]'s photos of [number]. */
