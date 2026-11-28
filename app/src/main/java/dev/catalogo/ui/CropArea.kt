@@ -31,10 +31,10 @@ import dev.catalogo.core.Placement
 import dev.catalogo.data.PhotoCropper
 import dev.catalogo.data.Framing
 
-private enum class Grip { NONE, MOVE, TL, TR, BL, BR, T, B, L, R }
+internal enum class Grip { NONE, MOVE, TL, TR, BL, BR, T, B, L, R }
 
 /** Where the photo sits on screen: [d] screen pixels per image pixel, its centre at ([cx], [cy]); the crop box moves over it. */
-private class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val imgH: Int) {
+internal class Geo(val cx: Float, val cy: Float, val d: Float, val imgW: Int, val imgH: Int) {
     val minW = d * imgW * 0.15f
 }
 
