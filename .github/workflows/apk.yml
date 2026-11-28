@@ -1,9 +1,9 @@
 name: APK
 
-# main: prueba, compila y publica la APK. reorganizacion: lo mismo sin publicar.
+# Cada push a main pasa las pruebas, compila la APK y la publica en la release «app».
 on:
   push:
-    branches: [main, reorganizacion]
+    branches: [main]
     paths: ["app/**", "core/**", "*.gradle.kts", "gradle/**", "gradle.properties", ".github/workflows/apk.yml"]
   workflow_dispatch:
 
