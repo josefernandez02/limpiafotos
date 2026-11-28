@@ -1,6 +1,6 @@
 package dev.catalogo.core.vinted
 
-import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
@@ -79,9 +79,9 @@ class TitleTest {
     fun `no repeated words in titles`() {
         assertEquals(
             "Levi's 710 Skinny Jeans Vintage Y2K Classic Fit Light Blue",
-            Ai.distinctWords("Levi's 710 Skinny Jeans Vintage Y2K Classic Skinny Fit Light Blue"),
+            AiAnswer.distinctWords("Levi's 710 Skinny Jeans Vintage Y2K Classic Skinny Fit Light Blue"),
         )
-        assertEquals("Nike Air Max 90 White", Ai.distinctWords("Nike Air Max 90 White"))
-        assertEquals("Carhartt Jacket Brown", Ai.distinctWords("Carhartt Jacket Brown brown"))
+        assertEquals("Nike Air Max 90 White", AiAnswer.distinctWords("Nike Air Max 90 White"))
+        assertEquals("Carhartt Jacket Brown", AiAnswer.distinctWords("Carhartt Jacket Brown brown"))
     }
 }

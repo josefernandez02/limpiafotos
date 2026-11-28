@@ -9,8 +9,10 @@ import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
 import dev.catalogo.core.photo.Backdrop
 import dev.catalogo.core.photo.CoverFrame
+import dev.catalogo.core.photo.FrameCoverage
 import dev.catalogo.core.photo.Mask
 import dev.catalogo.core.photo.Placement
+import dev.catalogo.core.photo.Silhouette
 import dev.catalogo.data.AppLog
 import kotlin.math.max
 import kotlin.math.min
@@ -44,10 +46,10 @@ object AutoFrame {
             val byFloor = floor?.let { CoverFrame.place(it, bmp.width, bmp.height, floor) }
             // Two independent opinions. When they agree, the model's smoother edge wins; when they do not (the model
             // loses a sleeve or a pattern, or the floor is tricky), the one that gave a believable silhouette is used.
-            val agree = model != null && floor != null && CoverFrame.agreement(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= AGREE
+            val agree = model != null && floor != null && Silhouette.agreement(Silhouette.largestParts(model) ?: model, Silhouette.largestParts(floor) ?: floor) >= AGREE
             // the backdrop read lost part of the garment (a sleeve as pale as the floor): the model's silhouette contains all of it and more
             val modelWhole = model != null && floor != null && byModel != null &&
-                CoverFrame.containment(CoverFrame.largestParts(model) ?: model, CoverFrame.largestParts(floor) ?: floor) >= CONTAINED
+                Silhouette.containment(Silhouette.largestParts(model) ?: model, Silhouette.largestParts(floor) ?: floor) >= CONTAINED
             val first = when {
                 byModel != null && (agree || byFloor == null || modelWhole) -> byModel to "IA"
                 byFloor != null -> byFloor to "fondo"
@@ -64,7 +66,7 @@ object AutoFrame {
                 }
             }
             note(bmp, model, floor, byModel, byFloor, agree, p, how)
-            Result(CoverFrame.settle(p, bmp.width, bmp.height, CoverFrame.fillLimit(p.rotation)).toFraming(), how, p.tight, if (how == "IA") model else floor)   // the plan already chose its fill (plain backdrop only, never deeper than CoverFrame.fillLimit)
+            Result(FrameCoverage.settle(p, bmp.width, bmp.height, CoverFrame.fillLimit(p.rotation)).toFraming(), how, p.tight, if (how == "IA") model else floor)   // the plan already chose its fill (plain backdrop only, never deeper than CoverFrame.fillLimit)
         } finally {
             bmp.recycle()
         }
@@ -76,7 +78,7 @@ object AutoFrame {
      */
     private fun note(bmp: Bitmap, model: Mask?, floor: Mask?, byModel: Placement?, byFloor: Placement?, agree: Boolean, chosen: Placement?, how: String) {
         fun box(m: Mask?): String {
-            val c = m?.let { CoverFrame.largestParts(it) } ?: return "-"
+            val c = m?.let { Silhouette.largestParts(it) } ?: return "-"
             var x0 = c.w; var y0 = c.h; var x1 = -1; var y1 = -1
             for (y in 0 until c.h) for (x in 0 until c.w) if (c.on[y * c.w + x]) { x0 = min(x0, x); y0 = min(y0, y); x1 = max(x1, x); y1 = max(y1, y) }
             if (x1 < 0) return "vacía"
@@ -85,7 +87,7 @@ object AutoFrame {
         fun cells(m: Mask?) = m?.count() ?: -1
         fun dump(name: String, m: Mask?): String {
             if (m == null) return "$name: sin máscara"
-            val c = CoverFrame.largestParts(m) ?: m
+            val c = Silhouette.largestParts(m) ?: m
             val sb = StringBuilder("$name (${c.w}x${c.h}, cada carácter = 3x3 celdas):")
             for (y in 0 until c.h step 3) {
                 sb.append('\n')

@@ -1,6 +1,7 @@
 package dev.catalogo.core.catalog
 
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
 import dev.catalogo.core.ai.AiResult
 import dev.catalogo.core.ai.AiSuggestion
 import dev.catalogo.core.listing.Garments
@@ -109,7 +110,7 @@ object Catalog {
         val me = s.mainAccount
         // What it was published with is what the AI wrote (a draft is never sent without it); without AI data there is nothing to avoid.
         val avoid = a.relist ?: Relist(
-            titles = a.ai?.titles.orEmpty().mapValues { Ai.distinctWords(it.value) }.filterValues { it.isNotBlank() },
+            titles = a.ai?.titles.orEmpty().mapValues { AiAnswer.distinctWords(it.value) }.filterValues { it.isNotBlank() },
             hashtags = a.ai?.hashtags.orEmpty(),
         )
         return replace(s, a.copy(
@@ -188,7 +189,7 @@ object Catalog {
         val ai = freshAi(s, number)
         val text = ListingWriter.text(listing, vintedAccount.style, vintedAccount.template, Sku.format(vintedAccount.prefix, number, s.digits), ai?.hashtags)
         // (also for titles generated before repeats were removed)
-        val title = ai?.titles?.get(vintedAccount.id)?.let(Ai::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
+        val title = ai?.titles?.get(vintedAccount.id)?.let(AiAnswer::distinctWords)?.takeIf { it.isNotBlank() } ?: return text
         return text.copy(title = title)
     }
 

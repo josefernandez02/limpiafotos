@@ -1,6 +1,8 @@
 package dev.catalogo.core.listing
 
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
+import dev.catalogo.core.ai.AiPrompt
 import dev.catalogo.core.ai.AiSuggestion
 import dev.catalogo.core.catalog.RelistRepair
 import dev.catalogo.core.model.Relist
@@ -102,7 +104,7 @@ class TitleGuardTest {
              "titulos":{"SH":"Jeckerson Mockneck Cashmere Jumper Retro Knit Blue Heather","SA":"Jeckerson Puffer Jacket Grey"},
              "hashtags":["jeckerson","cashmere","jumper","lana","cashmeresweater","knitwear"]}
         """
-        val s = Ai.parse(answer, Listing(brand = "Jeckerson"), accounts)
+        val s = AiAnswer.parse(answer, Listing(brand = "Jeckerson"), accounts)
         assertEquals(listOf("knit", "wool"), s.keywords)
         assertEquals(mapOf("p" to "Jeckerson Mockneck Jumper Retro Knit Heather"), s.titles, "the second account's title is about a puffer: dropped")
         assertEquals(listOf("jeckerson", "jumper", "lana", "knitwear"), s.hashtags)
@@ -111,10 +113,10 @@ class TitleGuardTest {
 
     @Test
     fun `the prompt asks for true titles, and a re-listing asks for real synonyms`() {
-        val prompt = Ai.prompt(Listing(brand = "Jeckerson"), accounts)
+        val prompt = AiPrompt.prompt(Listing(brand = "Jeckerson"), accounts)
         assertTrue("VERDAD (obligatorio)" in prompt)
         assertTrue("Wool ≠ Cashmere" in prompt)
-        val relist = Ai.prompt(Listing(brand = "Jeckerson"), accounts, avoid = Relist(mapOf("p" to "Jeckerson Wool Sweater"), listOf("lana")))
+        val relist = AiPrompt.prompt(Listing(brand = "Jeckerson"), accounts, avoid = Relist(mapOf("p" to "Jeckerson Wool Sweater"), listOf("lana")))
         assertTrue("sinónimos REALES" in relist)
         assertTrue("Wool no se cambia por Cashmere" in relist)
     }

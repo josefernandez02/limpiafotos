@@ -27,6 +27,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import dev.catalogo.core.photo.CoverFrame
+import dev.catalogo.core.photo.FrameCoverage
 import dev.catalogo.core.photo.Placement
 import dev.catalogo.data.photo.Framing
 import dev.catalogo.data.photo.PhotoCropper
@@ -42,7 +43,7 @@ internal fun Framing.placement() = Placement(scale, dx, dy, rotation)
 
 internal fun Placement.framing() = Framing(scale, dx, dy, rotation)
 
-internal fun Framing.covers(w: Int, h: Int) = CoverFrame.isCovered(placement(), w, h, CoverFrame.fillLimit(rotation))   // or only a strip of mirrored backdrop, which the box already shows
+internal fun Framing.covers(w: Int, h: Int) = FrameCoverage.isCovered(placement(), w, h, CoverFrame.fillLimit(rotation))   // or only a strip of mirrored backdrop, which the box already shows
 
 /** The crop box (left, top, right, bottom, in screen pixels) of a framing: the 3:4 frame, with the photo fixed under it. */
 private fun boxOf(f: Framing, g: Geo): FloatArray {

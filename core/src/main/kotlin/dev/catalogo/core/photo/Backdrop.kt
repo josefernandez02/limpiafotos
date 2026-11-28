@@ -111,7 +111,7 @@ object Backdrop {
             cur = next
         }
         // closing: a pattern (spots, diamonds) must not leave the garment in pieces
-        return fillHoles(CoverFrame.eroded(CoverFrame.dilated(Mask(w, h, cur), 3), 3))
+        return fillHoles(Silhouette.eroded(Silhouette.dilated(Mask(w, h, cur), 3), 3))
     }
 
     /** Cells not reachable from the border without crossing the garment (a pattern, a gap between arms) become garment. */

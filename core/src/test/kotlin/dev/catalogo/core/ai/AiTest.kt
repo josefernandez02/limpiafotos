@@ -49,7 +49,7 @@ class AiTest {
              "colores":["Azul","Azul claro","Negro"],"talla_etiqueta":"W30",
              "titulos":{"SH":"Levi's 501 Straight Leg Jeans 90s Faded","SA":"  1990s Levis 501 Denim Pants\n Sun Faded. ","XX":"nope"}}
         """
-        val s = Ai.parse(answer, levis, accounts)
+        val s = AiAnswer.parse(answer, levis, accounts)
         assertEquals("jeans", s.type)
         assertEquals(listOf("straight", "faded"), s.keywords)
         assertEquals(Gender.MEN, s.gender)
@@ -65,7 +65,7 @@ class AiTest {
         val answer = """{"tipo_prenda":"spaceship","palabras":[],"sexo":"mujer",
             "categoria":"Hombre › Ropa › Vaqueros › Vaqueros rectos","colores":["Azulado"],"talla_etiqueta":"M",
             "titulos":{"SH":"Same Title","SA":"same title"}}"""
-        val s = Ai.parse(answer, Listing(), accounts)
+        val s = AiAnswer.parse(answer, Listing(), accounts)
         assertNull(s.type)
         assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s.category)
         assertEquals(emptyList(), s.colors)
@@ -136,23 +136,23 @@ class AiTest {
         val answer = """{"marca":"Levi's","modelo":"505","talla":"W33","titulos":{},
             "hashtags":["#Levis","levis505","Vaqueros Vintage","sh0019","sa12","ootd!","levis"]}"""
         val blank = Listing(noLabel = true, flat = Measures(waist = "42"))
-        val s = Ai.parse(answer, blank, accounts)
+        val s = AiAnswer.parse(answer, blank, accounts)
         assertEquals("Levi's", s.brand)
         assertEquals("505", s.model)
         assertEquals(listOf("levis", "levis505", "vaquerosvintage"), s.hashtags)
         val applied = s.applyTo(blank)
         assertEquals("W33", applied.size)
         assertEquals("Levi's", applied.brand)
-        val noBrand = Ai.parse(answer, Listing(noBrand = true, size = "M"), accounts)
+        val noBrand = AiAnswer.parse(answer, Listing(noBrand = true, size = "M"), accounts)
         assertNull(noBrand.brand)
         assertNull(noBrand.model)
         assertNull(noBrand.sizeLabel)
-        assertNull(Ai.parse(answer, levis, accounts).brand, "the user typed the brand")
+        assertNull(AiAnswer.parse(answer, levis, accounts).brand, "the user typed the brand")
     }
 
     @Test
     fun `seller notes and missing data reach the prompt, and thinking stays short`() {
-        val prompt = Ai.prompt(Listing(noBrand = true, noLabel = true, flat = Measures(chest = "55"), aiNotes = "Made in Argentina"), accounts)
+        val prompt = AiPrompt.prompt(Listing(noBrand = true, noLabel = true, flat = Measures(chest = "55"), aiNotes = "Made in Argentina"), accounts)
         assertTrue("\"marca\":\"SIN MARCA\"" in prompt, prompt)
         assertTrue("\"pecho\":\"55\"" in prompt)
         assertTrue("\"notas_del_vendedor\":\"Made in Argentina\"" in prompt)
@@ -173,15 +173,15 @@ class AiTest {
 
     @Test
     fun `categories written loosely still match one path`() {
-        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Ai.matchCategory("hombre > ropa > vaqueros > vaqueros rectos"))
-        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", Ai.matchCategory("Hombre › Ropa › Vaqueros › Vaqueros rectos "))
-        assertNull(Ai.matchCategory("Ropa › Cosas raras"))
-        val prompt = Ai.prompt(Listing(gender = Gender.WOMEN), accounts)
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", AiCategories.matchCategory("hombre > ropa > vaqueros > vaqueros rectos"))
+        assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", AiCategories.matchCategory("Hombre › Ropa › Vaqueros › Vaqueros rectos "))
+        assertNull(AiCategories.matchCategory("Ropa › Cosas raras"))
+        val prompt = AiPrompt.prompt(Listing(gender = Gender.WOMEN), accounts)
         assertTrue("Mujer › Ropa › Vestidos › Midi" in prompt)
         assertFalse("Hombre › Ropa › Vaqueros" in prompt)
         val body = Ai.request(levis, accounts, listOf("A"))
         assertFalse("Vaqueros rectos" in body.substringAfter("responseSchema"), "no category enum in the schema")
-        val two = Ai.parse("""{"colores":["Negro","Blanco"]}""", Listing(), accounts)
+        val two = AiAnswer.parse("""{"colores":["Negro","Blanco"]}""", Listing(), accounts)
         assertEquals(listOf("Negro", "Blanco"), two.colors)
     }
 
@@ -196,9 +196,9 @@ class AiTest {
     @Test
     fun `answer text is read from the first candidate`() {
         val r = """{"candidates":[{"content":{"parts":[{"text":"{\"a\":"},{"text":"1}"}]}}]}"""
-        assertEquals("{\"a\":1}", Ai.answerText(r))
+        assertEquals("{\"a\":1}", AiAnswer.answerText(r))
         val blocked = """{"promptFeedback":{"blockReason":"SAFETY"}}"""
-        assertTrue(runCatching { Ai.answerText(blocked) }.exceptionOrNull()!!.message!!.contains("SAFETY"))
+        assertTrue(runCatching { AiAnswer.answerText(blocked) }.exceptionOrNull()!!.message!!.contains("SAFETY"))
     }
 
     @Test

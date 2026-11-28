@@ -1,6 +1,7 @@
 package dev.catalogo.core.catalog
 
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiPrompt
 import dev.catalogo.core.ai.AiResult
 import dev.catalogo.core.ai.AiSuggestion
 import dev.catalogo.core.listing.Listing
@@ -147,10 +148,10 @@ class RelistTest {
     @Test
     fun `the prompt asks for other words only when re-listing`() {
         val accounts = listOf(Ai.Account("p", "SH", 0), Ai.Account("c1", "SA", 1))
-        val first = Ai.prompt(levis, accounts)
+        val first = AiPrompt.prompt(levis, accounts)
         assertFalse("REPUBLICACION" in first)
         val avoid = Relist(mapOf("p" to "Levi's 501 Jeans Vintage Straight Fit Blue"), oldTags)
-        val again = Ai.prompt(levis, accounts, avoid = avoid)
+        val again = AiPrompt.prompt(levis, accounts, avoid = avoid)
         assertTrue("REPUBLICACION" in again)
         assertTrue("SH: Levi's 501 Jeans Vintage Straight Fit Blue" in again)
         assertTrue("levisvintage" in again)

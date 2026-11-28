@@ -46,7 +46,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.catalogo.core.photo.CoverFrame
 import dev.catalogo.core.photo.CropHistory
+import dev.catalogo.core.photo.FrameCoverage
 import dev.catalogo.core.photo.Mask
+import dev.catalogo.core.photo.Silhouette
 import dev.catalogo.data.photo.AutoFrame
 import dev.catalogo.data.photo.Framing
 import dev.catalogo.data.photo.PhotoCropper
@@ -109,7 +111,7 @@ internal fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCance
                 framing = PhotoCropper.cover(img.width, img.height)
                 if (isCover && slot.edit == null) auto(true)
             } else if (!cur.covers(img.width, img.height)) {
-                framing = CoverFrame.settle(cur.placement(), img.width, img.height, CoverFrame.fillLimit(cur.rotation)).framing()      // an old crop with made-up edges is tidied
+                framing = FrameCoverage.settle(cur.placement(), img.width, img.height, CoverFrame.fillLimit(cur.rotation)).framing()      // an old crop with made-up edges is tidied
             }
             // an already framed cover: the silhouette is only looked for to measure the space around the garment
             if (isCover && !(cur == null && slot.edit == null)) garment = AutoFrame.analyze(context, slot.source).mask
@@ -160,7 +162,7 @@ internal fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCance
                                 val mask = Mask(mw, mh, BooleanArray(mw * mh) { (it % mw) in x0 until x1 && (it / mw) in y0 until y1 })
                                 val p = CoverFrame.place(mask, img.width, img.height)
                                 if (p != null) {
-                                    framing = CoverFrame.settle(p, img.width, img.height, CoverFrame.fillLimit(p.rotation)).framing()
+                                    framing = FrameCoverage.settle(p, img.width, img.height, CoverFrame.fillLimit(p.rotation)).framing()
                                     garment = mask; touched = true; manual = true; note = ""; marking = false
                                 } else note = "Esa caja no sirve: debe ocupar entre un 8 % y un 90 % de la foto"
                             },
@@ -171,7 +173,7 @@ internal fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCance
                 } else Panel {
                     StraightenRow(fr.rotation) {
                         touched = true; manual = true; note = ""
-                        framing = CoverFrame.settle(fr.copy(rotation = it).placement(), img.width, img.height, CoverFrame.FILL_MAX).framing()
+                        framing = FrameCoverage.settle(fr.copy(rotation = it).placement(), img.width, img.height, CoverFrame.FILL_MAX).framing()
                     }
                     Text("Vistas previas · toca una para verla en grande", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
@@ -187,7 +189,7 @@ internal fun CropScreen(vm: MainViewModel, slot: Slot, isCover: Boolean, onCance
                         ) { OneLine(if (analyzing) "Buscando…" else "Auto") }
                         if (isCover) OutlinedButton(
                             onClick = {
-                                garment?.let { g -> CoverFrame.largestParts(g) }?.let { c ->
+                                garment?.let { g -> Silhouette.largestParts(g) }?.let { c ->
                                     var x0 = c.w; var y0 = c.h; var x1 = -1; var y1 = -1
                                     for (y in 0 until c.h) for (x in 0 until c.w) if (c.on[y * c.w + x]) { x0 = minOf(x0, x); y0 = minOf(y0, y); x1 = maxOf(x1, x); y1 = maxOf(y1, y) }
                                     if (x1 >= 0) markRect = floatArrayOf(x0.toFloat() / c.w, y0.toFloat() / c.h, (x1 + 1f) / c.w, (y1 + 1f) / c.h)

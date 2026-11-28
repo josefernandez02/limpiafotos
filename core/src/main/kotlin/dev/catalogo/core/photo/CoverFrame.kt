@@ -1,15 +1,22 @@
 package dev.catalogo.core.photo
 
-import kotlin.math.PI
+import dev.catalogo.core.photo.FrameCoverage.DEPTH_TINY
+import dev.catalogo.core.photo.FrameCoverage.coverScale
+import dev.catalogo.core.photo.FrameCoverage.fillDepth
+import dev.catalogo.core.photo.FrameCoverage.fillIsBackdrop
+import dev.catalogo.core.photo.FrameCoverage.isCovered
+import dev.catalogo.core.photo.FrameCoverage.uncoveredShare
+import dev.catalogo.core.photo.Silhouette.Box
+import dev.catalogo.core.photo.Silhouette.borderShare
+import dev.catalogo.core.photo.Silhouette.bounds
+import dev.catalogo.core.photo.Silhouette.dilated
+import dev.catalogo.core.photo.Silhouette.largestParts
+import dev.catalogo.core.photo.Silhouette.rotated
+import dev.catalogo.core.photo.Silhouette.tilt
 import kotlin.math.abs
-import kotlin.math.ceil
-import kotlin.math.cos
-import kotlin.math.floor
-import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 /**
  * Automatic framing of a cover photo: from the garment's silhouette, upright it, centre it and give it
@@ -43,17 +50,13 @@ object CoverFrame {
         val half = min(FRAME_H / 2 - (y0 + PAD), (y1 - PAD) - FRAME_H / 2)
         floatArrayOf(x0 + PAD, FRAME_H / 2 - half, x1 - PAD, FRAME_H / 2 + half)
     }
+
     val SAFE_W: Float = safe[2] - safe[0]                        // the garment never takes more than this of the frame's width…
     val SAFE_H: Float = (safe[3] - safe[1]) / FRAME_H            // …or of its height (as a share of it)
     val LIFT: Float = (FRAME_H / 2 - (safe[1] + safe[3]) / 2) / FRAME_H   // garment centre a little above the middle: labels cover the bottom
-    const val MAX_TILT = 12f             // degrees it will ever straighten
-    private const val MIN_TURN = 1.5f    // it never turns less than this: a degree or so is measuring noise, and would only make a straight garment crooked…
-    private const val MIN_GAIN = 1.25f   // …nor unless the turn makes the outline this many times straighter than it is…
-    private const val MAX_DISAGREE = 3f  // …nor when the two ways of reading the outline differ by more than this many degrees
     const val MIN_AREA = 0.08f           // silhouettes smaller or bigger than this share of the photo are not trusted
     const val MAX_AREA = 0.92f
     const val MAX_BORDER = 0.6f          // more than this share of the photo's borders being garment: nothing to frame by
-    private const val DEPTH_TINY = 0.02f // a strip of mirrored backdrop this deep (share of the frame's side) is not noticed at all…
     private const val DEPTH_OK = 0.055f  // …and this deep is still fine when it is only plain floor…
     const val FILL_MAX = 0.09f       // (public: the editor lets a hand-made framing reach this far too)
     private const val DEPTH_MAX = FILL_MAX  // …and this is the most: tall garments (trousers) shot with little margin need it, and the garment keeps its safe size
@@ -61,18 +64,11 @@ object CoverFrame {
 
     /** The deepest strip of mirrored backdrop a framing turned by [rotation] degrees may show (the app's auto framing and its editor agree on it). */
     fun fillLimit(rotation: Float): Float = if (rotation != 0f) TURNED_FILL_MAX else FILL_MAX
-    private const val EDGE = 0.002f      // tolerance when asking whether the photo reaches the frame's edge
+
     private val GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f)
     private val VISUAL_FIRST = booleanArrayOf(true, false)    // each centred try: first by the garment's visual middle, then by the middle of its box
     private val DIRT_GROWTHS = floatArrayOf(1f, 1.02f, 1.04f, 1.06f, 1.08f, 1.10f, 1.12f)   // how much a centred garment may grow to keep a strip from doubling something at the photo's edge
     private val CENTRED_GROWTHS = floatArrayOf(1f, 1.02f)          // …but a garment that is kept exactly centred only gets 2 %   // how much bigger than the safe size the garment may get to avoid any fill
-    private const val GRID_X = 24        // frame points checked for what the fill would show
-    private const val GRID_Y = 32
-    private const val FINE_X = 96        // …and the finer grid for what a mirrored strip would show
-    private const val FINE_Y = 128
-    private const val NEAR_BORDER = 5    // cells from the photo's edge that still count as touching it
-    private const val OPEN = 4            // cells (of a 128-cell grid) the opening uses to tell floor stains from the garment
-    private const val TRIM = 0.002f      // share of the silhouette ignored at each border (stray specks)
     private const val PULL_SHARE = 0.75f // how much of the way to the visual middle the garment is moved: the corner of a fold must not end up against the edge
     private const val PULL_MAX = 0.03f   // …and never more than this (frame widths) off the middle of its box
 
@@ -163,24 +159,6 @@ object CoverFrame {
     /** The box every preview shows (x0, y0, x1, y1 in frame widths from the frame's top-left), for the editor's guide. */
     fun safeBox(): FloatArray = safe.copyOf()
 
-    /** Share of [small] that lies inside [big] (same grid): 1 = [small] is entirely within [big]. */
-    fun containment(big: Mask, small: Mask): Float {
-        if (big.w != small.w || big.h != small.h) return 0f
-        var inside = 0
-        var total = 0
-        for (i in small.on.indices) if (small.on[i]) { total++; if (big.on[i]) inside++ }
-        return if (total == 0) 0f else inside.toFloat() / total
-    }
-
-    /** How much two silhouettes (same grid) agree: shared area over joint area (1 = identical). */
-    fun agreement(a: Mask, b: Mask): Float {
-        if (a.w != b.w || a.h != b.h) return 0f
-        var both = 0
-        var either = 0
-        for (i in a.on.indices) { if (a.on[i] && b.on[i]) both++; if (a.on[i] || b.on[i]) either++ }
-        return if (either == 0) 0f else both.toFloat() / either
-    }
-
     /**
      * The ideal placement for the given turn (garment centred, always the same size) and how it was reached:
      * 0 = the photo covers the whole frame, so there is nothing to fill (or only a sliver of mirrored backdrop);
@@ -269,339 +247,5 @@ object CoverFrame {
         val c = centered(mask, imageW, p) ?: return 0
         if (!isCovered(c, imageW, imageH, fillLimit(c.rotation))) return 0
         return (max(abs(c.dx - p.dx), abs(c.dy - p.dy)) * outW).roundToInt()
-    }
-
-    /**
-     * The same placement made a little bigger (about the frame's middle) until the photo covers the whole frame, so nothing
-     * has to be filled in: a few % more garment is not noticed, an invented backdrop is. When even that is not enough,
-     * the photo just covers the frame.
-     */
-    fun noFill(p: Placement, imageW: Int, imageH: Int): Placement {
-        if (uncoveredShare(p, imageW, imageH) == 0f) return p
-        var s = p.scale
-        repeat(60) {
-            s *= 1.01f
-            val k = s / p.scale
-            val q = p.copy(scale = s, dx = p.dx * k, dy = p.dy * k)
-            if (uncoveredShare(q, imageW, imageH) == 0f) return q
-        }
-        return Placement(coverScale(imageW, imageH, p.rotation), 0f, 0f, p.rotation, p.tight)
-    }
-
-    /** True when the photo covers the frame, or leaves at most a strip of mirrored backdrop too thin to be noticed ([DEPTH_TINY]). */
-    fun isCovered(p: Placement, imageW: Int, imageH: Int, tolerance: Float = DEPTH_TINY): Boolean = fillDepth(p, imageW, imageH) <= tolerance
-
-    /**
-     * Like [noFill], but a strip of mirrored backdrop that thin is left alone: the garment is made bigger only as much as needed
-     * to get under that depth (never more than ~12 %), so it stays centred and keeps the room it has in the narrow previews.
-     * When the photo is too far from covering the frame, the photo grows until it does (as [noFill]).
-     */
-    fun settle(p: Placement, imageW: Int, imageH: Int, tolerance: Float = DEPTH_TINY): Placement {
-        if (isCovered(p, imageW, imageH, tolerance)) return p
-        var s = p.scale
-        repeat(12) {
-            s *= 1.01f
-            val k = s / p.scale
-            val q = p.copy(scale = s, dx = p.dx * k, dy = p.dy * k)
-            if (isCovered(q, imageW, imageH, tolerance)) return q
-        }
-        return noFill(p, imageW, imageH)
-    }
-
-    /** Share of the frame the photo does not reach with this placement (0 = it covers everything). */
-    fun uncoveredShare(p: Placement, imageW: Int, imageH: Int): Float {
-        var out = 0
-        var n = 0
-        forEachFramePoint(p, imageW, imageH) { u, v ->
-            n++
-            if (u < -EDGE || u > 1f + EDGE || v < -EDGE || v > 1f + EDGE) out++
-        }
-        return if (n == 0) 0f else out.toFloat() / n
-    }
-
-    /** How far the fill has to reach beyond the photo's edge at the deepest point, as a share of the frame's width (across) or
-     *  height (down), so a strip looks equally thin on every side; 0 when the photo covers the frame. */
-    fun fillDepth(p: Placement, imageW: Int, imageH: Int): Float {
-        var deepest = 0f
-        val ph = p.scale * imageH / imageW
-        forEachFramePoint(p, imageW, imageH) { u, v ->
-            val dx = max(-u, u - 1f).coerceAtLeast(0f) * p.scale
-            val dy = max(-v, v - 1f).coerceAtLeast(0f) * ph
-            deepest = max(deepest, max(dx, dy / FRAME_H))
-        }
-        return deepest
-    }
-
-    /** For a grid of points over the frame, where each falls in the photo (0..1 across and down; outside = not reached). */
-    private inline fun forEachFramePoint(p: Placement, imageW: Int, imageH: Int, nx: Int = GRID_X, ny: Int = GRID_Y, f: (Float, Float) -> Unit) {
-        val rad = p.rotation * PI / 180.0
-        val c = cos(rad).toFloat()
-        val s = sin(rad).toFloat()
-        val ph = p.scale * imageH / imageW
-        for (j in 0..ny) for (i in 0..nx) {
-            val px = i.toFloat() / nx - 0.5f - p.dx
-            val py = j.toFloat() / ny * FRAME_H - FRAME_H / 2 - p.dy
-            f((c * px + s * py) / p.scale + 0.5f, (-s * px + c * py) / ph + 0.5f)
-        }
-    }
-
-    /** Smallest photo width (in frame widths) with which the photo, turned [tilt], covers the whole frame when centred. */
-    fun coverScale(imageW: Int, imageH: Int, tilt: Float): Float {
-        val rad = tilt * PI / 180.0
-        val c = abs(cos(rad)).toFloat()
-        val s = abs(sin(rad)).toFloat()
-        val xs = 0.5f * c + FRAME_H / 2 * s
-        val ys = 0.5f * s + FRAME_H / 2 * c
-        return max(2 * xs, 2 * ys * imageW / imageH)
-    }
-
-    /** True when every frame point the photo does not reach would show, once mirrored, backdrop and no garment. */
-    private fun fillIsBackdrop(near: Mask, p: Placement, imageW: Int, imageH: Int): Boolean {
-        var clean = true
-        // finer than the other checks: what a strip would double can be a sliver of a couple of cells (a shadow's tip at the edge)
-        forEachFramePoint(p, imageW, imageH, FINE_X, FINE_Y) { u, v ->
-            if (!clean || (u in 0f..1f && v in 0f..1f)) return@forEachFramePoint
-            val x = (mirrored(u) * near.w).toInt().coerceIn(0, near.w - 1)
-            val y = (mirrored(v) * near.h).toInt().coerceIn(0, near.h - 1)
-            if (near.on[y * near.w + x]) clean = false
-        }
-        return clean
-    }
-
-    /** Where a coordinate outside 0..1 lands when the photo is mirrored again and again (Android's MIRROR tiling). */
-    private fun mirrored(f: Float): Float {
-        val m = f - 2f * floor(f / 2f)
-        return if (m > 1f) 2f - m else m
-    }
-
-    /** Share of the photo's outermost cells that are garment. */
-    private fun borderShare(m: Mask): Float {
-        var on = 0
-        var n = 0
-        for (x in 0 until m.w) { if (m.on[x]) on++; if (m.on[(m.h - 1) * m.w + x]) on++; n += 2 }
-        for (y in 0 until m.h) { if (m.on[y * m.w]) on++; if (m.on[y * m.w + m.w - 1]) on++; n += 2 }
-        return on.toFloat() / n
-    }
-
-    /** The silhouette grown by [r] cells in every direction. */
-    fun dilated(m: Mask, r: Int): Mask {
-        var cur = m.on
-        repeat(r) {
-            val next = cur.copyOf()
-            for (y in 0 until m.h) for (x in 0 until m.w) {
-                if (cur[y * m.w + x]) continue
-                if ((x > 0 && cur[y * m.w + x - 1]) || (x < m.w - 1 && cur[y * m.w + x + 1]) ||
-                    (y > 0 && cur[(y - 1) * m.w + x]) || (y < m.h - 1 && cur[(y + 1) * m.w + x])) next[y * m.w + x] = true
-            }
-            cur = next
-        }
-        return Mask(m.w, m.h, cur)
-    }
-
-    // ---------- silhouette clean-up ----------
-
-    /** Labels the connected pieces of the silhouette (1, 2, …; 0 = off) and gives each one's size. */
-    private fun pieces(m: Mask): Pair<IntArray, List<Int>> {
-        val label = IntArray(m.w * m.h)
-        val sizes = ArrayList<Int>()
-        val stack = IntArray(m.w * m.h)
-        for (start in m.on.indices) {
-            if (!m.on[start] || label[start] != 0) continue
-            val id = sizes.size + 1
-            var top = 0
-            var n = 0
-            stack[top++] = start
-            label[start] = id
-            while (top > 0) {
-                val p = stack[--top]
-                n++
-                val x = p % m.w
-                val y = p / m.w
-                if (x > 0 && m.on[p - 1] && label[p - 1] == 0) { label[p - 1] = id; stack[top++] = p - 1 }
-                if (x < m.w - 1 && m.on[p + 1] && label[p + 1] == 0) { label[p + 1] = id; stack[top++] = p + 1 }
-                if (y > 0 && m.on[p - m.w] && label[p - m.w] == 0) { label[p - m.w] = id; stack[top++] = p - m.w }
-                if (y < m.h - 1 && m.on[p + m.w] && label[p + m.w] == 0) { label[p + m.w] = id; stack[top++] = p + m.w }
-            }
-            sizes.add(n)
-        }
-        return label to sizes
-    }
-
-    /**
-     * A piece that touches the photo's border while the main one does not is floor (the shadow in a corner, the edge of a
-     * rug or a wall), not garment: it is cut away, even when a thin neck joins it to the garment. When the main piece
-     * itself reaches the border the photo cuts the garment and nothing is removed.
-     */
-    private fun withoutBorderPieces(m: Mask): Mask {
-        val opened = dilated(eroded(m, OPEN), OPEN)             // the opening severs necks thinner than ~2·OPEN cells (legs and sleeves are wider)
-        val (label, sizes) = pieces(opened)
-        if (sizes.isEmpty()) return m
-        val main = sizes.indices.maxByOrNull { sizes[it] }!! + 1
-        val touches = BooleanArray(sizes.size + 1)
-        fun mark(x: Int, y: Int) { val l = label[y * m.w + x]; if (l > 0) touches[l] = true }
-        for (d in 0 until NEAR_BORDER) {                       // «touching» allows for a thin frame around the photo
-            for (x in 0 until m.w) { mark(x, d); mark(x, m.h - 1 - d) }
-            for (y in 0 until m.h) { mark(d, y); mark(m.w - 1 - d, y) }
-        }
-        if (touches[main] || (1..sizes.size).none { touches[it] && it != main }) return m
-        val mainPart = dilated(Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] == main }), OPEN + 1)
-        val floor = dilated(Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] > 0 && label[it] != main && touches[label[it]] }), OPEN + 1)
-        return Mask(m.w, m.h, BooleanArray(m.on.size) { m.on[it] && !(floor.on[it] && !mainPart.on[it]) })
-    }
-
-    /** Keeps the biggest piece and the pieces of at least a tenth of it (a vest with a gap), drops the specks and the floor. */
-    fun largestParts(whole: Mask): Mask? {
-        val m = withoutBorderPieces(whole)
-        val (label, sizes) = pieces(m)
-        val biggest = sizes.maxOrNull() ?: return null
-        val keep = BooleanArray(sizes.size + 1) { it > 0 && sizes[it - 1] * 10 >= biggest }
-        return Mask(m.w, m.h, BooleanArray(m.on.size) { label[it] > 0 && keep[label[it]] })
-    }
-
-    /** The silhouette shrunk by [r] cells (the photo's own border does not eat into it). */
-    fun eroded(m: Mask, r: Int): Mask {
-        var cur = m.on
-        repeat(r) {
-            val next = cur.copyOf()
-            for (y in 0 until m.h) for (x in 0 until m.w) {
-                if (!cur[y * m.w + x]) continue
-                if ((x > 0 && !cur[y * m.w + x - 1]) || (x < m.w - 1 && !cur[y * m.w + x + 1]) ||
-                    (y > 0 && !cur[(y - 1) * m.w + x]) || (y < m.h - 1 && !cur[(y + 1) * m.w + x])) next[y * m.w + x] = false
-            }
-            cur = next
-        }
-        return Mask(m.w, m.h, cur)
-    }
-
-    // ---------- straightening ----------
-
-    private class Box(val x0: Int, val y0: Int, val x1: Int, val y1: Int)
-
-    /** The silhouette turned [deg] degrees clockwise about its centre, in a square grid big enough for any turn. */
-    fun rotated(m: Mask, deg: Float): Mask {
-        val n = ceil(hypot(m.w.toDouble(), m.h.toDouble())).toInt() + 2
-        val rad = deg * PI / 180.0
-        val c = cos(rad)
-        val s = sin(rad)
-        val out = BooleanArray(n * n)
-        val ox = (m.w - 1) / 2.0
-        val oy = (m.h - 1) / 2.0
-        val on = (n - 1) / 2.0
-        for (v in 0 until n) {
-            for (u in 0 until n) {
-                // inverse turn: where this cell came from in the original
-                val px = u - on
-                val py = v - on
-                val sx = c * px + s * py + ox
-                val sy = -s * px + c * py + oy
-                out[v * n + u] = m.at(sx.roundToInt(), sy.roundToInt())
-            }
-        }
-        return Mask(n, n, out)
-    }
-
-    private fun bounds(m: Mask): Box? {
-        val cols = IntArray(m.w)
-        val rows = IntArray(m.h)
-        var total = 0
-        for (y in 0 until m.h) for (x in 0 until m.w) if (m.on[y * m.w + x]) { cols[x]++; rows[y]++; total++ }
-        if (total == 0) return null
-        fun edges(counts: IntArray): Pair<Int, Int> {
-            val cut = max(1, (total * TRIM).toInt())
-            var acc = 0
-            var lo = 0
-            while (lo < counts.size - 1 && acc + counts[lo] <= cut) { acc += counts[lo]; lo++ }
-            acc = 0
-            var hi = counts.size - 1
-            while (hi > lo && acc + counts[hi] <= cut) { acc += counts[hi]; hi-- }
-            return lo to hi
-        }
-        val (x0, x1) = edges(cols)
-        val (y0, y1) = edges(rows)
-        return Box(x0, y0, x1, y1)
-    }
-
-    /** The cells on the silhouette's outline (a photo's edge is not the garment's edge), as their centres. */
-    private fun outlinePoints(m: Mask): Pair<FloatArray, FloatArray> {
-        val xs = ArrayList<Float>()
-        val ys = ArrayList<Float>()
-        fun on(x: Int, y: Int) = x < 0 || y < 0 || x >= m.w || y >= m.h || m.on[y * m.w + x]
-        for (y in 0 until m.h) for (x in 0 until m.w) {
-            if (!m.on[y * m.w + x]) continue
-            if (!on(x - 1, y) || !on(x + 1, y) || !on(x, y - 1) || !on(x, y + 1)) { xs.add(x + 0.5f); ys.add(y + 0.5f) }
-        }
-        return xs.toFloatArray() to ys.toFloatArray()
-    }
-
-    /**
-     * How well the outline lines up with a pair of perpendicular axes turned by [deg]: the outline cells are projected on each
-     * axis, and cells of one straight edge fall in the same bin, so the sum of squares of the bin counts is big when edges are
-     * straight along that direction. The two axes count the same (geometric mean), so a single long edge that happens to
-     * be slanted, like the splayed leg of a pair of trousers, does not pass for the garment's own «straight».
-     */
-    private fun straightness(xs: FloatArray, ys: FloatArray, deg: Float): Double {
-        val rad = deg * PI / 180.0
-        val c = cos(rad).toFloat()
-        val s = sin(rad).toFloat()
-        var product = 1.0
-        for (axis in 0..1) {
-            val rho = FloatArray(xs.size) { if (axis == 0) xs[it] * c + ys[it] * s else -xs[it] * s + ys[it] * c }
-            val lo = rho.min()
-            val bins = IntArray(ceil(rho.max() - lo).toInt() + 2)
-            for (r in rho) bins[(r - lo).toInt()]++
-            var sum = 0.0
-            for (n in bins) sum += n.toDouble() * n
-            product *= sum
-        }
-        return Math.sqrt(product)
-    }
-
-    /** Area of the smallest rectangle, with sides along the axes turned by [deg], that holds the whole outline. */
-    private fun boxArea(xs: FloatArray, ys: FloatArray, deg: Float): Double {
-        val rad = deg * PI / 180.0
-        val c = cos(rad).toFloat()
-        val s = sin(rad).toFloat()
-        var x0 = Float.MAX_VALUE; var x1 = -Float.MAX_VALUE; var y0 = Float.MAX_VALUE; var y1 = -Float.MAX_VALUE
-        for (i in xs.indices) {
-            val u = xs[i] * c + ys[i] * s
-            val v = -xs[i] * s + ys[i] * c
-            x0 = min(x0, u); x1 = max(x1, u); y0 = min(y0, v); y1 = max(y1, v)
-        }
-        return (x1 - x0 + 1.0) * (y1 - y0 + 1.0)
-    }
-
-    /**
-     * The turn (degrees, clockwise) that puts the garment's own outline straight, searched within ±[MAX_TILT].
-     * It looks at the silhouette only, never at what is printed or sewn on it (a label, a pocket), and not at how
-     * symmetric it is: a folded garment is lopsided, and a pair of trousers with one leg splayed is not symmetric
-     * either, yet both have a clear «straight». Two independent readings of the outline have to agree before it turns:
-     *  - the turn at which most of the outline runs in straight edges along the photo's axes (waistband, hems and sides
-     *    of trousers, folds of a folded garment, hem and sides of a jumper), and
-     *  - the turn at which the smallest rectangle that holds the garment is the tightest.
-     * Cautious: a garment whose edges are already straight, one whose edges are not clear (round or lopsided shapes), or
-     * one on which the two readings disagree is left as it is.
-     */
-    fun tilt(m: Mask): Float {
-        val (xs, ys) = outlinePoints(m)
-        if (xs.size < 12) return 0f
-        val here = straightness(xs, ys, 0f)
-        val boxHere = boxArea(xs, ys, 0f)
-        if (here <= 0.0) return 0f
-        var edges = 0f
-        var edgesScore = here
-        var box = 0f
-        var boxScore = boxHere
-        var c = -MAX_TILT
-        while (c <= MAX_TILT + 1e-3f) {
-            val e = straightness(xs, ys, -c) * (1.0 - 0.0005 * abs(c))      // between equals, the smaller turn
-            if (e > edgesScore) { edgesScore = e; edges = c }
-            val b = boxArea(xs, ys, -c) * (1.0 + 0.0005 * abs(c))
-            if (b < boxScore) { boxScore = b; box = c }
-            c += 0.25f
-        }
-        if (edges == 0f || edgesScore / here < MIN_GAIN) return 0f
-        if (abs(edges - box) > MAX_DISAGREE) return 0f
-        val turn = ((edges + box) / 2 * 4).roundToInt() / 4f
-        return if (abs(turn) >= MIN_TURN) turn else 0f
     }
 }

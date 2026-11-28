@@ -1,6 +1,9 @@
 package dev.catalogo.core.listing
 
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
+import dev.catalogo.core.ai.AiCategories
+import dev.catalogo.core.ai.AiPrompt
 import dev.catalogo.core.catalog.Catalog
 import dev.catalogo.core.model.Article
 import dev.catalogo.core.model.CatalogState
@@ -45,7 +48,7 @@ class TagReadingTest {
         val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","categoria":null,
             "colores":["Azul"],"materiales":["Vaquero"],"dudas":["materiales"],"marca":null,"modelo":null,"talla":null,
             "titulos":{"SH":"Levi's 505 Jeans Vintage 90s Classic Straight Fit Blue"},"hashtags":["levis"]}"""
-        val s = Ai.parse(answer, jeans, accounts, reading)
+        val s = AiAnswer.parse(answer, jeans, accounts, reading)
         assertEquals(listOf("Algodón"), s.materials)
         assertTrue("materiales" !in s.doubts)
         val result = s.result(s.applyTo(jeans), "m")
@@ -54,10 +57,10 @@ class TagReadingTest {
 
     @Test
     fun `the prompt carries the reading and keeps a country out of the title`() {
-        val p = Ai.prompt(jeans, accounts, TagReading(composition = listOf("100% algodón")))
+        val p = AiPrompt.prompt(jeans, accounts, TagReading(composition = listOf("100% algodón")))
         assertTrue("LECTURA_DE_ETIQUETAS" in p && "100% algodón" in p, p)
         assertTrue("en UN solo sitio" in p)
-        assertTrue("LECTURA_DE_ETIQUETAS\n{" !in Ai.prompt(jeans, accounts, null))
+        assertTrue("LECTURA_DE_ETIQUETAS\n{" !in AiPrompt.prompt(jeans, accounts, null))
     }
 }
 
@@ -68,7 +71,7 @@ class NotesTest {
         val answer = """{"hallazgos":[],"tipo_prenda":"jumper","palabras":[],"sexo":"hombre","categoria":null,
             "colores":["Azul"],"materiales":["Acrílico"],"dudas":["materiales","talla"],"marca":null,"modelo":"Aran",
             "talla":"L","titulos":{"SH":"Vintage Dressing Wool Jumper Blue"},"hashtags":["jumper"]}"""
-        val s = Ai.parse(answer, jumper, listOf(Ai.Account("a", "SH", 0)))
+        val s = AiAnswer.parse(answer, jumper, listOf(Ai.Account("a", "SH", 0)))
         assertEquals(listOf("Lana"), s.materials)
         assertEquals(emptyList(), s.doubts)
         assertNull(s.model, "sin modelo: the AI does not add one")
@@ -117,12 +120,12 @@ class FitsTest {
         val answer = """{"hallazgos":[],"tipo_prenda":"jeans","palabras":[],"sexo":"hombre","corte":"slim",
             "categoria":"Hombre › Ropa › Vaqueros › Vaqueros ajustados","colores":["Azul"],"materiales":[],"dudas":["categoria"],
             "marca":null,"modelo":null,"talla":null,"titulos":{"SH":"Levi's 505 Jeans Blue"},"hashtags":["levis"]}"""
-        val s = Ai.parse(answer, jeans, listOf(Ai.Account("a", "SH", 0)))
+        val s = AiAnswer.parse(answer, jeans, listOf(Ai.Account("a", "SH", 0)))
         assertEquals("Hombre › Ropa › Vaqueros › Vaqueros rectos", s.category)
         assertTrue("categoria" !in s.doubts)
         // A women's label read in the photos moves the category to Mujer.
         val r = TagReading(gender = "mujer", fit = TrouserFits.STRAIGHT)
-        val s2 = Ai.parse(answer, jeans.copy(gender = null, model = ""), listOf(Ai.Account("a", "SH", 0)), r)
+        val s2 = AiAnswer.parse(answer, jeans.copy(gender = null, model = ""), listOf(Ai.Account("a", "SH", 0)), r)
         assertEquals("Mujer › Ropa › Vaqueros › Vaqueros rectos", s2.category)
     }
 }
@@ -130,10 +133,10 @@ class FitsTest {
 class CategoryFamilyTest {
     @Test
     fun `the garment type narrows the categories the AI sees`() {
-        val jeans = Ai.categoriesFor(Gender.MEN, "jeans")
+        val jeans = AiCategories.categoriesFor(Gender.MEN, "jeans")
         assertTrue(jeans.isNotEmpty() && jeans.all { it.startsWith("Hombre › Ropa › Vaqueros") }, jeans.toString())
-        val hoodies = Ai.categoriesFor(Gender.WOMEN, "hoodie")
+        val hoodies = AiCategories.categoriesFor(Gender.WOMEN, "hoodie")
         assertTrue(hoodies.all { "Jerséis y sudaderas" in it }, hoodies.toString())
-        assertEquals(Ai.categoriesFor(Gender.MEN), Ai.categoriesFor(Gender.MEN, ""))    // unknown type: all
+        assertEquals(AiCategories.categoriesFor(Gender.MEN), AiCategories.categoriesFor(Gender.MEN, ""))    // unknown type: all
     }
 }

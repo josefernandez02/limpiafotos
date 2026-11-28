@@ -63,7 +63,7 @@ class CoverFrameTest {
     @Test
     fun `a crooked garment is straightened`() {
         for (deg in listOf(-8f, -4.5f, 3f, 7f)) {
-            val tilted = CoverFrame.rotated(jumper(100, 110), deg)     // the photo was taken crooked by deg
+            val tilted = Silhouette.rotated(jumper(100, 110), deg)     // the photo was taken crooked by deg
             val p = assertNotNull(CoverFrame.place(tilted, 3000, 3000))
             // it has to be turned back by about -deg (to within a degree)
             assertEquals(-deg, p.rotation, 1.0f, "tilt $deg")
@@ -84,7 +84,7 @@ class CoverFrameTest {
     @Test
     fun `a lopsided folded garment is straightened by its outline and stays centred`() {
         for (deg in listOf(-9f, -6f, 8f)) {
-            val tilted = CoverFrame.rotated(folded(150, 140), deg)
+            val tilted = Silhouette.rotated(folded(150, 140), deg)
             val p = assertNotNull(CoverFrame.place(tilted, 3000, 3000), "tilt $deg")
             assertEquals(-deg, p.rotation, 1.5f, "tilt $deg")
             val mg = assertNotNull(CoverFrame.margins(tilted, 3000, p, 1000))        // top, bottom, left, right in px of a 1000-wide frame
@@ -209,7 +209,7 @@ class CoverFrameTest {
         val m = foldedJeansMask()
         val p = assertNotNull(CoverFrame.place(m, 480, 640))
         assertTrue(p.rotation in 5f..11f, "its bottom edge runs uphill to the right: it has to be turned clockwise, not ${p.rotation}")
-        val mg = assertNotNull(CoverFrame.margins(m, 480, CoverFrame.settle(p, 480, 640, CoverFrame.fillLimit(p.rotation)), 1000))
+        val mg = assertNotNull(CoverFrame.margins(m, 480, FrameCoverage.settle(p, 480, 640, CoverFrame.fillLimit(p.rotation)), 1000))
         assertTrue(abs(mg[0] - mg[1]) <= 25, "same space above and below: ${mg.toList()}")
         // folded jeans are wider at the bottom left (the corner of the fold) than at the waist, so the middle of their box is not
         // where they look centred: they are moved a little to the left, but never past the safe box (the fold is not cut or put against the edge)
@@ -253,7 +253,7 @@ class CoverFrameTest {
 
     @Test
     fun `a folded garment whose edges are already straight is not turned`() {
-        assertEquals(0f, CoverFrame.tilt(folded(150, 140)), 0.01f)
+        assertEquals(0f, Silhouette.tilt(folded(150, 140)), 0.01f)
     }
 
     @Test
@@ -266,14 +266,14 @@ class CoverFrameTest {
             val flare = (y - 44).coerceAtLeast(0) / 12                     // the right leg opens outwards, the left one does not
             on[y * w + x] = if (waist) x in 38..82 else (x in 38..58 || x in 64..(82 + flare))
         }
-        assertEquals(0f, CoverFrame.tilt(Mask(w, h, on)), 0.01f)
+        assertEquals(0f, Silhouette.tilt(Mask(w, h, on)), 0.01f)
     }
 
     @Test
     fun `a round or lopsided shape is left as it is`() {
         val n = 120
         val disc = Mask(n, n, BooleanArray(n * n) { i -> val x = i % n - n / 2; val y = i / n - n / 2; x * x + y * y < 45 * 45 })
-        assertEquals(0f, CoverFrame.tilt(disc), 0.01f)
+        assertEquals(0f, Silhouette.tilt(disc), 0.01f)
     }
 
     @Test
@@ -310,7 +310,7 @@ class CoverFrameTest {
         for (colour in listOf({ t: Int -> (0xFF shl 24) or ((190 + t) shl 16) or ((60 + t) shl 8) or (60 + t) },
                               { t: Int -> (0xFF shl 24) or ((105 + t) shl 16) or ((105 + t) shl 8) or (108 + t) })) {
             val m = Backdrop.mask(photo(colour), w, h)
-            val b = box(CoverFrame.largestParts(m)!!)
+            val b = box(Silhouette.largestParts(m)!!)
             assertTrue(abs(b[0] - 30) <= 2 && abs(b[2] - 89) <= 2 && abs(b[1] - 40) <= 2 && abs(b[3] - 119) <= 2, "box ${b.toList()}")
         }
     }
@@ -328,7 +328,7 @@ class CoverFrameTest {
     fun `a garment that fits is framed ideally and the rest is filled with mirrored backdrop`() {
         // small garment in the middle of a big photo: the ideal size is bigger than the photo, but what is missing is backdrop
         val p = assertNotNull(CoverFrame.place(jumper(120, 140, s = 1), 3000, 3500))
-        assertTrue(p.scale >= CoverFrame.coverScale(3000, 3500, p.rotation) - 0.001f)
+        assertTrue(p.scale >= FrameCoverage.coverScale(3000, 3500, p.rotation) - 0.001f)
     }
 
     @Test
@@ -338,7 +338,7 @@ class CoverFrameTest {
         // a garment running off the bottom of the photo: mirroring the bottom edge would show a second garment
         val on = BooleanArray(w * h) { val x = it % w; val y = it / w; x in 30..89 && y >= 50 }
         val p = assertNotNull(CoverFrame.place(Mask(w, h, on), 3000, 4000))
-        assertEquals(CoverFrame.coverScale(3000, 4000, p.rotation), p.scale, 0.001f)
+        assertEquals(FrameCoverage.coverScale(3000, 4000, p.rotation), p.scale, 0.001f)
         assertEquals(0f, p.dx, 0.001f)
         assertEquals(0f, p.dy, 0.001f)
     }
@@ -353,21 +353,21 @@ class CoverFrameTest {
     @Test
     fun `noFill grows a placement with a gap until the photo covers the frame, and leaves a covering one alone`() {
         val covering = Placement(1.2f, 0.02f, 0.02f, 0f)
-        assertEquals(covering, CoverFrame.noFill(covering, 3000, 4000))
+        assertEquals(covering, FrameCoverage.noFill(covering, 3000, 4000))
         val gap = Placement(0.9f, 0f, 0.05f, 0f)
-        assertTrue(CoverFrame.uncoveredShare(gap, 3000, 4000) > 0f)
-        val fixed = CoverFrame.noFill(gap, 3000, 4000)
-        assertEquals(0f, CoverFrame.uncoveredShare(fixed, 3000, 4000), 0f)
+        assertTrue(FrameCoverage.uncoveredShare(gap, 3000, 4000) > 0f)
+        val fixed = FrameCoverage.noFill(gap, 3000, 4000)
+        assertEquals(0f, FrameCoverage.uncoveredShare(fixed, 3000, 4000), 0f)
         assertTrue(fixed.scale >= gap.scale && fixed.scale < 1.3f, "scale ${fixed.scale}")
-        val hopeless = CoverFrame.noFill(Placement(0.5f, 3f, 3f, 0f), 3000, 4000)
-        assertEquals(0f, CoverFrame.uncoveredShare(hopeless, 3000, 4000), 0f)
+        val hopeless = FrameCoverage.noFill(Placement(0.5f, 3f, 3f, 0f), 3000, 4000)
+        assertEquals(0f, FrameCoverage.uncoveredShare(hopeless, 3000, 4000), 0f)
     }
 
     @Test
     fun `cover scale never leaves a gap`() {
-        assertEquals(1f, CoverFrame.coverScale(3000, 4000, 0f), 0.001f)                  // 3:4 photo = frame
-        assertTrue(CoverFrame.coverScale(3000, 4000, 5f) > 1f)                           // turned: needs a little more
-        assertTrue(CoverFrame.coverScale(4000, 3000, 0f) > 1.7f)                         // landscape photo must grow to fill the height
+        assertEquals(1f, FrameCoverage.coverScale(3000, 4000, 0f), 0.001f)                  // 3:4 photo = frame
+        assertTrue(FrameCoverage.coverScale(3000, 4000, 5f) > 1f)                           // turned: needs a little more
+        assertTrue(FrameCoverage.coverScale(4000, 3000, 0f) > 1.7f)                         // landscape photo must grow to fill the height
     }
 
     @Test
@@ -384,7 +384,7 @@ class CoverFrameTest {
             val v = if (spot) 25 + tex else light + tex
             (0xFF shl 24) or (v shl 16) or (v shl 8) or v
         }
-        val b = box(CoverFrame.largestParts(Backdrop.mask(photo, w, h))!!)
+        val b = box(Silhouette.largestParts(Backdrop.mask(photo, w, h))!!)
         assertTrue(abs(b[0] - 30) <= 4 && abs(b[2] - 89) <= 4 && abs(b[1] - 40) <= 4 && abs(b[3] - 119) <= 4, "box ${b.toList()}")
     }
 
@@ -394,16 +394,16 @@ class CoverFrameTest {
         for ((w, h) in listOf(3000 to 4000, 3000 to 3000, 4000 to 3000)) for (sx in listOf(-12, 0, 12)) {
             val m = jumper(120, 140, shiftX = sx)
             val p = assertNotNull(CoverFrame.place(m, w, h), "$w x $h shift $sx")
-            assertTrue(CoverFrame.uncoveredShare(p, w, h) <= 0.07f, "$w x $h shift $sx: ${CoverFrame.uncoveredShare(p, w, h)}")
+            assertTrue(FrameCoverage.uncoveredShare(p, w, h) <= 0.07f, "$w x $h shift $sx: ${FrameCoverage.uncoveredShare(p, w, h)}")
         }
     }
 
     @Test
     fun `a photo that covers the frame reports no uncovered share`() {
-        val cover = Placement(CoverFrame.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
-        assertEquals(0f, CoverFrame.uncoveredShare(cover, 3000, 4000), 0.0001f)
+        val cover = Placement(FrameCoverage.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
+        assertEquals(0f, FrameCoverage.uncoveredShare(cover, 3000, 4000), 0.0001f)
         val zoomedOut = Placement(0.5f, 0f, 0f, 0f)
-        assertTrue(CoverFrame.uncoveredShare(zoomedOut, 3000, 4000) > 0.3f)
+        assertTrue(FrameCoverage.uncoveredShare(zoomedOut, 3000, 4000) > 0.3f)
     }
 
     /** Trousers seen from above: two long legs joined at a waistband; much taller than wide. */
@@ -424,12 +424,12 @@ class CoverFrameTest {
         val m = trousers(120, 160, top = 22, bottom = 138)
         val p = assertNotNull(CoverFrame.place(m, 3000, 4000))
         assertTrue(!p.tight, "must not give up and keep the photo as it is")
-        val cover = CoverFrame.coverScale(3000, 4000, 0f)
+        val cover = FrameCoverage.coverScale(3000, 4000, 0f)
         val safeSize = CoverFrame.SAFE_H * CoverFrame.FRAME_H * 3000 / ((138 - 22 + 1) * 25f)   // the scale that gives the safe height
         assertTrue(p.scale < cover - 0.01f, "the photo is moved away a little: scale ${p.scale}")
         // a centred garment may grow up to 2 % over that size so the strip to fill stays unnoticeable
         assertTrue(p.scale <= safeSize * 1.021f, "scale ${p.scale}, safe size $safeSize")
-        assertTrue(CoverFrame.fillDepth(p, 3000, 4000) <= 0.056f, "the strip to fill is thin: ${CoverFrame.fillDepth(p, 3000, 4000)}")
+        assertTrue(FrameCoverage.fillDepth(p, 3000, 4000) <= 0.056f, "the strip to fill is thin: ${FrameCoverage.fillDepth(p, 3000, 4000)}")
         // the garment's bottom stays above the label band of the 4:5 preview (and the top below the crop of the 2:3 one)
         val b = box(m)
         val k = 3000f / m.w
@@ -449,15 +449,15 @@ class CoverFrameTest {
         val mg = assertNotNull(CoverFrame.margins(m, 1659, p, 1536))
         assertTrue(abs(mg[2] - mg[3]) <= 12, "left ${mg[2]} right ${mg[3]}")
         assertTrue(abs(mg[0] - mg[1]) <= 12, "up ${mg[0]} down ${mg[1]}")
-        assertTrue(CoverFrame.fillDepth(p, 1659, 2212) <= 0.056f, "fill ${CoverFrame.fillDepth(p, 1659, 2212)}")
+        assertTrue(FrameCoverage.fillDepth(p, 1659, 2212) <= 0.056f, "fill ${FrameCoverage.fillDepth(p, 1659, 2212)}")
         assertEquals(0, CoverFrame.offCentre(m, 1659, 2212, p, 1536), "the indicator must not call it off-centre")
     }
 
     @Test
     fun `the fill depth is zero when the photo covers the frame and grows as it is moved away`() {
-        val cover = Placement(CoverFrame.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
-        assertEquals(0f, CoverFrame.fillDepth(cover, 3000, 4000), 0.001f)
-        assertEquals(0.05f, CoverFrame.fillDepth(Placement(0.9f, 0f, 0f, 0f), 3000, 4000), 0.01f)
+        val cover = Placement(FrameCoverage.coverScale(3000, 4000, 0f), 0f, 0f, 0f)
+        assertEquals(0f, FrameCoverage.fillDepth(cover, 3000, 4000), 0.001f)
+        assertEquals(0.05f, FrameCoverage.fillDepth(Placement(0.9f, 0f, 0f, 0f), 3000, 4000), 0.01f)
     }
 
     @Test
@@ -468,7 +468,7 @@ class CoverFrameTest {
         val on = m.on.copyOf()
         for (y in 0 until 22) for (x in 0 until 45) on[y * w + x] = true            // corner blob touching the border
         for (i in 0 until 20) on[(22 + i) * w + 44 + i / 2] = true                   // a 1-cell neck down to the waistband
-        val clean = assertNotNull(CoverFrame.largestParts(Mask(w, h, on)))
+        val clean = assertNotNull(Silhouette.largestParts(Mask(w, h, on)))
         assertTrue((0 until 22).none { y -> (0 until 45).any { x -> clean.on[y * w + x] } }, "the corner is gone")
         assertTrue(clean.on[90 * w + 40], "the garment stays")
         assertTrue(box(clean)[1] >= 38, "its box starts at the garment's top")
@@ -479,7 +479,7 @@ class CoverFrameTest {
         val w = 120
         val h = 160
         val on = BooleanArray(w * h) { i -> i % w in 30..90 && i / w >= 60 }            // runs off the bottom edge
-        val clean = assertNotNull(CoverFrame.largestParts(Mask(w, h, on)))
+        val clean = assertNotNull(Silhouette.largestParts(Mask(w, h, on)))
         assertEquals(on.count { it }, clean.count())
     }
 
@@ -534,11 +534,11 @@ class CoverFrameTest {
     fun `the trousers silhouette measured on the phone is framed, not left as it is`() {
         val on = BooleanArray(96 * 128) { phoneTrousers.getOrNull(it / 96 / 3)?.getOrNull(it % 96 / 3) == '#' }
         for (grow in 0..2) {      // the real mask is a cell or so bigger than this coarse copy of it
-            val m = CoverFrame.dilated(Mask(96, 128, on), grow)
+            val m = Silhouette.dilated(Mask(96, 128, on), grow)
             val p = assertNotNull(CoverFrame.place(m, 480, 640), "grow $grow")
             assertTrue(!p.tight, "grow $grow must not be left as it is")
             assertEquals(0f, p.rotation, 0.01f, "grow $grow: trousers photographed straight are not turned")
-            assertTrue(CoverFrame.fillDepth(p, 480, 640) <= 0.091f, "grow $grow depth ${CoverFrame.fillDepth(p, 480, 640)}")
+            assertTrue(FrameCoverage.fillDepth(p, 480, 640) <= 0.091f, "grow $grow depth ${FrameCoverage.fillDepth(p, 480, 640)}")
         }
     }
 
@@ -571,12 +571,12 @@ class CoverFrameTest {
     @Test
     fun `settle leaves a hair-thin strip alone and grows the photo only as much as needed`() {
         val thin = Placement(0.99f, 0f, 0f, 0f)
-        assertTrue(CoverFrame.isCovered(thin, 3000, 4000))
-        assertEquals(thin, CoverFrame.settle(thin, 3000, 4000))
+        assertTrue(FrameCoverage.isCovered(thin, 3000, 4000))
+        assertEquals(thin, FrameCoverage.settle(thin, 3000, 4000))
         val gap = Placement(0.9f, 0f, 0f, 0f)
-        assertTrue(!CoverFrame.isCovered(gap, 3000, 4000))
-        val grown = CoverFrame.settle(gap, 3000, 4000)
-        assertTrue(CoverFrame.isCovered(grown, 3000, 4000), "depth ${CoverFrame.fillDepth(grown, 3000, 4000)}")
+        assertTrue(!FrameCoverage.isCovered(gap, 3000, 4000))
+        val grown = FrameCoverage.settle(gap, 3000, 4000)
+        assertTrue(FrameCoverage.isCovered(grown, 3000, 4000), "depth ${FrameCoverage.fillDepth(grown, 3000, 4000)}")
         assertTrue(grown.scale > 0.9f && grown.scale < 1f, "scale ${grown.scale}")
         assertEquals(0f, grown.dx, 0.001f)
     }
@@ -601,9 +601,9 @@ class CoverFrameTest {
             val g = assertNotNull(CoverFrame.margins(m, 3000, p, 1536))
             assertTrue(abs(g[0] - g[1]) <= 6, "shiftY $shiftY: above ${g[0]} px, below ${g[1]} px")
             assertTrue(abs(g[2] - g[3]) <= 6, "shiftY $shiftY: left ${g[2]} px, right ${g[3]} px")
-            assertTrue(CoverFrame.fillDepth(p, 3000, 4000) <= CoverFrame.FILL_MAX + 0.001f, "depth ${CoverFrame.fillDepth(p, 3000, 4000)}")
-            assertTrue(CoverFrame.isCovered(CoverFrame.settle(p, 3000, 4000, CoverFrame.FILL_MAX), 3000, 4000, CoverFrame.FILL_MAX))
-            assertEquals(p, CoverFrame.settle(p, 3000, 4000, CoverFrame.FILL_MAX))          // the planned fill is kept as it is
+            assertTrue(FrameCoverage.fillDepth(p, 3000, 4000) <= CoverFrame.FILL_MAX + 0.001f, "depth ${FrameCoverage.fillDepth(p, 3000, 4000)}")
+            assertTrue(FrameCoverage.isCovered(FrameCoverage.settle(p, 3000, 4000, CoverFrame.FILL_MAX), 3000, 4000, CoverFrame.FILL_MAX))
+            assertEquals(p, FrameCoverage.settle(p, 3000, 4000, CoverFrame.FILL_MAX))          // the planned fill is kept as it is
         }
     }
 
@@ -624,7 +624,7 @@ class CoverFrameTest {
             val p = assertNotNull(CoverFrame.place(m, 931, 1129, clutter))
             val g = assertNotNull(CoverFrame.margins(m, 931, p, 932))
             assertTrue(p.scale > plain.scale && p.scale <= plain.scale * 1.13f, "scale ${plain.scale} -> ${p.scale}")
-            assertTrue(CoverFrame.fillDepth(p, 931, 1129) <= 0.021f, "depth ${CoverFrame.fillDepth(p, 931, 1129)}")
+            assertTrue(FrameCoverage.fillDepth(p, 931, 1129) <= 0.021f, "depth ${FrameCoverage.fillDepth(p, 931, 1129)}")
             assertTrue(abs(g[0] - g[1]) <= 6 && abs(g[2] - g[3]) <= 6, "centred: ${g.toList()}")
         }
     }
@@ -647,7 +647,7 @@ class ContainmentTest {
     fun `a silhouette inside a bigger one is fully contained`() {
         val big = Mask(4, 1, booleanArrayOf(true, true, true, true))
         val small = Mask(4, 1, booleanArrayOf(false, true, true, false))
-        kotlin.test.assertEquals(1f, CoverFrame.containment(big, small))
-        kotlin.test.assertEquals(0.5f, CoverFrame.containment(small, big))
+        kotlin.test.assertEquals(1f, Silhouette.containment(big, small))
+        kotlin.test.assertEquals(0.5f, Silhouette.containment(small, big))
     }
 }

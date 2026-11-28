@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
 import dev.catalogo.core.ai.AiException
 import dev.catalogo.core.ai.AiSuggestion
 import dev.catalogo.core.ai.GeminiModelPool
@@ -75,7 +76,7 @@ class GeminiClient(private val resolver: ContentResolver) {
             if (images.isEmpty()) throw AiException("Haz fotos del artículo primero")
             val (text, model) = generate(key) { m, t -> Ai.request(listing, accounts, images, m, t, reading, avoid) }
             val seconds = ((System.currentTimeMillis() - started) / 1000).toInt()
-            val s = Ai.parse(text, listing, accounts, reading)
+            val s = AiAnswer.parse(text, listing, accounts, reading)
             AppLog.i("ia", "anuncio con $model en $seconds s: categoría=${s.category} materiales=${s.materials} talla=${s.sizeLabel} dudas=${s.doubts}")
             Answer(s, model, seconds)
         }
@@ -141,7 +142,7 @@ class GeminiClient(private val resolver: ContentResolver) {
                     }
                     AppLog.i("ia", "$model -> $code")
                     when {
-                        code == 200 -> return Ai.answerText(text) to model
+                        code == 200 -> return AiAnswer.answerText(text) to model
                         code == 400 && "API_KEY" in text || code == 401 || code == 403 ->
                             throw AiException("La clave de Gemini no es válida")
                         // A model that does not accept the reasoning setting: same model without it, and remembered.

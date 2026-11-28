@@ -1,6 +1,7 @@
 package dev.catalogo.core.catalog
 
 import dev.catalogo.core.ai.Ai
+import dev.catalogo.core.ai.AiAnswer
 import dev.catalogo.core.ai.AiSuggestion
 import dev.catalogo.core.listing.Garments
 import dev.catalogo.core.listing.ListingWriter
@@ -106,7 +107,7 @@ object RelistRepair {
     }
 
     private fun title(raw: String): String {
-        var t = Ai.distinctWords(raw.replace(Regex("\\s+"), " ").trim().trim('"', '.', '-', ' '))
+        var t = AiAnswer.distinctWords(raw.replace(Regex("\\s+"), " ").trim().trim('"', '.', '-', ' '))
         if (t.length > ListingWriter.TITLE_MAX) t = t.take(ListingWriter.TITLE_MAX).substringBeforeLast(' ')
         return t
     }
