@@ -9,7 +9,6 @@ import dev.catalogo.core.sales.ShippingLabels
 import dev.catalogo.data.AppLog
 import dev.catalogo.data.pc.PcClient
 import dev.catalogo.ui.MainViewModel
-import dev.catalogo.ui.sales.openInPrinter
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.withLock
