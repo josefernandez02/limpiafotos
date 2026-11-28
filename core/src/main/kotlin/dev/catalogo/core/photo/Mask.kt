@@ -1,7 +1,5 @@
 package dev.catalogo.core.photo
 
-import dev.catalogo.ui.sales.count
-
 /**
  * Where a photo goes inside the 3:4 template: [scale] is the photo's width in frame widths,
  * [dx]/[dy] move the photo's centre away from the frame's centre (also in frame widths), and

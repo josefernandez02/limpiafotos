@@ -13,7 +13,6 @@ import dev.catalogo.core.model.Stage
 import dev.catalogo.core.model.VintedAccount
 import dev.catalogo.core.pc.PcPayload
 import dev.catalogo.core.vinted.inVinted
-import dev.catalogo.ui.sales.count
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

@@ -1,7 +1,6 @@
 package dev.catalogo.data.store
 
 import dev.catalogo.core.model.Ids
-import dev.catalogo.ui.sales.count
 import java.io.File
 
 /** Clean photos waiting to be sent: <files>/outbox/<deviceId>/<number>/<name>.jpg */
