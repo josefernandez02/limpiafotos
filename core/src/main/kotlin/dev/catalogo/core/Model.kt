@@ -19,7 +19,7 @@ data class VintedAccount(
     val vintedId: String = "",
 ) {
     /** What the user calls this account: its Vinted name, or the phone's name until there is one. */
-    val label: String get() = account.ifBlank { name }
+    val label: String get() = vintedName.ifBlank { name }
 }
 
 /** An article as found in a Vinted wardrobe on the last check. */

@@ -25,7 +25,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import dev.catalogo.core.Catalog
-import dev.catalogo.core.VintedTaxonomy
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Alignment
 import dev.catalogo.core.Condition
