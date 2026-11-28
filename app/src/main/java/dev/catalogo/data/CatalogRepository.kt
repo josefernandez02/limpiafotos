@@ -2,20 +2,32 @@ package dev.catalogo.data
 
 import android.content.Context
 import android.net.Uri
-import dev.catalogo.core.AiResult
-import dev.catalogo.core.AiSuggestion
-import dev.catalogo.core.AppState
-import dev.catalogo.core.Catalog
-import dev.catalogo.core.CatalogException
-import dev.catalogo.core.VintedAccount
-import dev.catalogo.core.Ledger
-import dev.catalogo.core.Listing
-import dev.catalogo.core.Ids
-import dev.catalogo.core.ShippingLabels
-import dev.catalogo.core.CatalogState
-import dev.catalogo.core.Sales
-import dev.catalogo.core.Session
-import dev.catalogo.core.Sku
+import dev.catalogo.core.ai.AiResult
+import dev.catalogo.core.ai.AiSuggestion
+import dev.catalogo.core.catalog.Catalog
+import dev.catalogo.core.catalog.CatalogException
+import dev.catalogo.core.catalog.Ledger
+import dev.catalogo.core.listing.Listing
+import dev.catalogo.core.model.AppState
+import dev.catalogo.core.model.CatalogState
+import dev.catalogo.core.model.Ids
+import dev.catalogo.core.model.PcLink
+import dev.catalogo.core.model.PcTask
+import dev.catalogo.core.model.Session
+import dev.catalogo.core.model.Sku
+import dev.catalogo.core.model.VintedAccount
+import dev.catalogo.core.sales.LabelJob
+import dev.catalogo.core.sales.Sales
+import dev.catalogo.core.sales.ShippingLabels
+import dev.catalogo.data.ai.GeminiClient
+import dev.catalogo.data.pc.PcClient
+import dev.catalogo.data.photo.Gallery
+import dev.catalogo.data.photo.PhotoCleaner
+import dev.catalogo.data.store.AccountPhotoStore
+import dev.catalogo.data.store.LabelFileStore
+import dev.catalogo.data.store.LegacyPreviewStore
+import dev.catalogo.data.store.SaleImageStore
+import dev.catalogo.data.store.StateStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -78,7 +90,7 @@ class CatalogRepository(context: Context) {
     }
 
     /** Updates [number]'s draft status with [block] (it receives the current one). */
-    suspend fun updatePcTask(number: Int, block: (dev.catalogo.core.PcTask?) -> dev.catalogo.core.PcTask?) {
+    suspend fun updatePcTask(number: Int, block: (PcTask?) -> PcTask?) {
         store.update { s ->
             val p = s.catalog ?: return@update s
             val a = Catalog.article(p, number) ?: return@update s
@@ -90,12 +102,12 @@ class CatalogRepository(context: Context) {
         store.update { it.copy(gamesOff = off) }
     }
 
-    suspend fun setLabels(job: dev.catalogo.core.LabelJob) {
+    suspend fun setLabels(job: LabelJob) {
         store.update { it.copy(labels = job) }
     }
 
     /** The finished [job] with the PDF just saved, and the [orders] inside it. */
-    suspend fun keepLabels(job: dev.catalogo.core.LabelJob, orders: List<String>) {
+    suspend fun keepLabels(job: LabelJob, orders: List<String>) {
         store.update { ShippingLabels.saved(it, job, orders) }
     }
 
@@ -110,7 +122,7 @@ class CatalogRepository(context: Context) {
         AppLog.i("etiquetas", "borrados ${gone.size} PDF de ventas completadas")
     }
 
-    suspend fun setPc(link: dev.catalogo.core.PcLink?) {
+    suspend fun setPc(link: PcLink?) {
         store.update { it.copy(pc = link) }
     }
 

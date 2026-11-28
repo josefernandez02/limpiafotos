@@ -55,7 +55,7 @@
             android:name="com.google.mlkit.vision.DEPENDENCIES"
             android:value="subject_segment" />
         <service
-            android:name=".data.PcSyncService"
+            android:name=".data.pc.PcSyncService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
     </application>

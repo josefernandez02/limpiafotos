@@ -7,36 +7,50 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.catalogo.CatalogoApp
-import dev.catalogo.core.AiResult
-import dev.catalogo.core.AppState
-import dev.catalogo.core.Catalog
-import dev.catalogo.core.Sku
-import dev.catalogo.core.CatalogException
-import dev.catalogo.core.LabelJob
-import dev.catalogo.core.ShippingLabels
-import dev.catalogo.core.CatalogState
-import dev.catalogo.data.PcClient
+import dev.catalogo.core.ai.AiResult
+import dev.catalogo.core.catalog.Catalog
+import dev.catalogo.core.catalog.CatalogException
+import dev.catalogo.core.listing.Listing
+import dev.catalogo.core.model.AppState
+import dev.catalogo.core.model.Article
+import dev.catalogo.core.model.CatalogState
+import dev.catalogo.core.model.Mode
+import dev.catalogo.core.model.Money
+import dev.catalogo.core.model.PcLink
+import dev.catalogo.core.model.Sale
+import dev.catalogo.core.model.Sku
+import dev.catalogo.core.model.Stage
+import dev.catalogo.core.model.VintedAccount
+import dev.catalogo.core.pc.PcPayload
+import dev.catalogo.core.sales.LabelJob
+import dev.catalogo.core.sales.Sales
+import dev.catalogo.core.sales.Sales as SalesRules
+import dev.catalogo.core.sales.ShippingLabels
+import dev.catalogo.core.sales.VintedSales
+import dev.catalogo.core.sales.VintedSales.Kind
 import dev.catalogo.data.AppLog
-import dev.catalogo.core.VintedSales
-import dev.catalogo.core.VintedSales.Kind
-import dev.catalogo.core.PcLink
+import dev.catalogo.data.CatalogRepository
+import dev.catalogo.data.pc.PcClient
+import dev.catalogo.data.photo.Framing
+import dev.catalogo.data.photo.GalleryFolders
+import dev.catalogo.data.photo.PhotoCropper
+import dev.catalogo.ui.common.GAP
+import dev.catalogo.ui.photos.openCamera
+import dev.catalogo.ui.sales.SalesView
+import dev.catalogo.ui.sales.openInPrinter
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import dev.catalogo.core.Sales as SalesRules
-import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import dev.catalogo.core.VintedAccount
-import dev.catalogo.core.Listing
-import dev.catalogo.core.Money
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 sealed interface Screen {
@@ -125,7 +139,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             repo.ensureDistinctStyles()
             repo.adoptAccounts()
             repo.ensureSaleIds()
-            reportMoves(repo.adoptFolder(dev.catalogo.data.GalleryFolders.auto()))
+            reportMoves(repo.adoptFolder(GalleryFolders.auto()))
             refresh()
         }
     }
@@ -225,7 +239,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setupMainPhone(name: String, prefix: String) = run {
         repo.setupMainPhone(name, prefix)
-        repo.adoptFolder(dev.catalogo.data.GalleryFolders.auto())
+        repo.adoptFolder(GalleryFolders.auto())
     }
 
     // ---------- parent ----------
@@ -257,7 +271,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     /** «Generar y preparar borrador»: AI, checks and sending happen in the background. */
     /** «Generar y preparar borrador» with the photos the AI should look at (the PC gets all of them). */
-    fun prepareDraft(number: Int, photos: List<Uri>, mode: String = dev.catalogo.core.Mode.UPLOAD_PLAY) = run {
+    fun prepareDraft(number: Int, photos: List<Uri>, mode: String = Mode.UPLOAD_PLAY) = run {
         if (repo.state.pc == null) throw CatalogException("Configura el PC en Ajustes")
         if (photos.isEmpty()) throw CatalogException("Elige al menos una foto")
         repo.setPhotos(number, photos.map { it.toString() })
@@ -273,7 +287,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return album to chosen
     }
 
-    fun fixDraft(number: Int, fixes: dev.catalogo.core.PcPayload.Fixes) = run {
+    fun fixDraft(number: Int, fixes: PcPayload.Fixes) = run {
         app.pcSync.fix(number, fixes)
         _message.value = "Revisado: sigue su camino al PC"
     }
@@ -281,13 +295,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun retryDraft(number: Int) = run { app.pcSync.retry(number) }
 
     /** Where it stands, set by hand (also tells the PC). */
-    fun setStage(number: Int, stage: dev.catalogo.core.Stage, url: String = "") = run {
+    fun setStage(number: Int, stage: Stage, url: String = "") = run {
         app.pcSync.setStage(number, stage, url)
         _message.value = "Estado: ${stage.label}"
     }
 
     /** The same status for several articles; those the PC cannot change now are reported. */
-    fun setStageMany(numbers: List<Int>, stage: dev.catalogo.core.Stage) = run {
+    fun setStageMany(numbers: List<Int>, stage: Stage) = run {
         val failed = app.pcSync.setStageMany(numbers, stage)
         _message.value = if (failed.isEmpty()) "${numbers.size} en «${stage.label}»"
         else "${numbers.size - failed.size} cambiados; ${failed.size} no (¿PC sin conexión?)"
@@ -295,7 +309,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setMode(number: Int, mode: String) = run {
         app.pcSync.setMode(number, mode)
-        _message.value = dev.catalogo.core.Mode.label(mode)
+        _message.value = Mode.label(mode)
     }
 
     /** «Solo jugar»: an article already on Vinted goes to the next game with its link. */
@@ -341,7 +355,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     /** Checks the PC answers with this key before saving it. */
     fun savePc(url: String, token: String, done: () -> Unit) = run {
         val clean = url.trim().trimEnd('/').let { if (it.startsWith("http")) it else "http://$it" }
-        val link = dev.catalogo.core.PcLink(clean, token.trim())
+        val link = PcLink(clean, token.trim())
         val s = app.pcSync.test(link)
         repo.setPc(link)
         _message.value = "PC conectado: ${s.text}"
@@ -616,7 +630,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun assignSale(id: String, number: Int) = sale("Artículo asignado") { SalesRules.assign(it, id, number) }
 
     /** The picture kept from a sold article, if any. */
-    suspend fun saleImage(sale: dev.catalogo.core.Sale): java.io.File? = repo.saleImages.get(sale.id)
+    suspend fun saleImage(sale: Sale): java.io.File? = repo.saleImages.get(sale.id)
 
     private fun sale(done: String, change: (CatalogState) -> CatalogState) = run {
         askToDelete(repo.changeSales(change))
@@ -636,14 +650,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /** The framed photo as JPEG bytes, made off the main thread. */
-    suspend fun renderCrop(uri: Uri, framing: dev.catalogo.data.Framing): ByteArray = withContext(Dispatchers.Default) {
-        dev.catalogo.data.PhotoCropper.render(getApplication<Application>().contentResolver, uri, framing)
+    suspend fun renderCrop(uri: Uri, framing: Framing): ByteArray = withContext(Dispatchers.Default) {
+        PhotoCropper.render(getApplication<Application>().contentResolver, uri, framing)
     }
 
     private val _savingPhotos = MutableStateFlow(false)
     val savingPhotos: StateFlow<Boolean> = _savingPhotos.asStateFlow()
 
-    fun savePhotos(number: Int, accountId: String, photos: List<dev.catalogo.data.CatalogRepository.EditedPhoto>) = run {
+    fun savePhotos(number: Int, accountId: String, photos: List<CatalogRepository.EditedPhoto>) = run {
         if (photos.isEmpty()) throw CatalogException("Deja al menos una foto")
         _savingPhotos.value = true
         try {
